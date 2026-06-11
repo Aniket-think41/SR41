@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { MarketplaceBrowser } from "@/components/MarketplaceBrowser";
+import { getResources } from "@/lib/data";
 
 // ISR: regenerate at most once every 60s (spec §7) — no full SSR per request.
 export const revalidate = 60;
@@ -13,7 +14,8 @@ export const metadata: Metadata = {
   robots: { index: true, follow: true },
 };
 
-export default function MarketplacePage() {
+export default async function MarketplacePage() {
+  const items = await getResources();
   return (
     <>
       <section className="relative overflow-hidden bg-surface">
@@ -32,7 +34,7 @@ export default function MarketplacePage() {
 
       <section className="shell py-12 md:py-16">
         <Suspense fallback={<p className="text-sm font-medium text-muted">Loading registry…</p>}>
-          <MarketplaceBrowser />
+          <MarketplaceBrowser items={items} />
         </Suspense>
       </section>
     </>

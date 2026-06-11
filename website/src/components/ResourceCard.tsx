@@ -1,16 +1,16 @@
 import Link from "next/link";
-import { Resource, TYPE_META, fmt, getPublisher } from "@/lib/data";
+import { Resource, TYPE_META, fmt, initialsOf } from "@/lib/data";
 import { saveResource } from "@/lib/redirects";
 
 const TYPE_STYLES: Record<string, string> = {
-  skill: "bg-primary-50 text-primary",
-  mcp: "bg-[#e7f0ff] text-mcp",
-  note: "bg-[#fdece5] text-note",
+  SKILL: "bg-primary-50 text-primary",
+  MCP: "bg-[#e7f0ff] text-mcp",
+  NOTE: "bg-[#fdece5] text-note",
 };
 
 export function ResourceCard({ r }: { r: Resource }) {
   const meta = TYPE_META[r.type];
-  const pub = getPublisher(r.publisher);
+  const pub = r.author;
 
   return (
     <article className="card card-hover group relative flex h-full flex-col p-6">
@@ -33,9 +33,9 @@ export function ResourceCard({ r }: { r: Resource }) {
         </div>
 
         <h3 className="font-display mt-4 text-2xl font-semibold leading-tight transition group-hover:text-primary">
-          {r.name}
+          {r.title}
         </h3>
-        <p className="mt-2 flex-1 text-[0.95rem] leading-relaxed text-body">{r.summary}</p>
+        <p className="mt-2 line-clamp-3 flex-1 text-[0.95rem] leading-relaxed text-body">{r.description}</p>
 
         <div className="mt-4 flex flex-wrap gap-1.5">
           {r.tags.slice(0, 3).map((t) => (
@@ -46,14 +46,14 @@ export function ResourceCard({ r }: { r: Resource }) {
         <div className="mt-5 flex items-center justify-between border-t border-line pt-4">
           <span className="flex items-center gap-2">
             <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-[0.6rem] font-bold text-white">
-              {pub?.initials}
+              {pub ? initialsOf(pub.display_name) : "?"}
             </span>
             <span className="text-xs font-medium text-ink">
-              {pub?.name}
+              {pub?.display_name}
               {pub?.verified && <span className="ml-1 text-primary" title="Think41-verified">✦</span>}
             </span>
           </span>
-          <span className="text-xs text-muted">↓ {fmt(r.installs)} · ★ {fmt(r.stars)}</span>
+          <span className="text-xs text-muted">↓ {fmt(r.installs_count)} · ★ {fmt(r.stars_count)}</span>
         </div>
       </Link>
     </article>

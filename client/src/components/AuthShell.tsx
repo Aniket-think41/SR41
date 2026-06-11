@@ -2,8 +2,10 @@
 
 /**
  * Shared layout + form logic for /login and /signup.
- * Auth is mocked today (any password, demo account button); the form
- * shape matches POST /api/auth/login|signup so the real JWT flow drops in.
+ * The form posts to POST /api/auth/login|signup. Without NEXT_PUBLIC_API_URL
+ * the transport seam uses the in-browser mock (any password); with it set,
+ * this is the real JWT flow. The demo button logs in as the seeded demo user
+ * and works against both.
  */
 
 import Link from "next/link";
@@ -15,7 +17,7 @@ import { z } from "zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { Loader2, Sparkles } from "lucide-react";
 import { api } from "@/lib/api";
-import { errorMessage, setToken, USING_MOCK } from "@/lib/api/http";
+import { errorMessage, setToken } from "@/lib/api/http";
 import { Logo } from "./Logo";
 
 const loginSchema = z.object({
@@ -30,6 +32,12 @@ const signupSchema = loginSchema.extend({
 });
 
 type FormValues = z.infer<typeof loginSchema>;
+
+// Demo account — works against the in-browser mock AND a real seeded backend.
+// The seeded password is SEED_PASSWORD (default "skillshare-demo", see
+// backend/.env.example); override here if your deployment seeds differently.
+const DEMO_EMAIL = process.env.NEXT_PUBLIC_DEMO_EMAIL ?? "aniket.lnu@think41.com";
+const DEMO_PASSWORD = process.env.NEXT_PUBLIC_DEMO_PASSWORD ?? "skillshare-demo";
 
 function AuthForm({ mode }: { mode: "login" | "signup" }) {
   const router = useRouter();
@@ -46,8 +54,10 @@ function AuthForm({ mode }: { mode: "login" | "signup" }) {
     resolver: zodResolver(mode === "login" ? loginSchema : signupSchema),
   });
 
-  const finish = () => {
-    setToken("mock-access-token");
+  // Store the access token returned by the backend (the mock returns
+  // "mock-access-token"; the real API returns a JWT) and enter the dashboard.
+  const finish = (session: { access_token: string }) => {
+    setToken(session.access_token);
     qc.clear();
     router.replace(search.get("redirect") ?? "/dashboard");
   };
@@ -56,14 +66,15 @@ function AuthForm({ mode }: { mode: "login" | "signup" }) {
     setBusy(true);
     setServerError("");
     try {
-      if (mode === "login") await api.login({ email: values.email, password: values.password });
-      else
-        await api.signup({
-          email: values.email,
-          password: values.password,
-          display_name: values.display_name ?? "",
-        });
-      finish();
+      const session =
+        mode === "login"
+          ? await api.login({ email: values.email, password: values.password })
+          : await api.signup({
+              email: values.email,
+              password: values.password,
+              display_name: values.display_name ?? "",
+            });
+      finish(session);
     } catch (e) {
       setServerError(errorMessage(e));
       setBusy(false);
@@ -73,8 +84,8 @@ function AuthForm({ mode }: { mode: "login" | "signup" }) {
   const demo = async () => {
     setBusy(true);
     try {
-      await api.login({ email: "aniket.lnu@think41.com", password: "demo" });
-      finish();
+      const session = await api.login({ email: DEMO_EMAIL, password: DEMO_PASSWORD });
+      finish(session);
     } catch (e) {
       setServerError(errorMessage(e));
       setBusy(false);
@@ -133,7 +144,7 @@ function AuthForm({ mode }: { mode: "login" | "signup" }) {
         Continue with Google
       </button>
 
-      {USING_MOCK && (
+      {mode === "login" && (
         <button type="button" onClick={demo} className="btn btn-lime w-full" disabled={busy}>
           <Sparkles className="h-4 w-4" /> Explore as demo user
         </button>

@@ -2,16 +2,16 @@
 
 import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Resource, ResourceType, resources } from "@/lib/data";
+import { Resource, ResourceType } from "@/lib/data";
 import { ResourceCard } from "./ResourceCard";
 
 type Filter = ResourceType | "all";
 
 const FILTERS: { key: Filter; label: string }[] = [
   { key: "all", label: "All" },
-  { key: "skill", label: "◆ Skills" },
-  { key: "mcp", label: "▣ MCP Servers" },
-  { key: "note", label: "▤ Notes" },
+  { key: "SKILL", label: "◆ Skills" },
+  { key: "MCP", label: "▣ MCP Servers" },
+  { key: "NOTE", label: "▤ Notes" },
 ];
 
 const SORTS = [
@@ -20,12 +20,12 @@ const SORTS = [
   { key: "updated", label: "Recently updated" },
 ] as const;
 
-const VALID: Filter[] = ["all", "skill", "mcp", "note"];
+const VALID: Filter[] = ["all", "SKILL", "MCP", "NOTE"];
 
-export function MarketplaceBrowser() {
+export function MarketplaceBrowser({ items }: { items: Resource[] }) {
   // Read initial type from the URL on the client so the page stays static + ISR.
   const params = useSearchParams();
-  const urlType = params.get("type") ?? "all";
+  const urlType = (params.get("type") ?? "all").toUpperCase();
   const initialType = (VALID as string[]).includes(urlType) ? (urlType as Filter) : "all";
 
   const [filter, setFilter] = useState<Filter>(initialType);
@@ -33,22 +33,24 @@ export function MarketplaceBrowser() {
   const [q, setQ] = useState("");
 
   const list = useMemo(() => {
-    let out: Resource[] = resources.filter((r) => filter === "all" || r.type === filter);
+    let out: Resource[] = items.filter((r) => filter === "all" || r.type === filter);
     if (q.trim()) {
       const needle = q.toLowerCase();
       out = out.filter(
         (r) =>
-          r.name.toLowerCase().includes(needle) ||
-          r.summary.toLowerCase().includes(needle) ||
+          r.title.toLowerCase().includes(needle) ||
+          r.description.toLowerCase().includes(needle) ||
           r.tags.some((t) => t.includes(needle))
       );
     }
     return [...out].sort((a, b) =>
       sort === "updated"
-        ? b.updated.localeCompare(a.updated)
-        : (b[sort] as number) - (a[sort] as number)
+        ? b.updated_at.localeCompare(a.updated_at)
+        : sort === "stars"
+          ? b.stars_count - a.stars_count
+          : b.installs_count - a.installs_count
     );
-  }, [filter, sort, q]);
+  }, [items, filter, sort, q]);
 
   return (
     <div>

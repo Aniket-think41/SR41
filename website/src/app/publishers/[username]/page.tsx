@@ -3,17 +3,18 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import {
   getPublisher,
-  publishers,
-  resourcesByPublisher,
+  getPublishers,
   fmt,
+  initialsOf,
+  yearOf,
 } from "@/lib/data";
 import { ResourceCard } from "@/components/ResourceCard";
 import { followPublisher } from "@/lib/redirects";
 
 export const revalidate = 60;
 
-export function generateStaticParams() {
-  return publishers.map((p) => ({ username: p.username }));
+export async function generateStaticParams() {
+  return (await getPublishers()).map((p) => ({ username: p.username }));
 }
 
 export async function generateMetadata({
@@ -22,16 +23,16 @@ export async function generateMetadata({
   params: Promise<{ username: string }>;
 }): Promise<Metadata> {
   const { username } = await params;
-  const p = getPublisher(username);
+  const p = await getPublisher(username);
   if (!p) return { title: "Publisher not found" };
 
   // Spec §6: title = "Publisher name on SkillShare", canonical URL.
   return {
-    title: `${p.name} on SkillShare`,
+    title: `${p.display_name} on SkillShare`,
     description: p.bio,
     alternates: { canonical: `/publishers/${p.username}` },
     openGraph: {
-      title: `${p.name} on SkillShare`,
+      title: `${p.display_name} on SkillShare`,
       description: p.bio,
       type: "profile",
     },
@@ -44,12 +45,12 @@ export default async function PublisherProfile({
   params: Promise<{ username: string }>;
 }) {
   const { username } = await params;
-  const p = getPublisher(username);
+  const p = await getPublisher(username);
   if (!p) notFound();
 
-  const list = resourcesByPublisher(username);
-  const totalInstalls = list.reduce((s, r) => s + r.installs, 0);
-  const totalStars = list.reduce((s, r) => s + r.stars, 0);
+  const list = p.resources;
+  const totalInstalls = list.reduce((s, r) => s + r.installs_count, 0);
+  const totalStars = list.reduce((s, r) => s + r.stars_count, 0);
 
   return (
     <>
@@ -59,15 +60,15 @@ export default async function PublisherProfile({
           <div className="flex flex-col gap-8 md:flex-row md:items-end md:justify-between">
             <div className="flex items-center gap-5">
               <span className="flex h-20 w-20 items-center justify-center rounded-2xl bg-lime text-2xl font-bold text-ink">
-                {p.initials}
+                {initialsOf(p.display_name)}
               </span>
               <div>
                 <h1 className="font-display text-5xl font-semibold text-white md:text-6xl">
-                  {p.name}
+                  {p.display_name}
                   {p.verified && <span className="ml-2 text-lime">✦</span>}
                 </h1>
                 <p className="mt-2 text-sm text-white/60">
-                  @{p.username} · joined {p.joined}
+                  @{p.username}{p.created_at && ` · joined ${yearOf(p.created_at)}`}
                   {p.verified && " · Think41-verified"}
                 </p>
               </div>

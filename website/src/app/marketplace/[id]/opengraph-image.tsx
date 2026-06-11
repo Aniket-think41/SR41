@@ -1,5 +1,5 @@
 import { ImageResponse } from "next/og";
-import { getResource, getPublisher, TYPE_META } from "@/lib/data";
+import { getResource, TYPE_META, firstSentence, initialsOf } from "@/lib/data";
 
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
@@ -12,8 +12,8 @@ export default async function Image({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const r = getResource(id);
-  const pub = r ? getPublisher(r.publisher) : undefined;
+  const r = await getResource(id);
+  const pub = r?.author ?? undefined;
 
   const WHITE = "#ffffff";
   const INK = "#141413";
@@ -54,29 +54,29 @@ export default async function Image({
               fontSize: 24,
               fontWeight: 600,
               marginBottom: 28,
-              background: r?.type === "skill" ? LIME : "#efeafe",
-              color: r?.type === "skill" ? INK : PRIMARY,
+              background: r?.type === "SKILL" ? LIME : "#efeafe",
+              color: r?.type === "SKILL" ? INK : PRIMARY,
             }}
           >
             {r ? TYPE_META[r.type].label : "Resource"}
           </div>
           <div style={{ fontSize: 88, fontWeight: 700, lineHeight: 1.02, letterSpacing: -2, maxWidth: 1000, display: "flex" }}>
-            {r?.name ?? "Resource not found"}
+            {r?.title ?? "Resource not found"}
           </div>
           <div style={{ fontSize: 30, color: BODY, marginTop: 24, maxWidth: 980, display: "flex" }}>
-            {r?.summary ?? "Browse the SkillShare marketplace."}
+            {r ? firstSentence(r.description) : "Browse the SkillShare marketplace."}
           </div>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: `1px solid #e9e9f0`, paddingTop: 28 }}>
           <div style={{ fontSize: 26, display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ width: 40, height: 40, borderRadius: 9999, background: PRIMARY, color: WHITE, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 700 }}>
-              {pub?.initials ?? "SS"}
+              {pub ? initialsOf(pub.display_name) : "SS"}
             </div>
-            {pub?.name ?? "SkillShare"} {pub?.verified ? "✦" : ""}
+            {pub?.display_name ?? "SkillShare"} {pub?.verified ? "✦" : ""}
           </div>
           <div style={{ fontSize: 24, color: BODY, display: "flex" }}>
-            {r ? `↓ ${r.installs.toLocaleString()} · ★ ${r.stars}` : ""}
+            {r ? `↓ ${r.installs_count.toLocaleString()} · ★ ${r.stars_count}` : ""}
           </div>
         </div>
       </div>

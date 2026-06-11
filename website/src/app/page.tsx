@@ -32,8 +32,8 @@ const orgRows = [
   ["Resources", "Skills · MCP servers · notes — the things you actually use.", "bg-mcp"],
 ];
 
-export default function Home() {
-  const preview = latest(6);
+export default async function Home() {
+  const preview = await latest(6);
 
   return (
     <>

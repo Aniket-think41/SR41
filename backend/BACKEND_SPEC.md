@@ -4,7 +4,7 @@
 *SkillShare by Think41 — Backend Spec v1.0*
 
 > **Status: implemented** — FastAPI service in this folder (`app/`), verified
-> against the client contract by `scripts/smoke.py` (44 checks). Run + env
+> against the client contract by `scripts/smoke.py` (49 checks). Run + env
 > reference: [`README.md`](./README.md). The dashboard client (`../client`)
 > attaches by setting one env var (see §9); its
 > `client/src/lib/mock/handlers.ts` remains the in-browser fallback when no

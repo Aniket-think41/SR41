@@ -1,36 +1,43 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SkillShare — Marketing Website
 
-## Getting Started
+Public marketing site for SkillShare by Think41 (Next.js 16, App Router,
+SSR + ISR, SEO-optimized). Implements the *Marketing Website Specification
+v1.0*. The site is informational; every functional action redirects into the
+dashboard app (`../client`) via `src/lib/redirects.ts`.
 
-First, run the development server:
+## Run it
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cd website
+npm install
+npm run dev      # http://localhost:3000
+npm run build    # production build (static + ISR)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Pages: `/`, `/how-it-works`, `/marketplace`, `/marketplace/:id`,
+`/publishers/:username`, `/pricing`, `/blog`, plus auto-generated
+`sitemap.xml`, `robots.txt`, and per-resource OpenGraph cards.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Marketplace data — single source of truth
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The marketplace pages read from the backend's **public** API
+(`/api/public/*`, see `../backend/BACKEND_SPEC.md` §3.6) so the website,
+dashboard, CLI, and MCP all show the same content in the same wire shape
+(`src/lib/data.ts`).
 
-## Learn More
+```bash
+# Wire the site to a running backend (server-side fetch + ISR, revalidate 60s):
+API_URL=http://localhost:8400 npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+- `API_URL` (or `NEXT_PUBLIC_API_URL`) set → pages fetch live with ISR.
+- Neither set → the site falls back to the bundled seed in `src/lib/data.ts`
+  (mirrors `backend/scripts/seed.py`) so a standalone marketing build still
+  renders real content with no backend.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Notes
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- This is Next.js 16 — read `node_modules/next/dist/docs/` before changing
+  framework-level code (async `params`, ISR, metadata, etc.).
+- Design tokens (violet/lime/ink palette, Schibsted Grotesk / Manrope /
+  JetBrains Mono, 20px card radius, ◆▣▤ glyphs) are shared with the dashboard.

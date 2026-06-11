@@ -40,7 +40,7 @@ That's the whole integration — the client's transport seam
 ## Verify
 
 ```bash
-.venv/bin/python -m scripts.smoke   # 44-check contract test (throwaway SQLite)
+.venv/bin/python -m scripts.smoke   # 49-check contract test (throwaway SQLite)
 ```
 
 ## Integrations (CLI + MCP)

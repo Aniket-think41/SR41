@@ -1,11 +1,12 @@
 import type { MetadataRoute } from "next";
 import { SITE } from "@/lib/site";
-import { resources, publishers } from "@/lib/data";
+import { getResources, getPublishers } from "@/lib/data";
 
 // Auto-generated sitemap for all public routes (spec §6).
-export default function sitemap(): MetadataRoute.Sitemap {
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const base = SITE.url;
   const now = new Date();
+  const [resources, publishers] = await Promise.all([getResources(), getPublishers()]);
 
   const staticRoutes: MetadataRoute.Sitemap = [
     { url: `${base}/`, lastModified: now, changeFrequency: "weekly", priority: 1 },
@@ -17,7 +18,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
 
   const resourceRoutes: MetadataRoute.Sitemap = resources.map((r) => ({
     url: `${base}/marketplace/${r.id}`,
-    lastModified: new Date(r.updated),
+    lastModified: new Date(r.updated_at),
     changeFrequency: "weekly",
     priority: 0.7,
   }));

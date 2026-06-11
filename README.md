@@ -43,7 +43,7 @@ Attach the real backend later with `NEXT_PUBLIC_API_URL` (see
 ## Backend (API)
 
 FastAPI implementation of `backend/BACKEND_SPEC.md` — verified against the
-client contract by a 44-check smoke test.
+client contract by a 49-check smoke test.
 
 ```bash
 cd backend
