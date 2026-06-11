@@ -1,0 +1,122 @@
+"use client";
+
+/**
+ * Shared React Query hooks. Query keys follow the resource hierarchy so
+ * mutations can invalidate precisely (frontend spec §6).
+ */
+
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
+import { api, type ResourceQuery } from "./api";
+import { useUi } from "./store";
+
+export const qk = {
+  me: ["me"] as const,
+  orgs: ["orgs"] as const,
+  org: (slug: string) => ["org", slug] as const,
+  features: (slug: string) => ["org", slug, "features"] as const,
+  orgMembers: (slug: string) => ["org", slug, "members"] as const,
+  invitations: (slug: string) => ["org", slug, "invitations"] as const,
+  orgActivity: (slug: string) => ["org", slug, "activity"] as const,
+  orgResources: (slug: string, q?: ResourceQuery) => ["org", slug, "resources", q ?? {}] as const,
+  projects: (slug: string) => ["org", slug, "projects"] as const,
+  project: (id: string) => ["project", id] as const,
+  projectResources: (id: string, q?: ResourceQuery) => ["project", id, "resources", q ?? {}] as const,
+  pods: (projectId: string) => ["project", projectId, "pods"] as const,
+  pod: (id: string) => ["pod", id] as const,
+  podResources: (id: string, q?: ResourceQuery) => ["pod", id, "resources", q ?? {}] as const,
+  resource: (id: string) => ["resource", id] as const,
+  publicResources: (q?: ResourceQuery) => ["public", "resources", q ?? {}] as const,
+  publicResource: (id: string) => ["public", "resource", id] as const,
+  profile: (username: string) => ["profile", username] as const,
+};
+
+/** Current signed-in user; null when logged out. */
+export function useSession() {
+  return useQuery({
+    queryKey: qk.me,
+    queryFn: async () => {
+      try {
+        return await api.me();
+      } catch {
+        return null;
+      }
+    },
+    staleTime: 60_000,
+  });
+}
+
+/** Redirect to /login when unauthenticated. Used by the dashboard layout. */
+export function useRequireAuth() {
+  const { data: user, isLoading } = useSession();
+  const router = useRouter();
+  useEffect(() => {
+    if (!isLoading && user === null) router.replace("/login");
+  }, [isLoading, user, router]);
+  return { user: user ?? null, isLoading };
+}
+
+/** Orgs I belong to + the currently selected one (sidebar org switcher). */
+export function useCurrentOrg() {
+  const { orgSlug, setOrgSlug } = useUi();
+  const orgsQuery = useQuery({ queryKey: qk.orgs, queryFn: api.myOrgs });
+  const orgs = orgsQuery.data ?? [];
+
+  // Resolve selection: stored slug if still a member, else first org.
+  const current = orgs.find((o) => o.slug === orgSlug) ?? orgs[0] ?? null;
+
+  useEffect(() => {
+    if (current && current.slug !== orgSlug) setOrgSlug(current.slug);
+  }, [current, orgSlug, setOrgSlug]);
+
+  return { org: current, orgs, isLoading: orgsQuery.isLoading, setOrgSlug };
+}
+
+/** Feature flags for the current org (catalog + overrides + license). */
+export function useFeatures() {
+  const { org } = useCurrentOrg();
+  return useQuery({
+    queryKey: qk.features(org?.slug ?? ""),
+    queryFn: () => api.orgFeatures(org!.slug),
+    enabled: !!org,
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * One flag for the current org. Defaults to enabled while loading so the UI
+ * doesn't flash features off; gated mutations are still enforced server-side.
+ */
+export function useFeature(key: string): { enabled: boolean; licensed: boolean } {
+  const { data } = useFeatures();
+  const f = data?.find((x) => x.key === key);
+  return { enabled: f?.enabled ?? true, licensed: f?.licensed ?? true };
+}
+
+const plural = (s: string) => (/s$/i.test(s) ? s : `${s}s`);
+
+/**
+ * Org-facing labels for the hierarchy (custom-terminology feature).
+ * Data model stays projects → pods; this only changes what users read.
+ */
+export function useTerms() {
+  const { org } = useCurrentOrg();
+  const project = org?.terminology?.project?.trim() || "Project";
+  const pod = org?.terminology?.pod?.trim() || "Pod";
+  return { project, pod, projects: plural(project), pods: plural(pod) };
+}
+
+/** Invalidate every resource list a mutation could affect. */
+export function useInvalidateResources() {
+  const qc = useQueryClient();
+  return () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: ["org"] }),
+      qc.invalidateQueries({ queryKey: ["project"] }),
+      qc.invalidateQueries({ queryKey: ["pod"] }),
+      qc.invalidateQueries({ queryKey: ["public"] }),
+      qc.invalidateQueries({ queryKey: ["resource"] }),
+      qc.invalidateQueries({ queryKey: ["profile"] }),
+    ]);
+}

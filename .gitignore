@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Python
+.venv/
+**/.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.egg-info/
+**/*.egg-info/
+.pytest_cache/
+
+# Builds
+.next/
+**/.next/
+out/
+**/out/
+dist/
+build/
+
+# Env & secrets
+.env
+**/.env
+.env.local
+**/.env.local
+*.local
+
+# Databases / local data
+*.db
+*.sqlite
+*.sqlite3
+skillshare.db
+
+# Editor / OS
+.DS_Store
+*.log
+.idea/
+.vscode/
+
+# Credentials written by the CLI
+credentials.json

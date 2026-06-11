@@ -1,0 +1,299 @@
+"""3.2 Organizations + §3.7 features/licensing + activity + ⌘K search."""
+
+import re
+import secrets
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from ..config import get_settings
+from ..database import get_db
+from ..errors import conflict, forbidden, not_found, validation
+from ..features import CATALOG, feature_enabled, resolve_features
+from ..models import (
+    Invitation,
+    License,
+    Organization,
+    OrgFeature,
+    OrgMember,
+    Pod,
+    Project,
+    Resource,
+    User,
+)
+from ..permissions import org_by_slug, require_org_admin, require_org_member
+from ..schemas import FeaturePatch, InviteIn, LicenseIn, MemberRolePatch, OrgCreate, OrgPatch
+from ..security import get_current_user
+from ..serialize import (
+    activity_out,
+    invitation_out,
+    log_activity,
+    org_member_out,
+    org_out,
+    pod_out,
+    project_out,
+    resource_out,
+    user_out,
+)
+from ..models import Activity
+
+router = APIRouter(prefix="/api/orgs", tags=["orgs"])
+settings = get_settings()
+
+
+def _slugify(s: str) -> str:
+    return re.sub(r"^-+|-+$", "", re.sub(r"[^a-z0-9]+", "-", s.lower()))
+
+
+@router.get("")
+def my_orgs(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    memberships = db.query(OrgMember).filter(OrgMember.user_id == user.id).all()
+    out = []
+    for m in memberships:
+        org = db.get(Organization, m.org_id)
+        if org:
+            out.append(org_out(org, m.role))
+    return out
+
+
+@router.post("")
+def create_org(body: OrgCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    slug = _slugify(body.slug or body.name)
+    if not body.name.strip() or not slug:
+        raise validation("Organization name is required")
+    if db.query(Organization.id).filter(Organization.slug == slug).first():
+        raise conflict(f'Slug "{slug}" is taken')
+    org = Organization(name=body.name.strip(), slug=slug, description=body.description, owner_id=user.id)
+    db.add(org)
+    db.flush()
+    db.add(OrgMember(org_id=org.id, user_id=user.id, role="ADMIN", last_active=datetime.now(timezone.utc)))
+    db.commit()
+    return org_out(org)
+
+
+@router.get("/{slug}")
+def get_org(slug: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    org = org_by_slug(db, slug)
+    m = require_org_member(db, org, user)
+    return org_out(org, m.role)
+
+
+@router.patch("/{slug}")
+def update_org(slug: str, body: OrgPatch, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    org = org_by_slug(db, slug)
+    require_org_admin(db, org, user)
+    if body.terminology is not None and not feature_enabled(db, org, "custom-terminology"):
+        raise forbidden("Custom terminology is a premium feature — activate a license to rename Projects and Pods")
+    if body.name is not None:
+        org.name = body.name
+    if body.description is not None:
+        org.description = body.description
+    if body.logo_url is not None:
+        org.logo_url = body.logo_url
+    if body.terminology is not None:
+        org.terminology = body.terminology.model_dump()
+    db.commit()
+    return org_out(org)
+
+
+# ---- members & invitations ----
+
+@router.get("/{slug}/members")
+def members(slug: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    org = org_by_slug(db, slug)
+    require_org_member(db, org, user)
+    return [org_member_out(m) for m in db.query(OrgMember).filter(OrgMember.org_id == org.id).all()]
+
+
+@router.post("/{slug}/invite")
+def invite(slug: str, body: InviteIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    org = org_by_slug(db, slug)
+    require_org_admin(db, org, user)
+    inv = Invitation(
+        org_id=org.id,
+        email=body.email.lower(),
+        role=body.role if body.role in ("ADMIN", "MEMBER") else "MEMBER",
+        token=secrets.token_urlsafe(24),
+        expires_at=datetime.now(timezone.utc) + timedelta(days=7),
+    )
+    db.add(inv)
+    db.flush()  # assign inv.id before logging
+    log_activity(
+        db, user_id=user.id, org_id=org.id, verb="invited",
+        object_type="member", object_id=inv.id, object_title=inv.email,
+    )
+    db.commit()
+    return invitation_out(inv)
+
+
+@router.get("/{slug}/invitations")
+def invitations(slug: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    org = org_by_slug(db, slug)
+    require_org_admin(db, org, user)
+    rows = db.query(Invitation).filter(Invitation.org_id == org.id, Invitation.accepted_at.is_(None)).all()
+    return [invitation_out(i) for i in rows]
+
+
+@router.delete("/{slug}/invitations/{inv_id}")
+def cancel_invitation(slug: str, inv_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    org = org_by_slug(db, slug)
+    require_org_admin(db, org, user)
+    db.query(Invitation).filter(Invitation.id == inv_id, Invitation.org_id == org.id).delete()
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/{slug}/join/{token}")
+def join(slug: str, token: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    org = org_by_slug(db, slug)
+    inv = (
+        db.query(Invitation)
+        .filter(Invitation.org_id == org.id, Invitation.token == token, Invitation.accepted_at.is_(None))
+        .first()
+    )
+    if not inv or inv.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        raise not_found("Invitation")
+    inv.accepted_at = datetime.now(timezone.utc)
+    if not db.query(OrgMember.id).filter(OrgMember.org_id == org.id, OrgMember.user_id == user.id).first():
+        db.add(OrgMember(org_id=org.id, user_id=user.id, role=inv.role, last_active=datetime.now(timezone.utc)))
+        log_activity(
+            db, user_id=user.id, org_id=org.id, verb="joined",
+            object_type="org", object_id=org.id, object_title=org.name,
+        )
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/{slug}/members/{user_id}")
+def remove_member(slug: str, user_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    org = org_by_slug(db, slug)
+    require_org_admin(db, org, user)
+    if user_id == org.owner_id:
+        raise forbidden("The org owner cannot be removed")
+    db.query(OrgMember).filter(OrgMember.org_id == org.id, OrgMember.user_id == user_id).delete()
+    db.commit()
+    return {"ok": True}
+
+
+@router.patch("/{slug}/members/{user_id}")
+def set_member_role(
+    slug: str, user_id: str, body: MemberRolePatch,
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
+):
+    org = org_by_slug(db, slug)
+    require_org_admin(db, org, user)
+    m = db.query(OrgMember).filter(OrgMember.org_id == org.id, OrgMember.user_id == user_id).first()
+    if not m:
+        raise not_found("Member")
+    if body.role not in ("ADMIN", "MEMBER"):
+        raise validation("role must be ADMIN or MEMBER")
+    m.role = body.role
+    db.commit()
+    return org_member_out(m)
+
+
+# ---- activity & search ----
+
+@router.get("/{slug}/activity")
+def activity(slug: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    org = org_by_slug(db, slug)
+    require_org_member(db, org, user)
+    rows = (
+        db.query(Activity)
+        .filter(Activity.org_id == org.id)
+        .order_by(Activity.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    return [activity_out(a) for a in rows]
+
+
+@router.get("/{slug}/search")
+def search(slug: str, q: str = "", user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    org = org_by_slug(db, slug)
+    require_org_member(db, org, user)
+    needle = q.lower().strip()
+
+    projects = db.query(Project).filter(Project.org_id == org.id).all()
+    project_ids = [p.id for p in projects]
+    pods = db.query(Pod).filter(Pod.project_id.in_(project_ids)).all() if project_ids else []
+    pod_ids = [p.id for p in pods]
+    resources = (
+        db.query(Resource)
+        .filter(
+            ((Resource.scope_type == "ORG") & (Resource.scope_id == org.id))
+            | ((Resource.scope_type == "PROJECT") & Resource.scope_id.in_(project_ids or [""]))
+            | ((Resource.scope_type == "POD") & Resource.scope_id.in_(pod_ids or [""]))
+        )
+        .all()
+    )
+    member_users = [m.user for m in db.query(OrgMember).filter(OrgMember.org_id == org.id).all() if m.user]
+
+    def match(s: str) -> bool:
+        return needle in s.lower()
+
+    if not needle:
+        return {
+            "resources": [resource_out(db, r, user) for r in resources[:5]],
+            "projects": [project_out(db, p) for p in projects[:3]],
+            "pods": [pod_out(db, p) for p in pods[:3]],
+            "members": [],
+        }
+    return {
+        "resources": [
+            resource_out(db, r, user)
+            for r in resources
+            if match(r.title) or any(match(t) for t in (r.tags or []))
+        ][:6],
+        "projects": [project_out(db, p) for p in projects if match(p.name)][:4],
+        "pods": [pod_out(db, p) for p in pods if match(p.name)][:4],
+        "members": [user_out(u) for u in member_users if match(u.display_name) or match(u.username)][:4],
+    }
+
+
+# ---- feature flags & licensing (§3.7) ----
+
+@router.get("/{slug}/features")
+def features(slug: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    org = org_by_slug(db, slug)
+    require_org_member(db, org, user)
+    return resolve_features(db, org)
+
+
+@router.patch("/{slug}/features/{key}")
+def set_feature(
+    slug: str, key: str, body: FeaturePatch,
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
+):
+    org = org_by_slug(db, slug)
+    m = require_org_member(db, org, user)
+    if m.role != "ADMIN":
+        raise forbidden("Only org admins can change features")
+    flag = next((f for f in CATALOG if f["key"] == key), None)
+    if not flag:
+        raise not_found(f'Feature "{key}"')
+    if flag["premium"] and org.plan != "PREMIUM":
+        raise forbidden(f'"{flag["name"]}" is a premium feature — activate a license first')
+    existing = db.query(OrgFeature).filter(OrgFeature.org_id == org.id, OrgFeature.key == key).first()
+    if existing:
+        existing.enabled = body.enabled
+    else:
+        db.add(OrgFeature(org_id=org.id, key=key, enabled=body.enabled))
+    db.commit()
+    return next(f for f in resolve_features(db, org) if f["key"] == key)
+
+
+@router.post("/{slug}/license")
+def activate_license(slug: str, body: LicenseIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    org = org_by_slug(db, slug)
+    m = require_org_member(db, org, user)
+    if m.role != "ADMIN":
+        raise forbidden("Only org admins can activate a license")
+    key = body.license_key.strip().upper()
+    if not re.match(settings.license_key_pattern, key):
+        raise validation("Invalid license key (format: T41-PREM-XXXX)")
+    org.plan = "PREMIUM"
+    db.add(License(org_id=org.id, license_key=key, plan="PREMIUM", activated_by=user.id))
+    db.commit()
+    return {"plan": org.plan, "features": resolve_features(db, org)}

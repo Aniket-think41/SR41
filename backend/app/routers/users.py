@@ -1,0 +1,94 @@
+"""3.8 Profiles — GitHub-style profile page data (§8 additions)."""
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
+
+from ..database import get_db
+from ..errors import not_found
+from ..models import Activity, Organization, OrgMember, Resource, ResourceStar, User
+from ..security import get_current_user
+from ..serialize import activity_out, filter_resources, org_out, resource_out, sort_resources, user_out
+
+router = APIRouter(prefix="/api/users", tags=["users"])
+
+
+def _user_or_404(db: Session, username: str) -> User:
+    u = db.query(User).filter(User.username == username).first()
+    if not u:
+        raise not_found("User")
+    return u
+
+
+def _visible_resources(db: Session, target: User, viewer: User) -> list[Resource]:
+    """Own profile → everything; someone else's → public only (§4.2)."""
+    q = db.query(Resource).filter(Resource.author_id == target.id)
+    if viewer.id != target.id:
+        q = q.filter(Resource.is_public.is_(True))
+    return q.all()
+
+
+@router.get("/{username}")
+def profile(username: str, viewer: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    target = _user_or_404(db, username)
+    mine = db.query(Resource).filter(Resource.author_id == target.id).all()
+    return {
+        **user_out(target),
+        "stats": {
+            "resources": len(mine),
+            "public_resources": sum(1 for r in mine if r.is_public),
+            "stars_received": sum(r.stars_count for r in mine),
+            "stars_given": db.query(ResourceStar).filter(ResourceStar.user_id == target.id).count(),
+            "orgs": db.query(OrgMember).filter(OrgMember.user_id == target.id).count(),
+        },
+    }
+
+
+@router.get("/{username}/resources")
+def user_resources(
+    username: str,
+    q: str | None = Query(default=None),
+    type: str | None = Query(default=None),
+    tag: str | None = Query(default=None),
+    sort: str | None = Query(default=None),
+    viewer: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    target = _user_or_404(db, username)
+    rows = sort_resources(filter_resources(_visible_resources(db, target, viewer), q, type, tag), sort)
+    return [resource_out(db, r, viewer) for r in rows]
+
+
+@router.get("/{username}/starred")
+def user_starred(username: str, viewer: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    target = _user_or_404(db, username)
+    ids = [s.resource_id for s in db.query(ResourceStar).filter(ResourceStar.user_id == target.id).all()]
+    rows = db.query(Resource).filter(Resource.id.in_(ids or [""])).all()
+    if viewer.id != target.id:
+        rows = [r for r in rows if r.is_public]
+    return [resource_out(db, r, viewer) for r in rows]
+
+
+@router.get("/{username}/activity")
+def user_activity(username: str, viewer: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    target = _user_or_404(db, username)
+    rows = (
+        db.query(Activity)
+        .filter(Activity.user_id == target.id)
+        .order_by(Activity.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    return [activity_out(a) for a in rows]
+
+
+@router.get("/{username}/orgs")
+def user_orgs(username: str, viewer: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    target = _user_or_404(db, username)
+    # v1: org chips are visible to any signed-in viewer (profiles are in-app only).
+    # When public profiles ship, filter by org.is_public for non-self viewers.
+    out = []
+    for m in db.query(OrgMember).filter(OrgMember.user_id == target.id).all():
+        org = db.get(Organization, m.org_id)
+        if org:
+            out.append(org_out(org, m.role))
+    return out
