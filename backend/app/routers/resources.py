@@ -3,7 +3,7 @@ uploads (§6), and marketplace import."""
 
 import re
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -11,6 +11,7 @@ from ..database import get_db
 from ..errors import forbidden, not_found, validation
 from ..features import feature_enabled
 from ..models import Organization, Pod, Project, Resource, ResourceStar, User
+from .. import storage
 from ..permissions import (
     org_by_slug,
     pod_or_404,
@@ -275,6 +276,39 @@ def upload(body: UploadIn, user: User = Depends(get_current_user), db: Session =
 
     # local-dev fallback — no real storage, but the contract holds
     return {"upload_url": None, "file_url": f"https://cdn.skillshare.think41.com/{key}"}
+
+
+@router.post("/uploads")
+async def upload_binary(
+    file: UploadFile = File(...),
+    kind: str = Form("file"),  # image | video | file (diagrams use image)
+    user: User = Depends(get_current_user),
+):
+    """Direct multipart upload — stores the bytes via the configured storage
+    backend (local disk by default, S3/R2 in prod) and returns the public
+    file_url to attach to a resource. Same contract regardless of backend."""
+    if kind not in storage.ALLOWED_EXT:
+        raise validation("kind must be image, video, or file")
+    if not storage.ext_allowed(kind, file.filename or ""):
+        allowed = ", ".join(sorted(storage.ALLOWED_EXT[kind]))
+        raise validation(f"Unsupported file type for {kind}. Allowed: {allowed}")
+
+    data = await file.read()
+    limit = settings.max_upload_mb * 1024 * 1024
+    if len(data) > limit:
+        raise validation(f"File exceeds the {settings.max_upload_mb} MB limit")
+    if not data:
+        raise validation("Empty file")
+
+    file_url = storage.save_bytes(
+        data, kind=kind, username=user.username, filename=file.filename or "upload", content_type=file.content_type
+    )
+    return {
+        "file_url": file_url,
+        "filename": file.filename,
+        "content_type": file.content_type,
+        "size_bytes": len(data),
+    }
 
 
 # ---- marketplace import (§8 #7) ----

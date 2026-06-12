@@ -153,12 +153,14 @@ export function ResourceForm({
     onError: (e) => toast(errorMessage(e), "error"),
   });
 
-  const mockUpload = async (file: File) => {
+  const uploadSkill = async (file: File) => {
     setUploading(true);
     try {
-      const { file_url } = await api.upload(file.name);
+      const { file_url } = await api.uploadFile(file, "file");
       setFileUrl(file_url);
       toast(`"${file.name}" uploaded`);
+    } catch (e) {
+      toast(errorMessage(e), "error");
     } finally {
       setUploading(false);
     }
@@ -339,7 +341,7 @@ export function ResourceForm({
                         className="hidden"
                         onChange={(e) => {
                           const f = e.target.files?.[0];
-                          if (f) mockUpload(f);
+                          if (f) uploadSkill(f);
                         }}
                       />
                     </label>

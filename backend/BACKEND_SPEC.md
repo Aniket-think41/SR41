@@ -347,14 +347,29 @@ client-side in v1).
 
 ## 6. File Uploads
 
-- Skill packages are uploaded as `.skill` ZIP files via `/api/resources/upload`.
-- Backend validates MIME type and size (max 10 MB v1).
-- S3 presigned URL pattern: backend issues presigned PUT URL, client uploads
-  directly, then confirms to API with the returned URL.
-- `file_url` stored in resource record after confirmation.
-- Mock-mode note: the client currently short-circuits this to a single call
-  returning `{ "file_url": "…" }`. Implement the presigned flow as specified;
-  the client's `api.upload()` is the single function to extend.
+Two flows, sharing a **switchable storage backend** (`STORAGE_BACKEND=local|s3`,
+see `app/storage.py`):
+
+**Direct multipart upload — `POST /api/uploads`** (images, video, diagrams,
+files; powers resource attachments and skill packages):
+- `multipart/form-data` with `file` + `kind` (`image|video|file`; diagrams use
+  `image`). Validated by extension per kind and `MAX_UPLOAD_MB`.
+- Returns `{ file_url, filename, content_type, size_bytes }`.
+- **local** backend: bytes written under `UPLOAD_DIR`, served from the
+  `/uploads/<key>` static mount; `file_url = PUBLIC_BASE_URL/uploads/<key>`.
+- **s3** backend: `boto3 put_object` to `S3_BUCKET` (AWS S3 / Cloudflare R2 /
+  MinIO); `file_url = S3_PUBLIC_BASE_URL/<key>`.
+- Client: `api.uploadFile(file, kind)`. In mock mode it returns a local
+  object URL so previews work with no backend.
+
+**Presigned PUT — `POST /api/resources/upload`** (legacy skill-package path):
+backend issues a presigned PUT URL when S3 is configured; the client PUTs the
+file directly and stores the returned `file_url`. Returns a placeholder URL
+when storage is unconfigured.
+
+`file_url` is stored on the resource (skill package) or on each attachment item
+(`attachments[].url`). Production: set `STORAGE_BACKEND=s3` + bucket creds; for
+very large media, prefer the presigned flow to avoid proxying bytes through the API.
 
 ---
 

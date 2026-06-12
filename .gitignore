@@ -41,3 +41,7 @@ skillshare.db
 
 # Credentials written by the CLI
 credentials.json
+
+# Local file uploads (STORAGE_BACKEND=local)
+var/
+**/var/uploads/

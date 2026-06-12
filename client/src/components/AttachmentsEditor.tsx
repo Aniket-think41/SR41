@@ -6,8 +6,20 @@
  * of {kind, url, title, caption} items — links, images, videos, files.
  */
 
-import { Link2, Image as ImageIcon, Video, Paperclip, X, GripVertical } from "lucide-react";
+import { useState } from "react";
+import { Link2, Image as ImageIcon, Video, Paperclip, X, GripVertical, Upload, Loader2 } from "lucide-react";
 import type { Attachment, AttachmentKind } from "@/lib/types";
+import { api } from "@/lib/api";
+import { errorMessage } from "@/lib/api/http";
+import { useToast } from "./Toast";
+
+// File-picker accept filter per kind (the backend also validates by extension).
+const ACCEPT: Record<AttachmentKind, string> = {
+  link: "",
+  image: "image/*",
+  video: "video/*",
+  file: ".pdf,.md,.txt,.json,.csv,.zip,.skill,.docx,.pptx,.xlsx",
+};
 
 const KINDS: { kind: AttachmentKind; label: string; icon: typeof Link2; urlPlaceholder: string }[] = [
   { kind: "link", label: "Link", icon: Link2, urlPlaceholder: "https://…" },
@@ -25,9 +37,26 @@ export function AttachmentsEditor({
   value: Attachment[];
   onChange: (next: Attachment[]) => void;
 }) {
+  const { toast } = useToast();
+  const [uploading, setUploading] = useState<number | null>(null);
+
   const add = (kind: AttachmentKind) => onChange([...value, { kind, url: "", title: "", caption: "" }]);
   const update = (i: number, patch: Partial<Attachment>) =>
     onChange(value.map((a, idx) => (idx === i ? { ...a, ...patch } : a)));
+
+  const upload = async (i: number, kind: AttachmentKind, file: File) => {
+    setUploading(i);
+    try {
+      const { file_url } = await api.uploadFile(file, kind as "image" | "video" | "file");
+      // set url + default the title to the file name if empty
+      onChange(value.map((a, idx) => (idx === i ? { ...a, url: file_url, title: a.title || file.name } : a)));
+      toast(`"${file.name}" uploaded`);
+    } catch (e) {
+      toast(errorMessage(e), "error");
+    } finally {
+      setUploading(null);
+    }
+  };
   const remove = (i: number) => onChange(value.filter((_, idx) => idx !== i));
   const move = (i: number, dir: -1 | 1) => {
     const j = i + dir;
@@ -74,6 +103,26 @@ export function AttachmentsEditor({
                     placeholder={m.urlPlaceholder}
                     className="field code !py-1.5 flex-1 text-[0.8rem]"
                   />
+                  {a.kind !== "link" && (
+                    <label
+                      className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-full border border-line bg-white px-2.5 py-1.5 text-xs font-semibold text-body transition hover:border-primary hover:text-primary"
+                      title={`Upload ${a.kind}`}
+                    >
+                      {uploading === i ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                      Upload
+                      <input
+                        type="file"
+                        accept={ACCEPT[a.kind]}
+                        className="hidden"
+                        disabled={uploading !== null}
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) upload(i, a.kind, f);
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+                  )}
                   <button type="button" onClick={() => remove(i)} className="rounded-full p-1.5 text-muted transition hover:bg-white hover:text-note" aria-label="Remove">
                     <X className="h-4 w-4" />
                   </button>

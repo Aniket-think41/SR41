@@ -3,7 +3,7 @@
  * Screens never call fetch directly; they call these via React Query.
  */
 
-import { request } from "./http";
+import { request, uploadFile } from "./http";
 import type {
   Activity,
   AuthSession,
@@ -152,6 +152,7 @@ export const api = {
   unstar: (id: string) => request<Resource>("DELETE", `/api/resources/${id}/star`),
   upload: (filename: string) =>
     request<{ file_url: string }>("POST", "/api/resources/upload", { filename }),
+  uploadFile: (file: File, kind: "image" | "video" | "file") => uploadFile(file, kind),
   importResource: (id: string, orgSlug: string) =>
     request<Resource>("POST", `/api/resources/${id}/import`, { org_slug: orgSlug }),
 

@@ -6,8 +6,11 @@ NEXT_PUBLIC_API_URL to this server's origin; the wire format matches
 client/src/lib/types.ts exactly.
 """
 
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
 from .database import Base, engine
@@ -43,6 +46,12 @@ app.include_router(pods.router)
 app.include_router(resources.router)
 app.include_router(public.router)
 app.include_router(users.router)
+
+# Serve locally-stored uploads when STORAGE_BACKEND=local (no-op for S3, which
+# serves files from the bucket/CDN). Files land here from POST /api/uploads.
+if settings.storage_backend == "local":
+    os.makedirs(settings.upload_dir, exist_ok=True)
+    app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
 
 
 @app.get("/api/health")

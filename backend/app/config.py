@@ -39,13 +39,16 @@ class Settings(BaseSettings):
     redis_url: str = ""  # optional; in-memory limiter is used when empty (single-process only)
 
     # --- uploads (BACKEND_SPEC §6) ---
+    storage_backend: str = "local"   # local | s3  (switchable; see app/storage.py)
+    upload_dir: str = "var/uploads"  # local backend: where files are written
+    public_base_url: str = "http://localhost:8400"  # local backend: base for /uploads URLs
     s3_bucket: str = ""
     s3_region: str = "auto"
     s3_endpoint_url: str = ""        # e.g. Cloudflare R2 endpoint
     s3_public_base_url: str = ""     # public CDN base for stored files
     aws_access_key_id: str = ""
     aws_secret_access_key: str = ""
-    max_upload_mb: int = 10
+    max_upload_mb: int = 50          # images/diagrams/short clips; raise for video
 
     # --- licensing (BACKEND_SPEC §3.7) ---
     license_key_pattern: str = r"^T41-PREM-[A-Z0-9]{4,}$"

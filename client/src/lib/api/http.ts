@@ -38,6 +38,40 @@ export function errorMessage(e: unknown): string {
   return "Something went wrong";
 }
 
+/**
+ * Multipart file upload (images / video / diagrams / files). Stored by the
+ * backend's switchable storage backend (local disk in dev, S3/R2 in prod),
+ * which returns a public file_url. In mock mode there's no server, so we hand
+ * back a local object URL so previews still work in the browser.
+ */
+export async function uploadFile(
+  file: File,
+  kind: "image" | "video" | "file"
+): Promise<{ file_url: string }> {
+  if (USING_MOCK) return { file_url: URL.createObjectURL(file) };
+
+  const form = new FormData();
+  form.append("file", file);
+  form.append("kind", kind);
+  const res = await fetch(`${API_URL}/api/uploads`, {
+    method: "POST",
+    // NB: do NOT set Content-Type — the browser sets the multipart boundary.
+    headers: { ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}) },
+    body: form,
+    credentials: "include",
+  });
+  if (!res.ok) {
+    let err: ApiError;
+    try {
+      err = (await res.json()) as ApiError;
+    } catch {
+      err = { error: { code: "INTERNAL_ERROR", message: res.statusText, status: res.status } };
+    }
+    throw err;
+  }
+  return (await res.json()) as { file_url: string };
+}
+
 export async function request<T>(
   method: "GET" | "POST" | "PATCH" | "DELETE",
   path: string,
