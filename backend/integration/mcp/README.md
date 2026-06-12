@@ -56,7 +56,7 @@ claude mcp add skillshare \
 | Tool | Auth | Description |
 | ---- | ---- | ----------- |
 | `search_marketplace(query, resource_type, tag, sort)` | – | search public skills / MCPs / notes |
-| `get_resource(resource_id)` | –/✓ | full content: SKILL.md, MCP url + config JSON, note body |
+| `get_resource(resource_id)` | –/✓ | full content: SKILL.md, MCP url + config JSON, note body, attachments |
 | `get_publisher(username)` | – | publisher profile + their public resources |
 | `whoami()` | ✓ | the authenticated user |
 | `list_my_orgs()` | ✓ | orgs + role + plan |
@@ -64,7 +64,8 @@ claude mcp add skillshare \
 | `list_org_resources(org_slug, query, resource_type)` | ✓ | org-level resources |
 | `list_pod_resources(pod_id, scope, query, resource_type)` | ✓ | pod library incl. inherited (spec §5) |
 | `search_org(org_slug, query)` | ✓ | ⌘K-style search: resources/projects/pods/members |
-| `create_note(title, content_md, org_slug \| pod_id, …)` | ✓ | write a NOTE into an org or pod |
+| `create_note(title, content_md, org_slug \| pod_id, …, attachments)` | ✓ | write a NOTE; `attachments` = [{kind, url, title?}] |
+| `upload_file(path, kind)` | ✓ | store a local file (image/video/file) → returns its URL for `attachments` |
 | `star_resource(resource_id)` | ✓ | star |
 | `import_resource(resource_id, org_slug)` | ✓ | "Add to my org" |
 

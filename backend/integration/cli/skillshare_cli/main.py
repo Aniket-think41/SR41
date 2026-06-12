@@ -10,10 +10,12 @@ Personal Access Token (skst_…) and stores it in
     skillshare whoami / orgs / tokens         account
     skillshare search "code review" --type SKILL
     skillshare get pr-reviewer                full resource detail
-    skillshare pull pr-reviewer -o ./skills   save SKILL.md / config / note
+    skillshare pull pr-reviewer -o ./skills   save SKILL.md / config / note + assets
     skillshare list --org think41             org resources
     skillshare list --pod pod-retrieval       pod library incl. inherited
-    skillshare add note --org think41 --title "..." -f notes.md
+    skillshare upload diagram.png --kind image          store a file, print its URL
+    skillshare add note --org think41 --title "..." -f notes.md \
+        --image diagram.png --video demo.mp4 --link https://docs.example.com
     skillshare star <id> / publish <id> / import <id> --org <slug>
 """
 
@@ -79,6 +81,46 @@ def request(method: str, path: str, *, body: dict | None = None, params: dict | 
         except (KeyError, ValueError):
             die(f"HTTP {res.status_code}: {res.text[:200]}")
     return res.json() if res.text else None
+
+
+def upload_file(path: str, kind: str) -> dict:
+    """Upload a local file via POST /api/uploads (multipart) and return
+    {file_url, filename, content_type, size_bytes}. Storage backend is the
+    server's concern (local disk in dev, S3/R2 in prod) — we just get a URL."""
+    p = Path(path).expanduser()
+    if not p.is_file():
+        die(f"file not found: {path}")
+    t = token()
+    if not t:
+        die("not logged in — run `skillshare login` (or set SKILLSHARE_TOKEN)")
+    try:
+        with p.open("rb") as fh:
+            res = httpx.post(
+                f"{api_url()}/api/uploads",
+                headers={"Authorization": f"Bearer {t}"},
+                data={"kind": kind},
+                files={"file": (p.name, fh)},
+                timeout=120,
+            )
+    except httpx.HTTPError as e:
+        die(f"cannot reach {api_url()} ({e.__class__.__name__})")
+    if res.status_code >= 400:
+        try:
+            err = res.json()["error"]
+            die(f"{err['code']}: {err['message']}")
+        except (KeyError, ValueError):
+            die(f"HTTP {res.status_code}: {res.text[:200]}")
+    return res.json()
+
+
+def _resolve_attachment(value: str, kind: str) -> dict:
+    """A CLI attachment value is either a local file (uploaded, then attached)
+    or an already-public URL (attached as-is). Links are always URLs."""
+    p = Path(value).expanduser()
+    if kind != "link" and p.is_file():
+        up = upload_file(str(p), kind)
+        return {"kind": kind, "url": up["file_url"], "title": p.name}
+    return {"kind": kind, "url": value}
 
 
 def print_resources(rows: list[dict]) -> None:
@@ -173,6 +215,41 @@ def attachments_md(r) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _download(url: str, dest: Path) -> bool:
+    try:
+        with httpx.stream("GET", url, timeout=120, follow_redirects=True) as res:
+            if res.status_code >= 400:
+                return False
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            with dest.open("wb") as fh:
+                for chunk in res.iter_bytes():
+                    fh.write(chunk)
+        return True
+    except httpx.HTTPError:
+        return False
+
+
+def pull_attachments(r: dict, target: Path, fetch_assets: bool) -> str:
+    """Like attachments_md, but for `pull`: optionally download image/video/file
+    attachments into target/attachments/ and reference the local copies."""
+    items = r.get("attachments") or []
+    if not items:
+        return ""
+    lines = ["", "## Resources", ""]
+    for a in items:
+        kind, url = a.get("kind", "link"), a["url"]
+        title = a.get("title") or url
+        cap = f" — {a['caption']}" if a.get("caption") else ""
+        if fetch_assets and kind in ("image", "video", "file"):
+            name = re.sub(r"[^A-Za-z0-9._-]", "-", url.split("/")[-1].split("?")[0]) or f"{kind}-asset"
+            if _download(url, target / "attachments" / name):
+                print(f"{DIM}  ↓ attachments/{name}{RESET}")
+                lines.append(f"- **{kind}**: [{title}](attachments/{name}){cap}")
+                continue
+        lines.append(f"- **{kind}**: [{title}]({url}){cap}")
+    return "\n".join(lines) + "\n"
+
+
 def cmd_get(args) -> None:
     path = f"/api/resources/{args.id}" if token() else f"/api/public/resources/{args.id}"
     r = request("GET", path, auth=bool(token()))
@@ -200,20 +277,25 @@ def cmd_pull(args) -> None:
     slug = re.sub(r"[^a-z0-9]+", "-", r["title"].lower()).strip("-")
     target = out / slug
     target.mkdir(parents=True, exist_ok=True)
+    assets = not args.no_assets
+    section = pull_attachments(r, target, assets)
     if r["type"] == "SKILL":
-        (target / "SKILL.md").write_text((r.get("content_md") or "") + attachments_md(r))
+        (target / "SKILL.md").write_text((r.get("content_md") or "") + section)
         print(f"wrote {target / 'SKILL.md'}")
         if r.get("file_url"):
-            print(f"{DIM}package: {r['file_url']} (download manually or via the dashboard){RESET}")
+            name = re.sub(r"[^A-Za-z0-9._-]", "-", r["file_url"].split("/")[-1].split("?")[0]) or "package"
+            if assets and _download(r["file_url"], target / name):
+                print(f"{DIM}  ↓ {name}{RESET}")
+            else:
+                print(f"{DIM}package: {r['file_url']}{RESET}")
     elif r["type"] == "MCP":
-        cfg = r.get("config_json") or "{}"
-        (target / "mcp-config.json").write_text(cfg)
+        (target / "mcp-config.json").write_text(r.get("config_json") or "{}")
         print(f"wrote {target / 'mcp-config.json'}")
-        if r.get("attachments"):
-            (target / "README.md").write_text((r.get("content_md") or "") + attachments_md(r))
+        if r.get("content_md") or r.get("attachments"):
+            (target / "README.md").write_text((r.get("content_md") or "") + section)
             print(f"wrote {target / 'README.md'}")
     else:
-        (target / f"{slug}.md").write_text((r.get("content_md") or "") + attachments_md(r))
+        (target / f"{slug}.md").write_text((r.get("content_md") or "") + section)
         print(f"wrote {target / (slug + '.md')}")
 
 
@@ -242,6 +324,14 @@ def cmd_add_note(args) -> None:
         scope = {"scope_type": "ORG", "scope_id": org["id"]}
     else:
         die("provide --org <slug> or --pod <id>")
+    # --link is always a URL; --image/--video/--attach accept a local file
+    # (uploaded automatically) OR a URL.
+    attachments = (
+        [{"kind": "link", "url": u} for u in (args.link or [])]
+        + [_resolve_attachment(v, "image") for v in (args.image or [])]
+        + [_resolve_attachment(v, "video") for v in (args.video or [])]
+        + [_resolve_attachment(v, "file") for v in (args.attach or [])]
+    )
     r = request(
         "POST",
         "/api/resources",
@@ -251,10 +341,17 @@ def cmd_add_note(args) -> None:
             "description": args.description or "",
             "content_md": content,
             "tags": [t.strip() for t in (args.tags or "").split(",") if t.strip()],
+            "attachments": attachments,
             **scope,
         },
     )
-    print(f"created {BOLD}{r['title']}{RESET} [{r['id']}] in {r['scope_type'].lower()} scope")
+    extra = f" with {len(attachments)} attachment(s)" if attachments else ""
+    print(f"created {BOLD}{r['title']}{RESET} [{r['id']}] in {r['scope_type'].lower()} scope{extra}")
+
+
+def cmd_upload(args) -> None:
+    up = upload_file(args.file, args.kind)
+    print(up["file_url"])
 
 
 def cmd_star(args) -> None:
@@ -297,10 +394,16 @@ def main() -> None:
     sp.add_argument("id")
     sp.set_defaults(fn=cmd_get)
 
-    sp = sub.add_parser("pull", help="save a resource locally (SKILL.md / mcp-config.json / note.md)")
+    sp = sub.add_parser("pull", help="save a resource locally (SKILL.md / mcp-config.json / note.md + attachments)")
     sp.add_argument("id")
     sp.add_argument("-o", "--output", default=".", help="output directory (default .)")
+    sp.add_argument("--no-assets", action="store_true", help="don't download attachment files; keep URLs")
     sp.set_defaults(fn=cmd_pull)
+
+    sp = sub.add_parser("upload", help="upload a file and print its stored URL")
+    sp.add_argument("file")
+    sp.add_argument("--kind", default="file", choices=["image", "video", "file"])
+    sp.set_defaults(fn=cmd_upload)
 
     sp = sub.add_parser("list", help="list org or pod resources (incl. inherited)")
     sp.add_argument("--org", help="org slug")
@@ -318,6 +421,10 @@ def main() -> None:
     sp.add_argument("-f", "--file", help="markdown file (default: read stdin)")
     sp.add_argument("--description")
     sp.add_argument("--tags", help="comma-separated")
+    sp.add_argument("--link", action="append", help="attach a URL (repeatable)")
+    sp.add_argument("--image", action="append", help="attach an image — local file (uploaded) or URL (repeatable)")
+    sp.add_argument("--video", action="append", help="attach a video — local file (uploaded) or URL (repeatable)")
+    sp.add_argument("--attach", action="append", help="attach a file — local file (uploaded) or URL (repeatable)")
     sp.set_defaults(fn=cmd_add_note)
 
     sp = sub.add_parser("star", help="star a resource")

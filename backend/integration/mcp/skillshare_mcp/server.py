@@ -12,6 +12,7 @@ Public marketplace tools work without a token; org/pod tools require one.
 """
 
 import os
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -26,7 +27,9 @@ mcp = FastMCP(
         "SkillShare is a registry of AI skills, MCP servers, and team notes, "
         "organized as org → projects → pods. Use search/list tools to find "
         "resources, get_resource for full content (SKILL.md, MCP config JSON, "
-        "note markdown), and create_note/star/import to write."
+        "note markdown), and create_note/star/import to write. Resources can "
+        "carry typed attachments (link/image/video/file): upload_file stores a "
+        "local file and returns a URL you can pass to create_note's attachments."
     ),
 )
 
@@ -39,6 +42,23 @@ def _request(method: str, path: str, *, json: dict | None = None, params: dict |
     headers = {"Authorization": f"Bearer {TOKEN}"} if TOKEN else {}
     with httpx.Client(base_url=API_URL, timeout=30) as client:
         res = client.request(method, path, json=json, params=params, headers=headers)
+    if res.status_code >= 400:
+        try:
+            err = res.json()["error"]
+            raise SkillShareError(f"{err['code']}: {err['message']}")
+        except (KeyError, ValueError):
+            raise SkillShareError(f"HTTP {res.status_code}: {res.text[:200]}")
+    return res.json()
+
+
+def _upload(path: str, kind: str) -> dict:
+    """Upload a local file to POST /api/uploads (multipart) → {file_url, ...}."""
+    p = Path(path).expanduser()
+    if not p.is_file():
+        raise SkillShareError(f"file not found: {path}")
+    headers = {"Authorization": f"Bearer {TOKEN}"} if TOKEN else {}
+    with p.open("rb") as fh, httpx.Client(base_url=API_URL, timeout=120) as client:
+        res = client.post("/api/uploads", data={"kind": kind}, files={"file": (p.name, fh)}, headers=headers)
     if res.status_code >= 400:
         try:
             err = res.json()["error"]
@@ -204,6 +224,7 @@ def create_note(
     pod_id: str = "",
     description: str = "",
     tags: list[str] | None = None,
+    attachments: list[dict] | None = None,
 ) -> dict:
     """Create a NOTE resource — team knowledge in markdown. Provide either
     org_slug (org-level note, inherited everywhere) or pod_id (pod-level).
@@ -215,6 +236,9 @@ def create_note(
         pod_id: target pod id for a pod-level note (overrides org_slug).
         description: one-line summary shown on cards.
         tags: e.g. ["process", "rag"].
+        attachments: typed media, each {kind, url, title?, caption?} where kind
+            is "link" | "image" | "video" | "file". Pass public URLs; to attach
+            a local file, call upload_file first and use the returned file_url.
     """
     if pod_id:
         scope = {"scope_type": "POD", "scope_id": pod_id}
@@ -232,10 +256,29 @@ def create_note(
             "description": description,
             "content_md": content_md,
             "tags": tags or [],
+            "attachments": attachments or [],
             **scope,
         },
     )
     return _summary(r)
+
+
+@mcp.tool()
+def upload_file(path: str, kind: str = "file") -> dict:
+    """Upload a local file to SkillShare storage and return its public URL.
+
+    Use this when you have a file on disk (e.g. a diagram or image you just
+    generated) that you want to attach to a note. Pass the returned file_url
+    in create_note's `attachments`.
+
+    Args:
+        path: local filesystem path to the file.
+        kind: "image" (incl. diagrams), "video", or "file".
+    """
+    if kind not in ("image", "video", "file"):
+        raise SkillShareError("kind must be image, video, or file")
+    up = _upload(path, kind)
+    return {"file_url": up["file_url"], "filename": up.get("filename"), "size_bytes": up.get("size_bytes")}
 
 
 @mcp.tool()
