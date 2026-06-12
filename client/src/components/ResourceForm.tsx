@@ -105,6 +105,7 @@ export function ResourceForm({
   const {
     register,
     handleSubmit,
+    trigger,
     formState: { errors },
   } = useForm<Details>({
     resolver: zodResolver(schema),
@@ -157,10 +158,16 @@ export function ResourceForm({
     }
   };
 
-  const onSubmit = handleSubmit((d) => mutation.mutate(d));
+  // Only ever save from the explicit final button (step 3). Guard on step so a
+  // stray submit can never persist a half-filled resource, and block the
+  // <form>'s native submit entirely — this is a multi-step wizard, not a
+  // single-shot form.
+  const onSubmit = handleSubmit((d) => {
+    if (step === 3) mutation.mutate(d);
+  });
 
   return (
-    <form onSubmit={onSubmit} className="flex h-full flex-col">
+    <form onSubmit={(e) => e.preventDefault()} className="flex h-full flex-col">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-line p-6 pb-4">
         <div>
@@ -361,13 +368,10 @@ export function ResourceForm({
           <button
             type="button"
             onClick={async () => {
-              // validate details before leaving step 2
-              if (step === 2) {
-                const valid = await new Promise<boolean>((resolve) =>
-                  handleSubmit(() => resolve(true), () => resolve(false))()
-                );
-                if (!valid) return;
-              }
+              // validate the details fields before leaving step 2 — trigger()
+              // runs validation WITHOUT submitting the form (handleSubmit would
+              // run the submit path and save prematurely).
+              if (step === 2 && !(await trigger())) return;
               setStep(step + 1);
             }}
             className="btn btn-primary btn-sm"
@@ -375,7 +379,7 @@ export function ResourceForm({
             Continue <ArrowRight className="h-3.5 w-3.5" />
           </button>
         ) : (
-          <button type="submit" className="btn btn-primary btn-sm" disabled={mutation.isPending}>
+          <button type="button" onClick={onSubmit} className="btn btn-primary btn-sm" disabled={mutation.isPending}>
             {mutation.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             {editing ? "Save changes" : "Add resource"}
           </button>
