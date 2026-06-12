@@ -45,7 +45,7 @@ export function ResourceCard({
   }
 
   return (
-    <article className="card card-hover group relative flex h-full flex-col p-5">
+    <article className="card card-hover group relative flex h-full min-w-0 flex-col p-5">
       {onToggleStar && (
         <button
           onClick={(e) => {
@@ -64,7 +64,7 @@ export function ResourceCard({
         </button>
       )}
 
-      <button onClick={() => onOpen(r)} className="flex flex-1 cursor-pointer flex-col text-left">
+      <button onClick={() => onOpen(r)} className="flex min-w-0 flex-1 cursor-pointer flex-col text-left">
         <div className="flex flex-wrap items-center gap-2 pr-8">
           <TypeBadge type={r.type} />
           {showScopeBadge && r.scope_label && <ScopeBadge scope={r.scope_label} />}
@@ -76,10 +76,10 @@ export function ResourceCard({
           <span className="text-xs text-muted">v{r.version}</span>
         </div>
 
-        <h3 className="font-display mt-3 text-lg font-semibold leading-snug transition group-hover:text-primary">
+        <h3 className="font-display mt-3 break-words text-lg font-semibold leading-snug transition group-hover:text-primary">
           {r.title}
         </h3>
-        <p className="mt-1.5 line-clamp-2 flex-1 text-[0.85rem] leading-relaxed text-body">
+        <p className="mt-1.5 line-clamp-2 flex-1 break-words text-[0.85rem] leading-relaxed text-body">
           {r.description}
         </p>
 

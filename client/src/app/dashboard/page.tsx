@@ -107,9 +107,9 @@ export default function DashboardHome() {
         ))}
       </div>
 
-      <div className={`grid gap-6 ${activityFeature.enabled ? "lg:grid-cols-[1.2fr_0.8fr]" : ""}`}>
+      <div className={`grid gap-6 ${activityFeature.enabled ? "lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]" : ""}`}>
         {/* Recently updated resources */}
-        <section className="card p-6">
+        <section className="card min-w-0 p-6">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="font-display text-lg font-semibold">Recently updated</h2>
             <Link href="/dashboard/org/resources" className="flex items-center gap-1 text-xs font-bold text-primary hover:underline">
@@ -139,14 +139,14 @@ export default function DashboardHome() {
 
         {/* Activity feed (feature-gated) */}
         {activityFeature.enabled && (
-        <section className="card p-6">
+        <section className="card min-w-0 p-6">
           <h2 className="font-display mb-4 text-lg font-semibold">Recent activity</h2>
           <ol className="relative space-y-4 before:absolute before:bottom-2 before:left-[11px] before:top-2 before:w-px before:bg-line">
             {(activity ?? []).slice(0, 8).map((a) => (
               <li key={a.id} className="relative flex items-start gap-3 pl-0.5">
                 <Avatar name={a.user?.display_name ?? "?"} size="xs" className="relative z-10 ring-2 ring-white" />
                 <div className="min-w-0 flex-1 text-sm">
-                  <p className="leading-snug">
+                  <p className="break-words leading-snug">
                     <span className="font-bold text-ink">{a.user?.display_name}</span>{" "}
                     <span className="text-body">{VERBS[a.verb]}</span>{" "}
                     <span className="font-semibold text-primary">{a.object_title}</span>

@@ -97,8 +97,8 @@ function DetailView({ resource: initial, onClose }: { resource: Resource; onClos
           </button>
         </div>
 
-        <h2 className="font-display mt-3 text-2xl font-semibold">{r.title}</h2>
-        <p className="mt-1.5 text-sm leading-relaxed text-body">{r.description}</p>
+        <h2 className="font-display mt-3 break-words text-2xl font-semibold">{r.title}</h2>
+        <p className="mt-1.5 break-words text-sm leading-relaxed text-body">{r.description}</p>
 
         <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted">
           <span className="flex items-center gap-1.5">

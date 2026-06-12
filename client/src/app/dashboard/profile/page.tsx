@@ -282,12 +282,12 @@ export default function ProfilePage() {
 
       {/* ============ Tabbed panel ============ */}
       <section className="min-w-0">
-        <div className="flex gap-1 border-b border-line">
+        <div className="thin-scroll flex gap-1 overflow-x-auto border-b border-line">
           {TABS.map(({ key, label, icon: Icon }) => (
             <button
               key={key}
               onClick={() => setTab(key)}
-              className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
+              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
                 tab === key ? "border-primary text-ink" : "border-transparent text-muted hover:text-ink"
               }`}
             >
