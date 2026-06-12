@@ -159,6 +159,20 @@ def cmd_search(args) -> None:
     print_resources(request("GET", "/api/public/resources", params=params, auth=False))
 
 
+def attachments_md(r) -> str:
+    """Render typed attachments as a portable '## Resources' markdown section
+    (hybrid content model — content_md stays canonical, this appends media)."""
+    items = r.get("attachments") or []
+    if not items:
+        return ""
+    lines = ["", "## Resources", ""]
+    for a in items:
+        title = a.get("title") or a.get("url")
+        cap = f" — {a['caption']}" if a.get("caption") else ""
+        lines.append(f"- **{a.get('kind', 'link')}**: [{title}]({a['url']}){cap}")
+    return "\n".join(lines) + "\n"
+
+
 def cmd_get(args) -> None:
     path = f"/api/resources/{args.id}" if token() else f"/api/public/resources/{args.id}"
     r = request("GET", path, auth=bool(token()))
@@ -174,6 +188,9 @@ def cmd_get(args) -> None:
             print(f"\n{r['content_md']}")
     else:
         print(r.get("content_md") or "(no content)")
+    section = attachments_md(r)
+    if section:
+        print(section)
 
 
 def cmd_pull(args) -> None:
@@ -184,7 +201,7 @@ def cmd_pull(args) -> None:
     target = out / slug
     target.mkdir(parents=True, exist_ok=True)
     if r["type"] == "SKILL":
-        (target / "SKILL.md").write_text(r.get("content_md") or "")
+        (target / "SKILL.md").write_text((r.get("content_md") or "") + attachments_md(r))
         print(f"wrote {target / 'SKILL.md'}")
         if r.get("file_url"):
             print(f"{DIM}package: {r['file_url']} (download manually or via the dashboard){RESET}")
@@ -192,8 +209,11 @@ def cmd_pull(args) -> None:
         cfg = r.get("config_json") or "{}"
         (target / "mcp-config.json").write_text(cfg)
         print(f"wrote {target / 'mcp-config.json'}")
+        if r.get("attachments"):
+            (target / "README.md").write_text((r.get("content_md") or "") + attachments_md(r))
+            print(f"wrote {target / 'README.md'}")
     else:
-        (target / f"{slug}.md").write_text(r.get("content_md") or "")
+        (target / f"{slug}.md").write_text((r.get("content_md") or "") + attachments_md(r))
         print(f"wrote {target / (slug + '.md')}")
 
 

@@ -77,6 +77,7 @@ def resource_out(db: Session, r: Resource, me: User | None) -> dict:
         "file_url": r.file_url,
         "version": r.version,
         "tags": r.tags or [],
+        "attachments": r.attachments or [],
         "scope_type": r.scope_type,
         "scope_id": r.scope_id,
         "author_id": r.author_id,

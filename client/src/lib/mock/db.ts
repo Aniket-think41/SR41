@@ -415,6 +415,11 @@ The on-call playbook: severities, comms, and escalation paths.
     file_url: null,
     version: "1.2.0",
     tags: ["sre", "process", "on-call"],
+    attachments: [
+      { kind: "video", url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", title: "Incident response walkthrough", caption: "15-min screen recording of a SEV2 drill." },
+      { kind: "link", url: "https://www.atlassian.com/incident-management/handbook", title: "Atlassian Incident Handbook", caption: "Reference we based our severities on." },
+      { kind: "file", url: "https://cdn.skillshare.think41.com/docs/postmortem-template.md", title: "postmortem-template.md", caption: null },
+    ],
     scope_type: "ORG",
     scope_id: "org-think41",
     author_id: "u-think41",

@@ -15,9 +15,10 @@ import { ArrowLeft, ArrowRight, Loader2, Upload, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/api/http";
 import { qk, useCurrentOrg, useInvalidateResources, useTerms } from "@/lib/hooks";
-import type { Resource, ResourceType, ScopeType } from "@/lib/types";
+import type { Attachment, Resource, ResourceType, ScopeType } from "@/lib/types";
 import { TYPE_META, SCOPE_META } from "@/lib/utils";
 import { MarkdownEditor } from "./MarkdownEditor";
+import { AttachmentsEditor } from "./AttachmentsEditor";
 import { useToast } from "./Toast";
 
 const schema = z.object({
@@ -70,6 +71,7 @@ export function ResourceForm({
   const [serverUrl, setServerUrl] = useState(resource?.server_url ?? "");
   const [configJson, setConfigJson] = useState(resource?.config_json ?? "");
   const [fileUrl, setFileUrl] = useState<string | null>(resource?.file_url ?? null);
+  const [attachments, setAttachments] = useState<Attachment[]>(resource?.attachments ?? []);
   const [uploading, setUploading] = useState(false);
 
   // Scope options: current context + parents (override allowed, spec §4.3)
@@ -130,6 +132,10 @@ export function ResourceForm({
         description: details.description ?? "",
         version: details.version || "0.1.0",
         tags,
+        // keep only attachments with a url; trim empty title/caption to null
+        attachments: attachments
+          .filter((a) => a.url.trim())
+          .map((a) => ({ kind: a.kind, url: a.url.trim(), title: a.title?.trim() || null, caption: a.caption?.trim() || null })),
         content_md: contentMd,
         server_url: type === "MCP" ? serverUrl : undefined,
         config_json: type === "MCP" ? configJson : undefined,
@@ -350,6 +356,14 @@ export function ResourceForm({
                 </div>
               </>
             )}
+
+            {/* Typed media — applies to every resource type (hybrid model) */}
+            <div>
+              <label className="field-label">
+                Attachments <span className="font-normal text-muted">(links, images, video, files — optional)</span>
+              </label>
+              <AttachmentsEditor value={attachments} onChange={setAttachments} />
+            </div>
           </div>
         )}
       </div>

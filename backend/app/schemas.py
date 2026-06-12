@@ -1,6 +1,18 @@
 """Request bodies — names match what the client sends (lib/api/index.ts)."""
 
+from typing import Literal
+
 from pydantic import BaseModel, EmailStr, Field
+
+
+class Attachment(BaseModel):
+    """A typed media item attached to a resource (hybrid content model).
+    content_md stays the canonical prose; attachments add structured media."""
+
+    kind: Literal["link", "image", "video", "file"]
+    url: str = Field(min_length=1, max_length=2000)
+    title: str | None = Field(default=None, max_length=200)
+    caption: str | None = Field(default=None, max_length=500)
 
 
 class SignupIn(BaseModel):
@@ -101,6 +113,7 @@ class ResourceCreate(BaseModel):
     file_url: str | None = None
     version: str = "0.1.0"
     tags: list[str] = []
+    attachments: list[Attachment] = []
     scope_type: str  # ORG | PROJECT | POD | PUBLIC
     scope_id: str | None = None
 
@@ -114,6 +127,7 @@ class ResourcePatch(BaseModel):
     file_url: str | None = None
     version: str | None = None
     tags: list[str] | None = None
+    attachments: list[Attachment] | None = None
     scope_type: str | None = None
     scope_id: str | None = None
 

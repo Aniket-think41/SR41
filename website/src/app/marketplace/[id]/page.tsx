@@ -10,6 +10,7 @@ import {
   initialsOf,
 } from "@/lib/data";
 import { addToOrg, saveResource } from "@/lib/redirects";
+import { Attachments } from "@/components/Attachments";
 
 export const revalidate = 60;
 
@@ -86,6 +87,9 @@ export default async function ResourceDetail({
             <h2 className="kicker">Overview</h2>
             <p className="mt-4 text-lg leading-relaxed text-body">{r.description}</p>
           </div>
+
+          <Attachments items={r.attachments} />
+
 
           <div className="mt-8">
             <h2 className="kicker">Tags</h2>

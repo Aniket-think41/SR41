@@ -103,6 +103,7 @@ resources {
   id, type: SKILL|MCP|NOTE, title, description, content_md,
   server_url, config_json,      -- MCP structured fields (§8)
   file_url, version, tags[],
+  attachments[],                -- hybrid content model (see below)
   scope_type: ORG|PROJECT|POD|PUBLIC, scope_id,
   author_id, is_public, stars_count, installs_count, created_at, updated_at
 }
@@ -111,6 +112,11 @@ resources {
 - `scope_type` + `scope_id` together define where a resource lives.
 - `is_public`: true when published to public marketplace.
 - `file_url`: S3 URL for uploaded skill packages.
+- `attachments`: typed media (hybrid content model). JSON array of
+  `{ kind: link|image|video|file, url, title?, caption? }`. `content_md` stays
+  the canonical prose; attachments add structured media. Consumers that are
+  markdown-only (CLI `pull`, MCP, website) render attachments as a trailing
+  `## Resources` section / media block, so nothing downstream breaks.
 
 ### 2.9 Resource Star
 

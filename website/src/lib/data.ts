@@ -18,6 +18,15 @@ const API_BASE = (process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "").
 
 export type ResourceType = "SKILL" | "MCP" | "NOTE";
 
+export type AttachmentKind = "link" | "image" | "video" | "file";
+
+export interface Attachment {
+  kind: AttachmentKind;
+  url: string;
+  title?: string | null;
+  caption?: string | null;
+}
+
 /** Mirrors backend `user_out` (serialize.py). */
 export interface Publisher {
   id: string;
@@ -46,6 +55,7 @@ export interface Resource {
   file_url?: string | null;
   version: string;
   tags: string[];
+  attachments?: Attachment[];
   scope_type?: string;
   scope_id?: string | null;
   author_id: string;
@@ -145,6 +155,11 @@ const SEED: Resource[] = [
     description:
       "A structured note capturing how the team runs incidents — severity definitions, the comms cadence, escalation contacts, and post-mortem template. Shared at the org level so every pod inherits the same playbook automatically.",
     version: "1.2.0", tags: ["sre", "process", "on-call"],
+    attachments: [
+      { kind: "video", url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", title: "Incident response walkthrough", caption: "15-min screen recording of a SEV2 drill." },
+      { kind: "link", url: "https://www.atlassian.com/incident-management/handbook", title: "Atlassian Incident Handbook", caption: "Reference we based our severities on." },
+      { kind: "file", url: "https://cdn.skillshare.think41.com/docs/postmortem-template.md", title: "postmortem-template.md", caption: null },
+    ] as Attachment[],
     author_id: "u-think41", stars_count: 388, installs_count: 4300, updated_at: "2026-05-11",
   },
   {

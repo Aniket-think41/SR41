@@ -73,7 +73,7 @@ export default async function PublisherProfile({
                 </p>
               </div>
             </div>
-            <Link href={followPublisher(p.username)} className="btn btn-lime">Follow →</Link>
+            <Link href={followPublisher()} className="btn btn-lime">Follow →</Link>
           </div>
 
           <p className="mt-8 max-w-2xl text-lg text-white/80">{p.bio}</p>

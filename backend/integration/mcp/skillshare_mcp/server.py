@@ -102,6 +102,7 @@ def get_resource(resource_id: str) -> dict:
             "server_url": r.get("server_url"),
             "config_json": r.get("config_json"),
             "file_url": r.get("file_url"),
+            "attachments": r.get("attachments") or [],
         }
     )
     return out

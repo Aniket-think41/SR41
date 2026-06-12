@@ -129,6 +129,9 @@ class Resource(Base):
     file_url: Mapped[str | None] = mapped_column(String, nullable=True)
     version: Mapped[str] = mapped_column(String, default="0.1.0")
     tags: Mapped[list] = mapped_column(JSON, default=list)
+    # Typed media attached to any resource: list of
+    # {kind: link|image|video|file, url, title?, caption?} (hybrid content model)
+    attachments: Mapped[list] = mapped_column(JSON, default=list)
     scope_type: Mapped[str] = mapped_column(String, index=True)  # ORG | PROJECT | POD | PUBLIC
     scope_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     author_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)

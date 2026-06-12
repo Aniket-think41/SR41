@@ -18,6 +18,7 @@ import { useUi } from "@/lib/store";
 import type { Resource } from "@/lib/types";
 import { fmt, longDate, SCOPE_META } from "@/lib/utils";
 import { Markdown } from "@/lib/markdown";
+import { AttachmentsView } from "./AttachmentsView";
 import { Avatar } from "./Avatar";
 import { ScopeBadge, TypeBadge } from "./badges";
 import { useToast } from "./Toast";
@@ -166,6 +167,7 @@ function DetailView({ resource: initial, onClose }: { resource: Resource; onClos
             <Markdown source={r.content_md || "_No content yet._"} />
           </div>
         )}
+        <AttachmentsView items={r.attachments} />
       </div>
 
       {/* Action bar */}

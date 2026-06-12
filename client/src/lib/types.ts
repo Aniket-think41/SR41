@@ -120,12 +120,24 @@ export interface PodMember {
   user?: User;
 }
 
+export type AttachmentKind = "link" | "image" | "video" | "file";
+
+/** Typed media attached to a resource (hybrid content model). content_md
+ *  stays the canonical prose; attachments add structured media items. */
+export interface Attachment {
+  kind: AttachmentKind;
+  url: string;
+  title?: string | null;
+  caption?: string | null;
+}
+
 export interface Resource {
   id: string;
   type: ResourceType;
   title: string;
   description: string;
   content_md: string;
+  attachments?: Attachment[];
   /** MCP-only structured fields (serialized into content for v1 API parity) */
   server_url?: string;
   config_json?: string;
