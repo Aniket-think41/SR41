@@ -21,14 +21,17 @@ export const signIn = () => login;
 /** "Go to Dashboard" — dashboard decides onboarding vs. last-org. */
 export const goToDashboard = () => SITE.dashboard.base;
 
+// Post-login `redirect` targets are paths on the DASHBOARD app (the client),
+// not the marketing site — so they must be valid client routes.
+
 /** Marketplace star hover — "Sign in to save". */
 export const saveResource = (id: string) =>
-  `${login}?redirect=${encodeURIComponent(`/marketplace/${id}`)}`;
+  `${login}?redirect=${encodeURIComponent(`/dashboard/marketplace/${id}`)}`;
 
 /** Resource detail — "Add to my org". */
 export const addToOrg = (id: string) =>
   `${login}?redirect=${encodeURIComponent(`/dashboard/import/${id}`)}`;
 
-/** Publisher page — "Follow". */
-export const followPublisher = (username: string) =>
-  `${login}?redirect=${encodeURIComponent(`/publishers/${username}`)}`;
+/** Publisher page — "Follow" (no public publisher page in the dashboard yet). */
+export const followPublisher = (_username: string) =>
+  `${login}?redirect=${encodeURIComponent(`/dashboard/marketplace`)}`;
