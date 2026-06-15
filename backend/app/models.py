@@ -181,6 +181,30 @@ class Activity(Base):
     user: Mapped[User] = relationship(lazy="joined")
 
 
+class Notification(Base):
+    """Per-recipient notification, fanned out from an Activity to the members of
+    the scope it happened in (F1). One row per recipient; `read_at` tracks unread
+    state. The actor is never a recipient of their own action."""
+
+    __tablename__ = "notifications"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("ntf"))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)  # recipient
+    actor_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
+    org_id: Mapped[str] = mapped_column(String, ForeignKey("organizations.id"), index=True)
+    scope_type: Mapped[str] = mapped_column(String)  # ORG | PROJECT | POD
+    scope_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    verb: Mapped[str] = mapped_column(String)  # created | published
+    object_type: Mapped[str] = mapped_column(String)  # resource | …
+    object_id: Mapped[str] = mapped_column(String)
+    object_title: Mapped[str] = mapped_column(String)
+    meta: Mapped[str | None] = mapped_column(String, nullable=True)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+    actor: Mapped[User] = relationship(lazy="joined", foreign_keys=[actor_id])
+
+
 class OrgFeature(Base):
     """Per-org feature override (BACKEND_SPEC §2.12). Catalog lives in code."""
 

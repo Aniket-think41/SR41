@@ -369,6 +369,32 @@ def cmd_import(args) -> None:
     print(f"imported {BOLD}{r['title']}{RESET} into {args.org} [{r['id']}]")
 
 
+_VERB_GLYPH = {"created": "✦", "published": "🌐"}
+
+
+def cmd_inbox(args) -> None:
+    """Show notifications for resources added/published in scopes you belong to
+    (F1). Each carries a ready-to-run install command."""
+    params = {"limit": args.limit}
+    if args.unread:
+        params["unread_only"] = "true"
+    rows = request("GET", "/api/notifications", params=params)
+    if not rows:
+        print(f"{DIM}inbox empty{RESET}")
+    else:
+        for n in rows:
+            actor = (n.get("actor") or {}).get("username", "?")
+            when = str(n.get("created_at") or "")[:16].replace("T", " ")
+            dot = "" if n.get("read_at") else f"{BOLD}●{RESET} "
+            glyph = _VERB_GLYPH.get(n["verb"], "·")
+            print(f"{dot}{glyph} {BOLD}{n['object_title']}{RESET} {DIM}{n['verb']} by @{actor} · {when}{RESET}")
+            if n.get("install_command"):
+                print(f"    {DIM}$ {n['install_command']}{RESET}")
+    if args.mark_read and rows:
+        request("POST", "/api/notifications/read", body={"all": True})
+        print(f"{DIM}— marked {len(rows)} read{RESET}")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="skillshare", description="SkillShare registry CLI")
     sub = p.add_subparsers(dest="command", required=True)
@@ -426,6 +452,12 @@ def main() -> None:
     sp.add_argument("--video", action="append", help="attach a video — local file (uploaded) or URL (repeatable)")
     sp.add_argument("--attach", action="append", help="attach a file — local file (uploaded) or URL (repeatable)")
     sp.set_defaults(fn=cmd_add_note)
+
+    sp = sub.add_parser("inbox", help="notifications: resources added/published in your scopes")
+    sp.add_argument("--unread", action="store_true", help="only unread")
+    sp.add_argument("--mark-read", action="store_true", help="mark everything read after listing")
+    sp.add_argument("--limit", type=int, default=30)
+    sp.set_defaults(fn=cmd_inbox)
 
     sp = sub.add_parser("star", help="star a resource")
     sp.add_argument("id")

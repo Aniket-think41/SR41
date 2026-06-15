@@ -30,6 +30,8 @@ export const qk = {
   publicResources: (q?: ResourceQuery) => ["public", "resources", q ?? {}] as const,
   publicResource: (id: string) => ["public", "resource", id] as const,
   profile: (username: string) => ["profile", username] as const,
+  notifications: (unreadOnly = false) => ["notifications", { unreadOnly }] as const,
+  notificationsUnread: ["notifications", "unread_count"] as const,
 };
 
 /** Current signed-in user; null when logged out. */

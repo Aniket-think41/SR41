@@ -362,6 +362,41 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
       .map((a) => ({ ...a, user: db.users.find((u) => u.id === a.user_id) }));
   }],
 
+  /* ---- notifications (F1) ---- */
+  // Single-user mock: the seeded inbox belongs to the demo user; the real
+  // backend filters per recipient. Here we just require auth and serve it.
+  ["GET", "/api/notifications", (_p, _b, q, db) => {
+    currentUser(db);
+    const unreadOnly = q.get("unread_only") === "true";
+    const limit = Number(q.get("limit") ?? 30);
+    return (db.notifications ?? [])
+      .filter((n) => (unreadOnly ? !n.read_at : true))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, limit)
+      .map((n) => ({ ...n, actor: db.users.find((u) => u.id === n.actor_id) }));
+  }],
+
+  ["GET", "/api/notifications/unread_count", (_p, _b, _q, db) => {
+    currentUser(db);
+    return { count: (db.notifications ?? []).filter((n) => !n.read_at).length };
+  }],
+
+  ["POST", "/api/notifications/read", (_p, body, _q, db) => {
+    currentUser(db);
+    const all = body.all === true;
+    const ids = Array.isArray(body.ids) ? (body.ids as string[]) : [];
+    if (!all && ids.length === 0) throw new HttpError(422, "VALIDATION_ERROR", "Pass ids or all:true");
+    let marked = 0;
+    for (const n of db.notifications ?? []) {
+      if (!n.read_at && (all || ids.includes(n.id))) {
+        n.read_at = now();
+        marked += 1;
+      }
+    }
+    saveDb();
+    return { ok: true, marked };
+  }],
+
   /* ---- 3.3 Projects ---- */
   ["GET", "/api/orgs/:slug/projects", (p, _b, _q, db) => {
     const org = orgBySlug(db, p.slug);

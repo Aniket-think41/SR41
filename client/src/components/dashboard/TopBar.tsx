@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { Search, Bell, ChevronRight } from "lucide-react";
+import { Search, ChevronRight } from "lucide-react";
 import { api } from "@/lib/api";
 import { qk, useCurrentOrg, useFeature, useSession } from "@/lib/hooks";
 import { useUi } from "@/lib/store";
 import { Avatar } from "../Avatar";
+import { NotificationBell } from "./NotificationBell";
 
 /** Breadcrumb: Org › Project › Pod — clickable (frontend spec §3.2). */
 function Breadcrumb() {
@@ -79,13 +80,7 @@ export function TopBar() {
           </button>
         )}
 
-        <button
-          className="relative flex h-9 w-9 items-center justify-center rounded-full border border-line text-muted transition hover:border-primary hover:text-primary"
-          title="Notifications (coming soon)"
-          aria-label="Notifications"
-        >
-          <Bell className="h-4 w-4" />
-        </button>
+        <NotificationBell />
 
         <Link href="/dashboard/profile" aria-label="My profile">
           <Avatar name={user?.display_name ?? "?"} size="sm" />

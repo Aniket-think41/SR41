@@ -48,12 +48,18 @@ def _require_scope_write(db: Session, scope_type: str, scope_id: str | None, use
         require_pod_access(db, pod_or_404(db, scope_id or ""), user)
 
 
-def _log_resource(db: Session, user: User, r: Resource, verb: str, meta: str | None = None) -> None:
+def _log_resource(
+    db: Session, user: User, r: Resource, verb: str, meta: str | None = None,
+    notify_scope: str | None = None,
+) -> None:
     org = scope_org(db, r)
     if org:
+        # Created-in-a-pod notifies pod members; publish notifies the whole org.
+        scope_type = notify_scope or r.scope_type
         log_activity(
             db, user_id=user.id, org_id=org.id, verb=verb,
             object_type="resource", object_id=r.id, object_title=r.title, meta=meta,
+            scope_type=scope_type, scope_id=r.scope_id,
         )
 
 
@@ -198,7 +204,7 @@ def publish(resource_id: str, user: User = Depends(get_current_user), db: Sessio
     if not feature_enabled(db, scope_org(db, r), "publishing"):
         raise forbidden("Marketplace publishing is disabled for this organization")
     r.is_public = True
-    _log_resource(db, user, r, "published")
+    _log_resource(db, user, r, "published", notify_scope="ORG")
     db.commit()
     return resource_out(db, r, user)
 

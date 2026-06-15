@@ -17,6 +17,11 @@ skillshare login                 # email + password → mints & stores a PAT
 skillshare whoami
 skillshare orgs
 
+# inbox — resources added/published in your scopes (org / your projects / your pods)
+skillshare inbox                 # newest first; ● marks unread, shows install command
+skillshare inbox --unread        # only unread
+skillshare inbox --mark-read     # list, then clear them
+
 # marketplace (works logged-out too)
 skillshare search "code review" --type skill
 skillshare get pr-reviewer

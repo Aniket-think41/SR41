@@ -140,3 +140,10 @@ class UploadIn(BaseModel):
 
 class ImportIn(BaseModel):
     org_slug: str
+
+
+class NotificationReadIn(BaseModel):
+    """Mark notifications read: pass explicit ids, or all=true to clear the inbox."""
+
+    ids: list[str] = []
+    all: bool = False

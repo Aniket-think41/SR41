@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from .models import (
     Activity,
     Invitation,
+    Notification,
     Organization,
     OrgMember,
     Pod,
@@ -182,6 +183,98 @@ def activity_out(a: Activity) -> dict:
     }
 
 
+# Verbs that fan out into per-user notifications (F1). Kept narrow on purpose:
+# "something new/shared appeared in a scope I belong to". Stars/joins/invites
+# stay out of the inbox to avoid noise.
+NOTIFY_VERBS = {"created", "published"}
+
+
+def _notification_recipients(db: Session, *, org_id: str, scope_type: str, scope_id: str | None) -> set[str]:
+    """User ids to notify for an event in (scope_type, scope_id). Membership-based
+    (F1 decision): POD → pod members, PROJECT → project members, else org members."""
+    if scope_type == "POD" and scope_id:
+        rows = db.query(PodMember.user_id).filter(PodMember.pod_id == scope_id).all()
+    elif scope_type == "PROJECT" and scope_id:
+        rows = db.query(ProjectMember.user_id).filter(ProjectMember.project_id == scope_id).all()
+    else:  # ORG / PUBLIC publish → the whole owning org
+        rows = db.query(OrgMember.user_id).filter(OrgMember.org_id == org_id).all()
+    return {r[0] for r in rows}
+
+
+def _fan_out_notifications(
+    db: Session,
+    *,
+    actor_id: str,
+    org_id: str,
+    verb: str,
+    object_type: str,
+    object_id: str,
+    object_title: str,
+    meta: str | None,
+    scope_type: str,
+    scope_id: str | None,
+) -> None:
+    # Only resource events (skills/MCPs/notes) reach the inbox — not pod/project
+    # creation, invites, or joins.
+    if verb not in NOTIFY_VERBS or object_type != "resource":
+        return
+    # Gate on the org's feature flag (imported lazily to avoid an import cycle).
+    from .features import feature_enabled
+
+    org = db.get(Organization, org_id)
+    if not org or not feature_enabled(db, org, "notifications"):
+        return
+    recipients = _notification_recipients(db, org_id=org_id, scope_type=scope_type, scope_id=scope_id)
+    recipients.discard(actor_id)
+    for uid in recipients:
+        db.add(
+            Notification(
+                user_id=uid,
+                actor_id=actor_id,
+                org_id=org_id,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                verb=verb,
+                object_type=object_type,
+                object_id=object_id,
+                object_title=object_title,
+                meta=meta,
+            )
+        )
+
+
+def notification_out(db: Session, n: Notification) -> dict:
+    """Serialize a notification, attaching a ready-to-run install hint + a
+    dashboard deep link so CLI/MCP/web can act on it directly."""
+    deep_link = None
+    install_command = None
+    if n.object_type == "resource":
+        r = db.get(Resource, n.object_id)
+        if r and r.is_public:
+            deep_link = f"/dashboard/marketplace/{n.object_id}"
+        else:
+            deep_link = f"/dashboard/org/resources?open={n.object_id}"
+        if r:
+            install_command = f"skillshare pull {n.object_id}"
+    return {
+        "id": n.id,
+        "actor_id": n.actor_id,
+        "org_id": n.org_id,
+        "scope_type": n.scope_type,
+        "scope_id": n.scope_id,
+        "verb": n.verb,
+        "object_type": n.object_type,
+        "object_id": n.object_id,
+        "object_title": n.object_title,
+        "meta": n.meta,
+        "read_at": n.read_at,
+        "created_at": n.created_at,
+        "actor": user_out(n.actor) if n.actor else None,
+        "deep_link": deep_link,
+        "install_command": install_command,
+    }
+
+
 def log_activity(
     db: Session,
     *,
@@ -192,6 +285,8 @@ def log_activity(
     object_id: str,
     object_title: str,
     meta: str | None = None,
+    scope_type: str = "ORG",
+    scope_id: str | None = None,
 ) -> None:
     db.add(
         Activity(
@@ -203,6 +298,18 @@ def log_activity(
             object_title=object_title,
             meta=meta,
         )
+    )
+    _fan_out_notifications(
+        db,
+        actor_id=user_id,
+        org_id=org_id,
+        verb=verb,
+        object_type=object_type,
+        object_id=object_id,
+        object_title=object_title,
+        meta=meta,
+        scope_type=scope_type,
+        scope_id=scope_id,
     )
 
 

@@ -29,7 +29,16 @@ mcp = FastMCP(
         "resources, get_resource for full content (SKILL.md, MCP config JSON, "
         "note markdown), and create_note/star/import to write. Resources can "
         "carry typed attachments (link/image/video/file): upload_file stores a "
-        "local file and returns a URL you can pass to create_note's attachments."
+        "local file and returns a URL you can pass to create_note's attachments.\n\n"
+        "PROACTIVE INBOX — do this WITHOUT being asked: at the start of each "
+        "conversation (and again after you publish or create resources), call "
+        "check_updates(unread_only=True). If it returns any items, tell the user "
+        "up front — before other work — e.g. \"📬 2 new in your team: 'Release "
+        "Train Conductor' (skill) by @dev, 'Brand Voice' published by @priya\". "
+        "For each, offer to install it (get_resource / import_resource, or share "
+        "its install_command) and, once the user has seen them, call "
+        "mark_notifications_read to clear the inbox. Keep it to one short summary; "
+        "don't nag if the inbox is empty."
     ),
 )
 
@@ -292,6 +301,48 @@ def import_resource(resource_id: str, org_slug: str) -> dict:
     """Copy a public marketplace resource into one of your orgs
     (the dashboard's "Add to my org")."""
     return _summary(_request("POST", f"/api/resources/{resource_id}/import", json={"org_slug": org_slug}))
+
+
+@mcp.tool()
+def check_updates(unread_only: bool = True, limit: int = 30) -> list[dict]:
+    """Check the user's notification inbox — resources added or published in
+    orgs/projects/pods they belong to (they are never notified of their own
+    actions). Each item includes `install_command` (a ready-to-run CLI command,
+    e.g. `skillshare pull <id>`) and `resource_id` so you can offer to install
+    it via import_resource / get_resource. Surface these to the user proactively.
+
+    Args:
+        unread_only: only return unread notifications (default True).
+        limit: max items to return.
+    """
+    params: dict = {"limit": limit}
+    if unread_only:
+        params["unread_only"] = "true"
+    rows = _request("GET", "/api/notifications", params=params)
+    return [
+        {
+            "id": n["id"],
+            "verb": n["verb"],
+            "title": n["object_title"],
+            "resource_id": n["object_id"] if n["object_type"] == "resource" else None,
+            "actor": (n.get("actor") or {}).get("username"),
+            "read": n.get("read_at") is not None,
+            "created_at": str(n.get("created_at")),
+            "install_command": n.get("install_command"),
+            "deep_link": n.get("deep_link"),
+        }
+        for n in rows
+    ]
+
+
+@mcp.tool()
+def mark_notifications_read(notification_ids: list[str] | None = None, mark_all: bool = False) -> dict:
+    """Mark notifications read. Pass `notification_ids` to clear specific ones,
+    or `mark_all=True` to clear the whole inbox."""
+    if not mark_all and not notification_ids:
+        raise SkillShareError("Provide notification_ids or mark_all=True")
+    body = {"all": True} if mark_all else {"ids": notification_ids}
+    return _request("POST", "/api/notifications/read", json=body)
 
 
 def main() -> None:

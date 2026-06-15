@@ -8,6 +8,7 @@ import type {
   Activity,
   AuthSession,
   Invitation,
+  Notification,
   OrgFeature,
   PlanTier,
   Terminology,
@@ -155,6 +156,20 @@ export const api = {
   uploadFile: (file: File, kind: "image" | "video" | "file") => uploadFile(file, kind),
   importResource: (id: string, orgSlug: string) =>
     request<Resource>("POST", `/api/resources/${id}/import`, { org_slug: orgSlug }),
+
+  /* ---- notifications (F1) ---- */
+  notifications: (opts: { unreadOnly?: boolean; limit?: number } = {}) =>
+    request<Notification[]>(
+      "GET",
+      `/api/notifications${qs({
+        unread_only: opts.unreadOnly ? "true" : undefined,
+        limit: opts.limit ? String(opts.limit) : undefined,
+      })}`
+    ),
+  notificationsUnreadCount: () =>
+    request<{ count: number }>("GET", "/api/notifications/unread_count"),
+  markNotificationsRead: (body: { ids?: string[]; all?: boolean }) =>
+    request<{ ok: true; marked: number }>("POST", "/api/notifications/read", body),
 
   /* ---- public marketplace ---- */
   publicResources: (query: ResourceQuery = {}) =>

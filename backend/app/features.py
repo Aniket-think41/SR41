@@ -39,6 +39,13 @@ CATALOG: list[dict] = [
         "default_enabled": True,
     },
     {
+        "key": "notifications",
+        "name": "Notifications",
+        "description": "Notify members when resources are added or published in scopes they belong to (inbox in CLI, MCP, and the dashboard bell).",
+        "premium": False,
+        "default_enabled": True,
+    },
+    {
         "key": "custom-terminology",
         "name": "Custom terminology",
         "description": "Rename Projects and Pods to match how your org works — e.g. call pods “Teams”.",

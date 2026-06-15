@@ -202,3 +202,22 @@ export interface Activity {
   created_at: string;
   user?: User;
 }
+
+/** Notification inbox (F1) — resources added/published in scopes you belong to. */
+export interface Notification {
+  id: string;
+  actor_id: string;
+  org_id: string;
+  scope_type: ScopeType;
+  scope_id: string | null;
+  verb: "created" | "published";
+  object_type: "resource";
+  object_id: string;
+  object_title: string;
+  meta?: string | null;
+  read_at: string | null;
+  created_at: string;
+  actor?: User;
+  deep_link?: string | null;
+  install_command?: string | null;
+}

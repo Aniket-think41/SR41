@@ -68,6 +68,12 @@ claude mcp add skillshare \
 | `upload_file(path, kind)` | ✓ | store a local file (image/video/file) → returns its URL for `attachments` |
 | `star_resource(resource_id)` | ✓ | star |
 | `import_resource(resource_id, org_slug)` | ✓ | "Add to my org" |
+| `check_updates(unread_only, limit)` | ✓ | inbox: resources added/published in your scopes (each with an `install_command` + `resource_id`) |
+| `mark_notifications_read(notification_ids, mark_all)` | ✓ | clear inbox items |
+
+The server instructions tell the agent to call `check_updates`
+**proactively at the start of a conversation** and surface anything new before
+other work — so you hear about new team skills / MCPs / notes without asking.
 
 All permissions are enforced server-side by the API (spec §4.2) — the MCP
 server holds no logic of its own and can only do what the token's user can.

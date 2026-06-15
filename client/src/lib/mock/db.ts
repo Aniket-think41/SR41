@@ -11,6 +11,7 @@ import type {
   Activity,
   FeatureFlag,
   Invitation,
+  Notification,
   Organization,
   OrgMember,
   Pod,
@@ -55,6 +56,13 @@ export const FEATURES: FeatureFlag[] = [
     default_enabled: true,
   },
   {
+    key: "notifications",
+    name: "Notifications",
+    description: "Notify members when resources are added or published in scopes they belong to (inbox in CLI, MCP, and the dashboard bell).",
+    premium: false,
+    default_enabled: true,
+  },
+  {
     key: "custom-terminology",
     name: "Custom terminology",
     description: "Rename Projects and Pods to match how your org works — e.g. call pods “Teams”.",
@@ -75,13 +83,14 @@ export interface Db {
   resource_stars: { id: string; resource_id: string; user_id: string }[];
   invitations: Invitation[];
   activities: Activity[];
+  notifications: Notification[];
   /** per-org feature overrides (absent key → catalog default) */
   org_features: { id: string; org_id: string; key: string; enabled: boolean }[];
   /** id of the signed-in user, null when logged out */
   session_user_id: string | null;
 }
 
-const STORAGE_KEY = "skillshare.mockdb.v2"; // v2: feature flags + org plan/terminology
+const STORAGE_KEY = "skillshare.mockdb.v3"; // v3: notification inbox (F1)
 
 const t = (iso: string) => new Date(iso).toISOString();
 
@@ -754,6 +763,14 @@ const seedActivities: Activity[] = [
   { id: "act-7", user_id: "u-think41", org_id: "org-think41", verb: "published", object_type: "resource", object_id: "brand-voice", object_title: "Brand Voice", created_at: t("2026-05-06T10:00:00Z") },
 ];
 
+// Notifications addressed to the demo user (u-aniket) — things teammates added
+// or published in scopes aniket belongs to. Mirrors the backend's fan-out (F1).
+const seedNotifications: Notification[] = [
+  { id: "ntf-1", actor_id: "u-priya", org_id: "org-think41", scope_type: "ORG", scope_id: "org-think41", verb: "published", object_type: "resource", object_id: "brand-voice", object_title: "Brand Voice", read_at: null, created_at: t("2026-06-14T09:30:00Z"), deep_link: "/dashboard/marketplace/brand-voice", install_command: "skillshare pull brand-voice" },
+  { id: "ntf-2", actor_id: "u-dev", org_id: "org-think41", scope_type: "POD", scope_id: "pod-dx", verb: "created", object_type: "resource", object_id: "res-release-skill", object_title: "Release Train Conductor", read_at: null, created_at: t("2026-06-12T08:05:00Z"), deep_link: "/dashboard/org/resources?open=res-release-skill", install_command: "skillshare pull res-release-skill" },
+  { id: "ntf-3", actor_id: "u-priya", org_id: "org-think41", scope_type: "ORG", scope_id: "org-think41", verb: "created", object_type: "resource", object_id: "res-component-gen", object_title: "Component Generator", read_at: t("2026-06-10T12:00:00Z"), created_at: t("2026-06-09T11:00:00Z"), deep_link: "/dashboard/org/resources?open=res-component-gen", install_command: "skillshare pull res-component-gen" },
+];
+
 const seedInvitations: Invitation[] = [
   {
     id: "inv-1",
@@ -779,6 +796,7 @@ export function seed(): Db {
     resource_stars: structuredClone(seedStars),
     invitations: structuredClone(seedInvitations),
     activities: structuredClone(seedActivities),
+    notifications: structuredClone(seedNotifications),
     org_features: [],
     session_user_id: null,
   };
