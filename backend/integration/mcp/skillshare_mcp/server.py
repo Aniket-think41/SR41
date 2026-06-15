@@ -18,6 +18,11 @@ from typing import Any
 import httpx
 from mcp.server.fastmcp import FastMCP
 
+# Shared local-scan core (detectors, fingerprint, redaction) lives in the CLI
+# package so CLI and MCP stay in lockstep (declared as a dependency in pyproject).
+from skillshare_cli.local.detect import DETECTORS
+from skillshare_cli.local.scan import reconcile, redacted_payload, scan
+
 API_URL = os.environ.get("SKILLSHARE_API_URL", "http://localhost:8400").rstrip("/")
 TOKEN = os.environ.get("SKILLSHARE_TOKEN", "")
 
@@ -38,7 +43,13 @@ mcp = FastMCP(
         "For each, offer to install it (get_resource / import_resource, or share "
         "its install_command) and, once the user has seen them, call "
         "mark_notifications_read to clear the inbox. Keep it to one short summary; "
-        "don't nag if the inbox is empty."
+        "don't nag if the inbox is empty.\n\n"
+        "CONTRIBUTE BACK — when the user mentions a local skill/MCP/note, has just "
+        "built one, or asks what they could share, call scan_local to find local "
+        "artifacts not yet on the platform and offer to push the NEW ones. Always "
+        "show the redacted preview (secrets are stripped automatically) and get "
+        "explicit approval before push_artifact; if they decline, call "
+        "dismiss_artifact so it isn't suggested again."
     ),
 )
 
@@ -343,6 +354,110 @@ def mark_notifications_read(notification_ids: list[str] | None = None, mark_all:
         raise SkillShareError("Provide notification_ids or mark_all=True")
     body = {"all": True} if mark_all else {"ids": notification_ids}
     return _request("POST", "/api/notifications/read", json=body)
+
+
+def _reconciled(sources: list[str] | None, notes_dir: str, include_dismissed: bool) -> list[dict]:
+    cands = scan(sources=sources or list(DETECTORS), notes_dir=notes_dir or None)
+    try:
+        state = _request("GET", "/api/local-state")
+    except SkillShareError:
+        state = []
+    rows = reconcile(cands, state)
+    if not include_dismissed:
+        rows = [r for r in rows if r["status"] != "dismissed"]
+    return rows
+
+
+@mcp.tool()
+def scan_local(sources: list[str] | None = None, notes_dir: str = "", include_dismissed: bool = False) -> list[dict]:
+    """Scan the local machine for skills, MCP servers, and notes that may not be
+    on SkillShare yet, and reconcile them with what's already pushed/dismissed.
+
+    Use this to proactively offer to back up / share the user's local artifacts.
+    Each candidate includes its `status` (new | pushed | dismissed), a content
+    `fingerprint`, the secret-`redaction` findings, and a redacted `preview` of
+    exactly what would be uploaded. To contribute one, draft a good title/
+    description/tags from the preview and call push_artifact; if the user says no,
+    call dismiss_artifact so it isn't suggested again.
+
+    Args:
+        sources: limit to detectors (e.g. ["claude-code", "cursor"]); default all.
+        notes_dir: also scan this directory's *.md files as notes.
+        include_dismissed: include artifacts the user previously dismissed.
+    """
+    rows = _reconciled(sources, notes_dir, include_dismissed)
+    out = []
+    for r in rows:
+        c = r["candidate"]
+        payload, findings = redacted_payload(c)
+        out.append({
+            "fingerprint": r["fingerprint"],
+            "status": r["status"],
+            "kind": c.kind,
+            "name": c.name,
+            "source": c.source,
+            "title": c.title,
+            "description": c.description,
+            "path": c.path,
+            "resource_id": r["resource_id"],
+            "redaction": findings,
+            "preview": {k: payload.get(k) for k in ("content_md", "config_json", "server_url") if payload.get(k)},
+        })
+    return out
+
+
+@mcp.tool()
+def push_artifact(
+    fingerprint: str,
+    org_slug: str = "",
+    pod_id: str = "",
+    title: str = "",
+    description: str = "",
+    tags: list[str] | None = None,
+) -> dict:
+    """Push a local artifact (found via scan_local) to SkillShare. Secrets are
+    redacted automatically before upload. Provide a target scope (org_slug or
+    pod_id) and optionally override the auto-derived title/description/tags with
+    better ones you drafted from the preview.
+
+    Args:
+        fingerprint: the candidate's fingerprint from scan_local (prefix ok).
+        org_slug: target org for an org-level resource.
+        pod_id: target pod (overrides org_slug).
+        title/description/tags: optional overrides for the resource metadata.
+    """
+    rows = _reconciled(None, "", include_dismissed=True)
+    match = next((r for r in rows if r["fingerprint"].startswith(fingerprint)), None)
+    if not match:
+        raise SkillShareError(f"No local artifact matching fingerprint {fingerprint}")
+    c = match["candidate"]
+    payload, findings = redacted_payload(c)
+    if title:
+        payload["title"] = title
+    if description:
+        payload["description"] = description
+    if tags is not None:
+        payload["tags"] = tags
+    if pod_id:
+        payload.update({"scope_type": "POD", "scope_id": pod_id})
+    elif org_slug:
+        org = _request("GET", f"/api/orgs/{org_slug}")
+        payload.update({"scope_type": "ORG", "scope_id": org["id"]})
+    else:
+        raise SkillShareError("Provide org_slug or pod_id")
+    created = _request("POST", "/api/resources", json=payload)
+    _request("POST", "/api/local-state", json={
+        "fingerprint": match["fingerprint"], "kind": c.kind, "status": "pushed",
+        "source": c.source, "resource_id": created["id"], "name": c.name})
+    return {"pushed": _summary(created), "redacted_secrets": findings}
+
+
+@mcp.tool()
+def dismiss_artifact(fingerprint: str, kind: str = "skill", source: str = "", name: str = "") -> dict:
+    """Remember NOT to recommend a local artifact again (the user declined to
+    push it). Synced server-side so the decision carries across machines."""
+    return _request("POST", "/api/local-state", json={
+        "fingerprint": fingerprint, "kind": kind, "status": "dismissed", "source": source, "name": name})
 
 
 def main() -> None:

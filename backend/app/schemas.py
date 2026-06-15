@@ -116,6 +116,7 @@ class ResourceCreate(BaseModel):
     attachments: list[Attachment] = []
     scope_type: str  # ORG | PROJECT | POD | PUBLIC
     scope_id: str | None = None
+    source_fingerprint: str | None = None  # set when pushed from a local artifact (F2)
 
 
 class ResourcePatch(BaseModel):
@@ -147,3 +148,14 @@ class NotificationReadIn(BaseModel):
 
     ids: list[str] = []
     all: bool = False
+
+
+class LocalStateIn(BaseModel):
+    """Upsert provenance/dismissal for a local artifact (F2), keyed by fingerprint."""
+
+    fingerprint: str = Field(min_length=4, max_length=128)
+    kind: Literal["skill", "mcp", "note"]
+    status: Literal["pushed", "dismissed"]
+    source: str = ""
+    resource_id: str | None = None
+    name: str = ""

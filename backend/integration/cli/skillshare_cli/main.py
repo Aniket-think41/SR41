@@ -29,6 +29,9 @@ from pathlib import Path
 
 import httpx
 
+from .local.detect import DETECTORS
+from .local.scan import reconcile, redacted_payload, scan
+
 CONFIG_DIR = Path(os.environ.get("SKILLSHARE_CONFIG_DIR", "~/.config/skillshare")).expanduser()
 CREDS_FILE = CONFIG_DIR / "credentials.json"
 DEFAULT_API = "http://localhost:8400"
@@ -395,6 +398,99 @@ def cmd_inbox(args) -> None:
         print(f"{DIM}— marked {len(rows)} read{RESET}")
 
 
+KIND_GLYPH = {"skill": "◆", "mcp": "▣", "note": "▤"}
+STATUS_TAG = {"new": f"{BOLD}NEW{RESET}", "pushed": f"{DIM}pushed{RESET}", "dismissed": f"{DIM}dismissed{RESET}"}
+
+
+def _scan_rows(args):
+    """Scan local sources and reconcile against the server's provenance state."""
+    sources = args.source or list(DETECTORS)
+    cands = scan(sources=sources, notes_dir=args.notes_dir)
+    try:
+        state = request("GET", "/api/local-state")
+    except SystemExit:
+        state = []
+    return reconcile(cands, state)
+
+
+def cmd_scan(args) -> None:
+    rows = _scan_rows(args)
+    if not args.include_dismissed:
+        rows = [r for r in rows if r["status"] != "dismissed"]
+    if args.json:
+        print(json.dumps([
+            {"fingerprint": r["fingerprint"], "status": r["status"], "kind": r["candidate"].kind,
+             "name": r["candidate"].name, "source": r["candidate"].source, "title": r["candidate"].title,
+             "path": r["candidate"].path, "resource_id": r["resource_id"]}
+            for r in rows
+        ], indent=2))
+        return
+    if not rows:
+        print(f"{DIM}no local skills / MCP servers / notes found{RESET}")
+        return
+    for r in rows:
+        c = r["candidate"]
+        _, findings = redacted_payload(c)
+        sec = f" {DIM}· {len(findings)} secret(s) will be redacted{RESET}" if findings else ""
+        print(f"{KIND_GLYPH.get(c.kind, '·')} {BOLD}{c.title}{RESET} {STATUS_TAG.get(r['status'], r['status'])}"
+              f"  {DIM}{c.kind} · {c.source} · {r['fingerprint'][:14]}{RESET}{sec}")
+        print(f"    {DIM}{c.path}{RESET}")
+    n_new = sum(1 for r in rows if r["status"] == "new")
+    if n_new:
+        print(f"\n{n_new} new — push with {BOLD}skillshare push --org <slug>{RESET} (or --pod <id>)")
+
+
+def _resolve_push_scope(args) -> dict:
+    if args.pod:
+        return {"scope_type": "POD", "scope_id": args.pod}
+    if args.org:
+        org = request("GET", f"/api/orgs/{args.org}")
+        return {"scope_type": "ORG", "scope_id": org["id"]}
+    die("provide --org <slug> or --pod <id> as the push target")
+
+
+def cmd_push(args) -> None:
+    scope = _resolve_push_scope(args)
+    rows = _scan_rows(args)
+    targets = [r for r in rows if r["status"] == "new"]
+    if args.fingerprint:
+        targets = [r for r in rows if r["fingerprint"].startswith(args.fingerprint)]
+        if not targets:
+            die(f"no candidate matching fingerprint {args.fingerprint}")
+    if not targets:
+        print(f"{DIM}nothing new to push (everything is already pushed or dismissed){RESET}")
+        return
+    for r in targets:
+        c = r["candidate"]
+        payload, findings = redacted_payload(c)
+        print(f"\n{KIND_GLYPH.get(c.kind, '·')} {BOLD}{c.title}{RESET} {DIM}({c.kind} from {c.source}){RESET}")
+        if findings:
+            print(f"  {BOLD}⚠ {len(findings)} secret(s) redacted before upload:{RESET} {DIM}{', '.join(findings)}{RESET}")
+        if not args.yes:
+            ans = input(f"  push to {scope['scope_type'].lower()} {args.org or args.pod}? [y/N/d=dismiss] ").strip().lower()
+            if ans == "d":
+                request("POST", "/api/local-state", body={
+                    "fingerprint": r["fingerprint"], "kind": c.kind, "status": "dismissed",
+                    "source": c.source, "name": c.name})
+                print(f"  {DIM}dismissed — won't ask again{RESET}")
+                continue
+            if ans != "y":
+                print(f"  {DIM}skipped (will ask again next scan){RESET}")
+                continue
+        created = request("POST", "/api/resources", body={**payload, **scope})
+        request("POST", "/api/local-state", body={
+            "fingerprint": r["fingerprint"], "kind": c.kind, "status": "pushed",
+            "source": c.source, "resource_id": created["id"], "name": c.name})
+        print(f"  {BOLD}✓ pushed{RESET} [{created['id']}]")
+
+
+def cmd_dismiss(args) -> None:
+    request("POST", "/api/local-state", body={
+        "fingerprint": args.fingerprint, "kind": args.kind, "status": "dismissed",
+        "source": args.source or "", "name": args.name or ""})
+    print(f"{DIM}dismissed {args.fingerprint} — won't be recommended again{RESET}")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="skillshare", description="SkillShare registry CLI")
     sub = p.add_subparsers(dest="command", required=True)
@@ -458,6 +554,32 @@ def main() -> None:
     sp.add_argument("--mark-read", action="store_true", help="mark everything read after listing")
     sp.add_argument("--limit", type=int, default=30)
     sp.set_defaults(fn=cmd_inbox)
+
+    def _scan_flags(parser):
+        parser.add_argument("--source", action="append", choices=list(DETECTORS),
+                            help="limit to a source (repeatable); default = all")
+        parser.add_argument("--notes-dir", help="also scan this directory's *.md as notes")
+
+    sp = sub.add_parser("scan", help="find local skills/MCP/notes and see which aren't on the platform yet")
+    _scan_flags(sp)
+    sp.add_argument("--include-dismissed", action="store_true", help="also show ones you dismissed")
+    sp.add_argument("--json", action="store_true", help="machine-readable output")
+    sp.set_defaults(fn=cmd_scan)
+
+    sp = sub.add_parser("push", help="push local artifacts to the platform (secrets redacted, with preview)")
+    _scan_flags(sp)
+    sp.add_argument("--org", help="target org slug")
+    sp.add_argument("--pod", help="target pod id")
+    sp.add_argument("--fingerprint", help="push only the candidate with this fingerprint (prefix ok)")
+    sp.add_argument("--yes", action="store_true", help="don't prompt for confirmation")
+    sp.set_defaults(fn=cmd_push)
+
+    sp = sub.add_parser("dismiss", help="remember not to recommend a local artifact (by fingerprint)")
+    sp.add_argument("fingerprint")
+    sp.add_argument("--kind", default="skill", choices=["skill", "mcp", "note"])
+    sp.add_argument("--source", default="")
+    sp.add_argument("--name", default="")
+    sp.set_defaults(fn=cmd_dismiss)
 
     sp = sub.add_parser("star", help="star a resource")
     sp.add_argument("id")

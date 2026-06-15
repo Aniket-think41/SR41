@@ -15,4 +15,4 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["skillshare_cli"]
+packages = ["skillshare_cli", "skillshare_cli.local"]

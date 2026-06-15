@@ -199,13 +199,15 @@ I'd ship **Phase 1 then Phase 3** first — they give you the full "notify + ado
 ### Dashboard (client)
 - Topbar **notification bell** + unread badge → dropdown list → mark-read → deep-link opens the resource drawer. Query hooks + api methods + mock handlers (mock mode).
 
-### Phasing (build order)
-1. **Backend F1** — `Notification` model, fan-out in `log_activity`, endpoints, feature flag.
-2. **CLI `inbox` + MCP `check_updates`** — verify the notify loop end-to-end.
-3. **Dashboard bell** — unread badge + dropdown + deep-link.
-4. **Backend F2** — `LocalArtifactState`, `source_fingerprint`, endpoints (+ reseed).
-5. **Shared core lib** — detectors (Claude Code first), fingerprint, redact.
-6. **CLI `scan`/`push` + MCP `scan_local`/`push_artifact`/`dismiss_artifact`** — full adopt loop, both surfaces.
-7. **More sources** — Cursor, Codex, Claude Desktop detectors; drift detection.
+### Phasing (build order) — ALL DONE ✅
+1. ✅ **Backend F1** — `Notification` model, fan-out in `log_activity`, endpoints, feature flag.
+2. ✅ **CLI `inbox` + MCP `check_updates`** — notify loop verified end-to-end.
+3. ✅ **Dashboard bell** — unread badge + dropdown + deep-link + mark-read.
+4. ✅ **Backend F2** — `LocalArtifactState`, `source_fingerprint`, endpoints (reseeded).
+5. ✅ **Shared core lib** — detectors, fingerprint, redaction (`skillshare_cli/local/`).
+6. ✅ **CLI `scan`/`push`/`dismiss` + MCP `scan_local`/`push_artifact`/`dismiss_artifact`** — full adopt loop, both surfaces.
+7. ✅ **Sources** — Claude Code (primary) + Cursor + Codex + Claude Desktop (pluggable). Drift detection deferred (fingerprint already re-surfaces edited files).
 
-Each phase ends with a live smoke test against the running stack before moving on.
+Proactive surfacing ("Claude tells you without being asked") is implemented via
+the MCP server `instructions` for both the inbox and the contribute-back flow.
+Each phase ended with a live smoke test against the running stack.

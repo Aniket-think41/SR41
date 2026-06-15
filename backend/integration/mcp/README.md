@@ -7,7 +7,10 @@ and import — over the [Model Context Protocol](https://modelcontextprotocol.io
 
 ## Install
 
+The MCP server reuses the CLI's local-scan core, so install the CLI first:
+
 ```bash
+pip install -e backend/integration/cli        # provides skillshare_cli.local (F2)
 pip install -e backend/integration/mcp        # or pipx install once published
 ```
 
@@ -70,6 +73,9 @@ claude mcp add skillshare \
 | `import_resource(resource_id, org_slug)` | ✓ | "Add to my org" |
 | `check_updates(unread_only, limit)` | ✓ | inbox: resources added/published in your scopes (each with an `install_command` + `resource_id`) |
 | `mark_notifications_read(notification_ids, mark_all)` | ✓ | clear inbox items |
+| `scan_local(sources, notes_dir, include_dismissed)` | ✓ | find local skills/MCP/notes (Claude Code, Cursor, Codex, Desktop) with status + redacted preview |
+| `push_artifact(fingerprint, org_slug \| pod_id, title?, …)` | ✓ | push a scanned artifact (secrets redacted before upload) |
+| `dismiss_artifact(fingerprint, kind, source, name)` | ✓ | remember not to recommend it again (synced) |
 
 The server instructions tell the agent to call `check_updates`
 **proactively at the start of a conversation** and surface anything new before

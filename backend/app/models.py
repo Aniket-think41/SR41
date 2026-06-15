@@ -136,6 +136,9 @@ class Resource(Base):
     scope_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     author_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
     is_public: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    # Set when a resource was pushed from a local artifact (F2). Lets us detect
+    # "this already exists on the platform" across machines → link, not duplicate.
+    source_fingerprint: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     stars_count: Mapped[int] = mapped_column(Integer, default=0)
     installs_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
@@ -203,6 +206,26 @@ class Notification(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
 
     actor: Mapped[User] = relationship(lazy="joined", foreign_keys=[actor_id])
+
+
+class LocalArtifactState(Base):
+    """Per-user provenance/dismissal memory for local artifacts (F2). Keyed by a
+    content fingerprint so a changed file re-surfaces while an identical one stays
+    silent. Synced server-side so a 'pushed'/'dismissed' decision carries across
+    machines. status: pushed (we created resource_id) | dismissed (user said no)."""
+
+    __tablename__ = "local_artifact_states"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("las"))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
+    fingerprint: Mapped[str] = mapped_column(String, index=True)
+    kind: Mapped[str] = mapped_column(String)  # skill | mcp | note
+    source: Mapped[str] = mapped_column(String, default="")  # claude-code | cursor | codex | …
+    status: Mapped[str] = mapped_column(String)  # pushed | dismissed
+    resource_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    name: Mapped[str] = mapped_column(String, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
 
 class OrgFeature(Base):

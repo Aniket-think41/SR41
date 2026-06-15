@@ -42,6 +42,14 @@ skillshare star incident-runbook
 skillshare publish res-handbook              # needs publisher mode + org feature
 skillshare import postgres-mcp --org think41
 
+# contribute local artifacts (F2) — find local skills/MCP/notes not on the platform
+skillshare scan                              # lists candidates; NEW = not pushed yet
+skillshare scan --source claude-code --source cursor   # limit sources (also: codex, claude-desktop)
+skillshare scan --notes-dir ./docs           # also treat ./docs/*.md as notes
+skillshare push --org think41                # push NEW ones (secrets redacted; previews + confirms each)
+skillshare push --org think41 --fingerprint fp_ab12   # push just one
+skillshare dismiss fp_ab12                   # never recommend this one again (synced server-side)
+
 # housekeeping
 skillshare tokens                            # list PATs
 skillshare logout                            # revoke + forget

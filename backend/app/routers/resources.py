@@ -86,6 +86,7 @@ def create_resource(body: ResourceCreate, user: User = Depends(get_current_user)
         scope_type=body.scope_type,
         scope_id=body.scope_id,
         author_id=user.id,
+        source_fingerprint=body.source_fingerprint,
     )
     db.add(r)
     db.flush()

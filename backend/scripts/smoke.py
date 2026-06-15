@@ -71,7 +71,7 @@ ok(search["pods"] and search["resources"], "⌘K search finds pods + resources")
 
 print("features & licensing")
 feats = c.get("/api/orgs/think41/features", headers=H).json()
-ok(len(feats) == 5 and all(f["licensed"] for f in feats), "premium org: all flags licensed")
+ok(len(feats) == 6 and all(f["licensed"] for f in feats), "premium org: all flags licensed")
 f = c.patch("/api/orgs/think41/features/activity-feed", headers=H, json={"enabled": False}).json()
 ok(f["enabled"] is False, "flag toggled off")
 c.patch("/api/orgs/think41/features/activity-feed", headers=H, json={"enabled": True})
