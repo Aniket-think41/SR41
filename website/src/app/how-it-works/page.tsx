@@ -96,20 +96,10 @@ export default function HowItWorks() {
 
           <div className="mt-10 flex flex-wrap gap-3">
             <Link href={getStarted()} className="btn btn-lime">Become a publisher →</Link>
-            <Link href="/marketplace" className="btn btn-secondary !border-white/30 !bg-transparent !text-white hover:!bg-white hover:!text-navy">
+            <Link href="/" className="btn btn-secondary !border-white/30 !bg-transparent !text-white hover:!bg-white hover:!text-navy">
               Browse the marketplace
             </Link>
           </div>
-        </div>
-      </section>
-
-      {/* CTA */}
-      <section className="shell py-20 text-center md:py-28">
-        <h2 className="font-display mx-auto max-w-2xl text-4xl font-semibold sm:text-5xl">
-          Ready to organize your AI stack?
-        </h2>
-        <div className="mt-8 flex justify-center">
-          <Link href={getStarted()} className="btn btn-primary">Get started free →</Link>
         </div>
       </section>
     </>

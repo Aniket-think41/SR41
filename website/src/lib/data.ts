@@ -220,6 +220,95 @@ export async function getResources(): Promise<Resource[]> {
   return (await apiGet<Resource[]>("/resources")) ?? SEED;
 }
 
+// ---------------------------------------------------------------------------
+// Marketplace paging — server-side filter/sort/paginate so "Load more" fetches
+// the next page from the backend (with a seed fallback when API_URL is unset).
+// ---------------------------------------------------------------------------
+
+export const MARKETPLACE_PAGE_SIZE = 6;
+
+export interface MarketplaceStats {
+  skills: number;
+  mcp: number;
+  notes: number;
+  total_installs: number;
+  total: number;
+}
+
+export interface ResourcePage {
+  items: Resource[];
+  total: number;
+}
+
+export interface ResourceQuery {
+  type?: string; // "all" | SKILL | MCP | NOTE
+  q?: string;
+  sort?: string; // installs | stars | updated
+  limit: number;
+  offset: number;
+}
+
+export async function getMarketplaceStats(): Promise<MarketplaceStats> {
+  const live = await apiGet<MarketplaceStats>("/stats");
+  if (live) return live;
+  const c = (t: ResourceType) => SEED.filter((r) => r.type === t).length;
+  return {
+    skills: c("SKILL"),
+    mcp: c("MCP"),
+    notes: c("NOTE"),
+    total_installs: SEED.reduce((s, r) => s + r.installs_count, 0),
+    total: SEED.length,
+  };
+}
+
+function sortSeed(rows: Resource[], sort?: string): Resource[] {
+  return [...rows].sort((a, b) =>
+    sort === "stars"
+      ? b.stars_count - a.stars_count
+      : sort === "updated"
+        ? b.updated_at.localeCompare(a.updated_at)
+        : b.installs_count - a.installs_count,
+  );
+}
+
+function seedPage(opts: ResourceQuery): ResourcePage {
+  let rows = SEED;
+  if (opts.type && opts.type !== "all") rows = rows.filter((r) => r.type === opts.type!.toUpperCase());
+  if (opts.q?.trim()) {
+    const n = opts.q.toLowerCase().trim();
+    rows = rows.filter(
+      (r) =>
+        r.title.toLowerCase().includes(n) ||
+        r.description.toLowerCase().includes(n) ||
+        r.tags.some((t) => t.includes(n)),
+    );
+  }
+  rows = sortSeed(rows, opts.sort);
+  return { items: rows.slice(opts.offset, opts.offset + opts.limit), total: rows.length };
+}
+
+export async function getResourcesPage(opts: ResourceQuery): Promise<ResourcePage> {
+  if (!API_BASE) return seedPage(opts);
+  const qs = new URLSearchParams();
+  if (opts.type && opts.type !== "all") qs.set("type", opts.type);
+  if (opts.q?.trim()) qs.set("q", opts.q.trim());
+  if (opts.sort) qs.set("sort", opts.sort);
+  qs.set("limit", String(opts.limit));
+  qs.set("offset", String(opts.offset));
+  try {
+    const res = await fetch(`${API_BASE}/api/public/resources?${qs.toString()}`, {
+      next: { revalidate: 60 },
+      headers: { accept: "application/json" },
+    });
+    if (!res.ok) return seedPage(opts);
+    const items = (await res.json()) as Resource[];
+    const total = Number(res.headers.get("X-Total-Count") ?? items.length);
+    return { items, total };
+  } catch {
+    return seedPage(opts); // backend unreachable → bundled seed
+  }
+}
+
 export async function getResource(id: string): Promise<Resource | undefined> {
   const live = await apiGet<Resource>(`/resources/${id}`);
   if (live) return live;

@@ -23,8 +23,8 @@ export const SITE = {
     login: `${DASHBOARD_ORIGIN}/login`,
   },
   nav: [
+    { label: "Marketplace", href: "/" },
     { label: "How it works", href: "/how-it-works" },
-    { label: "Marketplace", href: "/marketplace" },
     { label: "Pricing", href: "/pricing" },
     { label: "Blog", href: "/blog" },
   ],

@@ -28,7 +28,7 @@ export function Nav() {
       }`}
     >
       <div className="shell flex h-20 items-center justify-between">
-        <Link href="/" aria-label="SkillShare home" className="flex items-center gap-2.5">
+        <Link href="/home" aria-label="SkillShare home" className="flex items-center gap-2.5">
           <Logo className="h-8 w-8" />
           <span className="font-display text-xl font-semibold tracking-tight">
             Skill<span className="text-primary">Share</span>

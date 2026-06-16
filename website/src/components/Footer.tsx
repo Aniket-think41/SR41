@@ -2,23 +2,24 @@ import Link from "next/link";
 import { SITE } from "@/lib/site";
 import { getStarted } from "@/lib/redirects";
 import { Logo } from "./Logo";
+import { GradientVideo } from "./GradientVideo";
 
 const columns = [
   {
     title: "Product",
     links: [
+      { label: "Marketplace", href: "/" },
       { label: "How it works", href: "/how-it-works" },
-      { label: "Marketplace", href: "/marketplace" },
+      { label: "Why SkillShare", href: "/home" },
       { label: "Pricing", href: "/pricing" },
-      { label: "Changelog", href: "/blog" },
     ],
   },
   {
     title: "Resources",
     links: [
-      { label: "Skills", href: "/marketplace?type=skill" },
-      { label: "MCP servers", href: "/marketplace?type=mcp" },
-      { label: "Notes", href: "/marketplace?type=note" },
+      { label: "Skills", href: "/?type=skill" },
+      { label: "MCP servers", href: "/?type=mcp" },
+      { label: "Notes", href: "/?type=note" },
       { label: "Publishers", href: "/publishers/think41" },
     ],
   },
@@ -27,8 +28,8 @@ const columns = [
     links: [
       { label: "Think41", href: "https://think41.com" },
       { label: "Blog", href: "/blog" },
-      { label: "Privacy", href: "/blog" },
-      { label: "Terms", href: "/blog" },
+      { label: "Privacy", href: "/privacy" },
+      { label: "Terms", href: "/terms" },
     ],
   },
 ];
@@ -38,8 +39,9 @@ export function Footer() {
     <footer className="bg-navy text-white">
       {/* CTA band */}
       <div className="shell pt-20">
-        <div className="relative overflow-hidden rounded-[28px] bg-primary px-8 py-14 text-center sm:px-16">
-          <div className="blob -right-10 -top-10 h-56 w-56" style={{ background: "var(--color-lime)", opacity: 0.35 }} />
+        <div className="relative overflow-hidden rounded-[28px] px-8 py-14 text-center sm:px-16">
+          <GradientVideo />
+          <div className="absolute inset-0 bg-navy/20" />
           <h2 className="font-display relative mx-auto max-w-2xl text-3xl font-semibold text-white sm:text-4xl">
             Ready to organize your AI stack?
           </h2>
@@ -55,7 +57,7 @@ export function Footer() {
       <div className="shell py-16">
         <div className="grid gap-12 md:grid-cols-[1.6fr_1fr_1fr_1fr]">
           <div>
-            <Link href="/" className="flex items-center gap-2.5">
+            <Link href="/home" className="flex items-center gap-2.5">
               <Logo className="h-8 w-8" />
               <span className="font-display text-xl font-semibold text-white">SkillShare</span>
             </Link>
