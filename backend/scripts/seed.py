@@ -14,10 +14,15 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, ".")  # allow running as a script from backend/
 
+from sqlalchemy import inspect, text  # noqa: E402
+
 from app.config import get_settings  # noqa: E402
 from app.database import Base, SessionLocal, engine  # noqa: E402
 from app.models import (  # noqa: E402
     Activity,
+    BlogPost,
+    ChangelogEntry,
+    ContentPage,
     Invitation,
     Organization,
     OrgMember,
@@ -55,7 +60,7 @@ def seed(db) -> None:
         "aniket": User(id="u-aniket", email="aniket.lnu@think41.com", password_hash=pw, username="aniket",
                        display_name="Aniket Kumar", bio="Full-stack engineer at Think41. Building SkillShare — the registry itself.",
                        location="Bengaluru, IN", website="https://think41.com", is_publisher=True, verified=True,
-                       created_at=t("2025-09-12")),
+                       is_admin=True, created_at=t("2025-09-12")),
         "think41": User(id="u-think41", email="platform@think41.com", password_hash=pw, username="think41",
                         display_name="Think41", bio="The team behind SkillShare. Foundational skills and MCP servers, maintained and verified.",
                         is_publisher=True, verified=True, created_at=t("2025-06-01")),
@@ -292,18 +297,225 @@ def seed(db) -> None:
     db.commit()
 
 
+def seed_content(db) -> None:
+    """Marketing content: blog posts, changelog, legal pages. Mirrors what the
+    website previously hardcoded (website/src/lib/blog.ts and the privacy/terms
+    pages). Idempotent per-item, so it tops up an already-seeded DB without a
+    wipe — letting the new content tables fill in for existing local databases."""
+
+    posts = [
+        BlogPost(
+            slug="proactive-notifications", status="published", featured=True,
+            title="Your team's new skills now find you", date="2026-06-12", tag="Feature",
+            reading_minutes=4, author_name="Ada Rao", author_role="Product, SkillShare",
+            excerpt="Notifications land the moment a skill, MCP server, or note is published in a scope you belong to — in the dashboard, the CLI, and right inside your AI agent.",
+            standfirst="Discovery shouldn't depend on someone remembering to Slack you a link.",
+            body=[
+                {"type": "p", "text": "The hardest part of a shared registry was never publishing — it was discovery. Someone on your pod ships a brilliant pr-reviewer skill and you find out three weeks later, by accident. We fixed that."},
+                {"type": "h2", "text": "Scoped to what you can actually see"},
+                {"type": "p", "text": "When a resource is added or published in a scope you belong to, you get a notification. Membership decides the reach: your org, your projects, and your pods — never anything outside what you already have access to. You're never notified about your own actions."},
+                {"type": "ul", "items": [
+                    "Dashboard: a bell with an unread count and one-click deep links.",
+                    "CLI: `skillshare inbox` — newest first, with a ready-to-run install command.",
+                    "MCP: your agent calls `check_updates` at the start of a conversation and tells you what's new before you ask.",
+                ]},
+                {"type": "quote", "text": "The point is that the registry comes to you. You should hear about a new team MCP from your own agent, not from a forwarded message."},
+                {"type": "h2", "text": "Install in one step"},
+                {"type": "p", "text": "Every notification carries an install command and a link straight to the resource. See it, run it, done — whether you live in the dashboard, the terminal, or an AI agent."},
+            ],
+        ),
+        BlogPost(
+            slug="contribute-back-local-scan", status="published", featured=True,
+            title="Push the skills you already have", date="2026-06-12", tag="Feature",
+            reading_minutes=5, author_name="Ada Rao", author_role="Product, SkillShare",
+            excerpt="Scan your machine for local skills, MCP servers, and notes that aren't on the platform yet — preview them with secrets redacted, then push with one approval.",
+            standfirst="The best skills are the ones already sitting in your dotfiles.",
+            body=[
+                {"type": "p", "text": "Most teams already have great skills — they're just trapped in someone's local Claude Code config, a Cursor setup, or a CLAUDE.md no one else has read. Contribute-back surfaces them."},
+                {"type": "h2", "text": "Detect, redact, preview, push"},
+                {"type": "ul", "items": [
+                    "Detectors read Claude Code (primary), Cursor, Codex, and Claude Desktop — pluggable, so more sources slot in over time.",
+                    "Secrets are redacted before anything leaves your machine. API keys, tokens, and credentials in MCP configs never get uploaded.",
+                    "You see a full redacted preview, and nothing is pushed without your explicit approval.",
+                    "Dismiss something once and it stays dismissed — synced to your account, so it won't nag you on another machine.",
+                ]},
+                {"type": "quote", "text": "Never auto-upload. MCP configs are full of credentials — the redact-and-preview step is non-negotiable, and it's enforced server-side too."},
+                {"type": "h2", "text": "Works from the CLI and your agent"},
+                {"type": "p", "text": "Run `skillshare scan` to list candidates and `skillshare push --org <slug>` to contribute them. Or just mention a local skill to your AI agent — it can scan, draft the title and description from the redacted content, show you the preview, and push once you say yes."},
+            ],
+        ),
+        BlogPost(
+            slug="org-inheritance", status="published",
+            title="Define a skill once, inherit it everywhere", date="2026-05-12", tag="Guide",
+            reading_minutes=3, author_name="Marco Reyes", author_role="Engineering, SkillShare",
+            excerpt="Org → project → pod inheritance means you maintain a resource in one place and every team below it gets the update automatically. Here's the mental model.",
+            body=[
+                {"type": "p", "text": "Copy-paste is how skill libraries rot. A resource gets duplicated into five pods, one of them fixes a bug, and now you have five subtly different versions. Inheritance is the cure."},
+                {"type": "h2", "text": "Three levels, one source of truth"},
+                {"type": "ul", "items": [
+                    "Org — the root. Define a resource here and everyone inherits it.",
+                    "Project — a body of work that groups related pods.",
+                    "Pod — a team. Inherits everything above it and adds its own.",
+                ]},
+                {"type": "p", "text": "Resolve a pod's library and you get its own resources plus everything inherited from its project and org — deduplicated, always current. Update the org-level definition and the change flows downward with no manual sync."},
+            ],
+        ),
+        BlogPost(
+            slug="why-a-registry", status="published",
+            title="Why your AI team needs a registry, not a folder", date="2026-04-22", tag="Story",
+            reading_minutes=4, author_name="Ada Rao", author_role="Product, SkillShare",
+            excerpt="Skills, MCP servers, and notes are real artifacts with versions, owners, and permissions. Treating them like loose files is why they drift. A registry treats them like what they are.",
+            body=[
+                {"type": "p", "text": "When AI tooling was a novelty, a shared folder of prompts was fine. It isn't anymore. Your skills encode how your team works, your MCP servers hold real credentials, and your notes are institutional memory."},
+                {"type": "h2", "text": "What a registry gives you that a folder can't"},
+                {"type": "ul", "items": [
+                    "Versions and provenance — who published what, and when.",
+                    "Permissions scoped to org, project, and pod membership.",
+                    "Discovery that comes to you, instead of tribal knowledge.",
+                    "One vocabulary across the dashboard, CLI, MCP, and marketplace.",
+                ]},
+                {"type": "p", "text": "That last point matters most: the website, dashboard, CLI, and MCP all speak the same model. A skill is the same object everywhere you touch it. That's the difference between a tool you check and infrastructure your team relies on."},
+            ],
+        ),
+    ]
+    for p in posts:
+        if not db.query(BlogPost.id).filter(BlogPost.slug == p.slug).first():
+            db.add(p)
+
+    changelog = [
+        ChangelogEntry(date="2026-06-12", tag="Feature", title="Notifications + contribute-back",
+                       body="Get notified when team resources are published, and push your local skills/MCP/notes back to the platform — secrets redacted, preview first."),
+        ChangelogEntry(date="2026-05-27", tag="Release", title="Public marketplace is live",
+                       body="Browse every public skill, MCP server, and note without an account. Generated share cards included."),
+        ChangelogEntry(date="2026-05-12", tag="Feature", title="Org-level inheritance",
+                       body="Define a resource once at the org level and every project and pod inherits it automatically."),
+        ChangelogEntry(date="2026-04-30", tag="Feature", title="Think41-verified publishers",
+                       body="Verified makers now get a badge across the marketplace and their profile."),
+    ]
+    for c in changelog:
+        exists = db.query(ChangelogEntry.id).filter(
+            ChangelogEntry.date == c.date, ChangelogEntry.title == c.title
+        ).first()
+        if not exists:
+            db.add(c)
+
+    pages = [
+        ContentPage(
+            key="privacy", status="published", kicker="Legal", title="Privacy Policy",
+            updated_label="June 15, 2026",
+            intro="Plain-language summary of what we collect and how we protect it. SkillShare is v1 — this policy will grow with the product.",
+            sections=[
+                {"heading": "Who we are", "paragraphs": [
+                    "SkillShare is a skill and MCP registry operated by Think41. This policy explains what data we collect when you use the dashboard, CLI, MCP server, and public marketplace, and what we do with it.",
+                ]},
+                {"heading": "What we collect", "bullets": [
+                    "Account data — your name, email, and the organizations, projects, and pods you belong to.",
+                    "Content you publish — skills, MCP server configurations, notes, and their metadata.",
+                    "Usage data — installs, stars, and activity needed to power notifications and discovery.",
+                    "Authentication — Personal Access Tokens you mint for the CLI and MCP, stored hashed.",
+                ]},
+                {"heading": "Secrets are redacted before they leave your machine", "paragraphs": [
+                    "When you contribute a local skill, MCP server, or note through the CLI or MCP, we detect and redact secrets — API keys, tokens, and credentials — before anything is uploaded. You always see a redacted preview, and nothing is pushed without your explicit approval.",
+                    "Redaction is enforced again server-side, so a credential that slips past the client is never stored.",
+                ]},
+                {"heading": "How we use your data", "bullets": [
+                    "To operate the registry and resolve what you can see based on your membership.",
+                    "To notify you when resources are added or published in scopes you belong to.",
+                    "To show installs, stars, and verified-publisher status on the public marketplace.",
+                    "To keep the service secure and debug problems.",
+                ]},
+                {"heading": "What we don't do", "paragraphs": [
+                    "We don't sell your data. We don't use the private contents of your org's resources to train models. Public marketplace listings are, by design, public.",
+                ]},
+                {"heading": "Your choices", "bullets": [
+                    "Revoke a Personal Access Token at any time from the dashboard or with `skillshare logout`.",
+                    "Dismiss contribution recommendations — your choice is remembered and synced to your account.",
+                    "Request export or deletion of your account data by contacting us.",
+                ]},
+                {"heading": "Changes", "paragraphs": [
+                    "We may update this policy as the product evolves. Material changes will be noted on this page, and the “last updated” date above will change.",
+                ]},
+            ],
+        ),
+        ContentPage(
+            key="terms", status="published", kicker="Legal", title="Terms of Service",
+            updated_label="June 15, 2026",
+            intro="The ground rules for using SkillShare. Free in v1, with sensible limits on publishing and acceptable use.",
+            sections=[
+                {"heading": "Acceptance", "paragraphs": [
+                    "By creating an account or using SkillShare — the dashboard, CLI, MCP server, or public marketplace — you agree to these terms. If you're using SkillShare for an organization, you agree on its behalf.",
+                ]},
+                {"heading": "The service", "paragraphs": [
+                    "SkillShare is a registry for AI skills, MCP servers, and team knowledge, operated by Think41. It is free in v1. Paid Team and Enterprise plans are planned for future versions; pricing and terms for those will be published before they launch.",
+                ]},
+                {"heading": "Your content", "bullets": [
+                    "You keep ownership of the skills, MCP configs, and notes you publish.",
+                    "By publishing to the public marketplace, you grant others the right to view, install, and import that resource.",
+                    "You're responsible for having the rights to publish what you upload, and for not including secrets or third-party confidential data.",
+                ]},
+                {"heading": "Acceptable use", "bullets": [
+                    "Don't upload malware, or skills/MCP servers designed to exfiltrate data or cause harm.",
+                    "Don't violate others' intellectual property or privacy.",
+                    "Don't abuse the API, attempt to bypass permission scopes, or disrupt the service.",
+                    "Don't misrepresent authorship or impersonate a verified publisher.",
+                ]},
+                {"heading": "Verified publishers", "paragraphs": [
+                    "Think41-verified status is granted at our discretion and may be revoked if these terms are violated. Verification signals identity, not an endorsement of every resource a publisher ships.",
+                ]},
+                {"heading": "Disclaimer & liability", "paragraphs": [
+                    "SkillShare is provided “as is,” without warranties of any kind. Resources on the marketplace are published by their authors — review them before installing. To the extent permitted by law, Think41 is not liable for indirect or consequential damages arising from use of the service.",
+                ]},
+                {"heading": "Termination", "paragraphs": [
+                    "You can stop using SkillShare at any time and delete your account. We may suspend or terminate access for violations of these terms.",
+                ]},
+                {"heading": "Changes", "paragraphs": [
+                    "We may update these terms as the product evolves. Material changes will be posted here, and continued use after a change means you accept the updated terms.",
+                ]},
+            ],
+        ),
+    ]
+    for page in pages:
+        if not db.query(ContentPage.id).filter(ContentPage.key == page.key).first():
+            db.add(page)
+
+    db.commit()
+
+
+def ensure_columns() -> None:
+    """create_all() makes missing tables but not missing columns. Add columns
+    introduced after a DB was first created, so existing local SQLite databases
+    upgrade in place without a --reset wipe."""
+    insp = inspect(engine)
+    if "users" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("users")}
+    if "is_admin" not in cols:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0"))
+        print("Migrated: added users.is_admin column.")
+
+
 def main() -> None:
     reset = "--reset" in sys.argv
     if reset:
         Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+    ensure_columns()
     db = SessionLocal()
     try:
         if db.query(User.id).first():
-            print("Database already seeded — use --reset to wipe and reseed.")
-            return
-        seed(db)
-        print(f"Seeded demo data. Login: aniket.lnu@think41.com / {settings.seed_password}")
+            print("Users already seeded — skipping demo data (use --reset to wipe).")
+        else:
+            seed(db)
+            print(f"Seeded demo data. Login: aniket.lnu@think41.com / {settings.seed_password}")
+        # Content tables are seeded idempotently every run so existing DBs fill in.
+        seed_content(db)
+        # Ensure the platform admin flag is set even on a pre-existing DB.
+        admin = db.query(User).filter(User.email == "aniket.lnu@think41.com").first()
+        if admin and not admin.is_admin:
+            admin.is_admin = True
+            db.commit()
+        print("Marketing content (blog, changelog, legal pages) is up to date.")
     finally:
         db.close()
 

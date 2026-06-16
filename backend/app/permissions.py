@@ -8,6 +8,14 @@ from .errors import forbidden, not_found
 from .models import Organization, OrgMember, Pod, PodMember, Project, ProjectMember, Resource, User
 
 
+def require_admin(user: User) -> User:
+    """Platform admin (User.is_admin) — manages marketing content + publishers.
+    Distinct from org ADMIN, which is scoped to a single organization."""
+    if not user.is_admin:
+        raise forbidden("Platform admin access required")
+    return user
+
+
 def org_by_slug(db: Session, slug: str) -> Organization:
     org = db.query(Organization).filter(Organization.slug == slug).first()
     if not org:

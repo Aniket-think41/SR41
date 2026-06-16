@@ -37,6 +37,10 @@ class User(Base):
     website: Mapped[str | None] = mapped_column(String, nullable=True)
     is_publisher: Mapped[bool] = mapped_column(Boolean, default=False)
     verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Platform admin (not org admin): may manage marketing content — blog posts,
+    # changelog, legal pages — and verify publishers. Set in seed; never exposed
+    # on the public user payload.
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
@@ -279,3 +283,66 @@ class RefreshToken(Base):
     token: Mapped[str] = mapped_column(String, unique=True, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+# ---------------------------------------------------------------------------
+# Marketing content — blog, changelog, legal pages. Authored/managed by a
+# platform admin (User.is_admin) and read by the public marketing site
+# (/api/public/*). Blog posts carry a draft|published status so old posts can
+# be hidden and new ones staged before going live.
+# ---------------------------------------------------------------------------
+
+
+class BlogPost(Base):
+    __tablename__ = "blog_posts"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("blog"))
+    slug: Mapped[str] = mapped_column(String, unique=True, index=True)
+    title: Mapped[str] = mapped_column(String)
+    # YYYY-MM-DD display/sort date (matches the marketing site's BlogPost.date).
+    date: Mapped[str] = mapped_column(String, index=True)
+    tag: Mapped[str] = mapped_column(String, default="Story")  # Release | Feature | Guide | Story
+    excerpt: Mapped[str] = mapped_column(Text, default="")
+    standfirst: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Ordered content blocks: [{type: p|h2|ul|quote, text?|items?}]
+    body: Mapped[list] = mapped_column(JSON, default=list)
+    author_name: Mapped[str] = mapped_column(String, default="")
+    author_role: Mapped[str] = mapped_column(String, default="")
+    reading_minutes: Mapped[int] = mapped_column(Integer, default=3)
+    featured: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(String, default="draft", index=True)  # draft | published
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class ChangelogEntry(Base):
+    __tablename__ = "changelog_entries"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("chg"))
+    date: Mapped[str] = mapped_column(String, index=True)  # YYYY-MM-DD
+    tag: Mapped[str] = mapped_column(String, default="Release")
+    title: Mapped[str] = mapped_column(String)
+    body: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String, default="published", index=True)  # draft | published
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class ContentPage(Base):
+    """A static legal/marketing page (privacy, terms) — structured so the site
+    renders it through the shared LegalPage layout with no code change."""
+
+    __tablename__ = "content_pages"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("page"))
+    key: Mapped[str] = mapped_column(String, unique=True, index=True)  # privacy | terms
+    kicker: Mapped[str] = mapped_column(String, default="Legal")
+    title: Mapped[str] = mapped_column(String)
+    intro: Mapped[str] = mapped_column(Text, default="")
+    # Display string shown as "Last updated …", e.g. "June 15, 2026".
+    updated_label: Mapped[str] = mapped_column(String, default="")
+    # [{heading, paragraphs?: [...], bullets?: [...]}]
+    sections: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String, default="published", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)

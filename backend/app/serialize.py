@@ -9,6 +9,9 @@ from sqlalchemy.orm import Session
 
 from .models import (
     Activity,
+    BlogPost,
+    ChangelogEntry,
+    ContentPage,
     Invitation,
     Notification,
     Organization,
@@ -332,6 +335,53 @@ def filter_resources(rows: list[Resource], q: str | None, type_: str | None, tag
             or any(needle in t.lower() for t in (r.tags or []))
         ]
     return rows
+
+
+# ---- Marketing content serializers ----
+#
+# Public shapes mirror the marketing site's types field-for-field
+# (website/src/lib/blog.ts BlogPost, website/src/components/LegalPage.tsx
+# LegalSection) so the site can consume them with no remapping. The admin
+# variants add id/status/timestamps for content management.
+
+
+def blog_post_out(p: BlogPost, admin: bool = False) -> dict:
+    out = {
+        "slug": p.slug,
+        "title": p.title,
+        "date": p.date,
+        "tag": p.tag,
+        "excerpt": p.excerpt,
+        "readingMinutes": p.reading_minutes,
+        "author": {"name": p.author_name, "role": p.author_role},
+        "standfirst": p.standfirst,
+        "featured": p.featured,
+        "body": p.body or [],
+    }
+    if admin:
+        out.update({"id": p.id, "status": p.status, "created_at": p.created_at, "updated_at": p.updated_at})
+    return out
+
+
+def changelog_out(c: ChangelogEntry, admin: bool = False) -> dict:
+    out = {"date": c.date, "tag": c.tag, "title": c.title, "body": c.body}
+    if admin:
+        out.update({"id": c.id, "status": c.status, "created_at": c.created_at, "updated_at": c.updated_at})
+    return out
+
+
+def content_page_out(p: ContentPage, admin: bool = False) -> dict:
+    out = {
+        "key": p.key,
+        "kicker": p.kicker,
+        "title": p.title,
+        "intro": p.intro,
+        "updated": p.updated_label,
+        "sections": p.sections or [],
+    }
+    if admin:
+        out.update({"id": p.id, "status": p.status, "created_at": p.created_at, "updated_at": p.updated_at})
+    return out
 
 
 def sort_resources(rows: list[Resource], sort: str | None) -> list[Resource]:

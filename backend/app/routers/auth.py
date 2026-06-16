@@ -56,10 +56,16 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
     )
 
 
+def _me_out(user: User) -> dict:
+    """Self payload — like user_out but includes is_admin, which is intentionally
+    withheld from the public user serializer."""
+    return {**user_out(user), "is_admin": user.is_admin}
+
+
 def _session_payload(db: Session, response: Response, user: User) -> dict:
     refresh = issue_refresh_token(db, user)
     _set_refresh_cookie(response, refresh)
-    return {"user": user_out(user), "access_token": create_access_token(user), "refresh_token": refresh}
+    return {"user": _me_out(user), "access_token": create_access_token(user), "refresh_token": refresh}
 
 
 @router.post("/signup")
@@ -136,7 +142,7 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
 
 @router.get("/me")
 def me(user: User = Depends(get_current_user)):
-    return user_out(user)
+    return _me_out(user)
 
 
 @router.patch("/me")
@@ -146,7 +152,17 @@ def update_me(body: MePatch, user: User = Depends(get_current_user), db: Session
         if value is not None:
             setattr(user, field, value)
     db.commit()
-    return user_out(user)
+    return _me_out(user)
+
+
+@router.post("/become-publisher")
+def become_publisher(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Opt in to publishing. Flips on the publisher flag so the user can push
+    resources to the public marketplace. The Think41-verified badge is granted
+    separately by a platform admin (POST /api/admin/publishers/{username}/verify)."""
+    user.is_publisher = True
+    db.commit()
+    return _me_out(user)
 
 
 # ---- Personal Access Tokens (CLI / MCP — BACKEND_SPEC §10) ----

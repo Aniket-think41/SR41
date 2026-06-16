@@ -201,8 +201,11 @@ def publish(resource_id: str, user: User = Depends(get_current_user), db: Sessio
     r = resource_or_404(db, resource_id)
     require_resource_write(db, r, user)
     if not user.is_publisher:
-        raise forbidden("Enable publisher mode in your profile to publish to the marketplace")
-    if not feature_enabled(db, scope_org(db, r), "publishing"):
+        raise forbidden("Become a publisher first (POST /api/auth/become-publisher) to publish to the marketplace")
+    # A publisher can always publish a resource they authored. The premium
+    # "publishing" feature gates publishing *other people's* org resources
+    # (an admin pushing a teammate's work), not your own.
+    if r.author_id != user.id and not feature_enabled(db, scope_org(db, r), "publishing"):
         raise forbidden("Marketplace publishing is disabled for this organization")
     r.is_public = True
     _log_resource(db, user, r, "published", notify_scope="ORG")

@@ -159,3 +159,82 @@ class LocalStateIn(BaseModel):
     source: str = ""
     resource_id: str | None = None
     name: str = ""
+
+
+# ---- Marketing content (admin-managed) ----
+
+BlogTag = Literal["Release", "Feature", "Guide", "Story"]
+ContentStatus = Literal["draft", "published"]
+
+
+class BlogBlock(BaseModel):
+    """One content block in a post body. `text` for p/h2/quote, `items` for ul."""
+
+    type: Literal["p", "h2", "ul", "quote"]
+    text: str | None = None
+    items: list[str] | None = None
+
+
+class BlogPostCreate(BaseModel):
+    slug: str = Field(min_length=1, max_length=120)
+    title: str = Field(min_length=1, max_length=160)
+    date: str = Field(min_length=10, max_length=10)  # YYYY-MM-DD
+    tag: BlogTag = "Story"
+    excerpt: str = ""
+    standfirst: str | None = None
+    body: list[BlogBlock] = []
+    author_name: str = ""
+    author_role: str = ""
+    reading_minutes: int = Field(default=3, ge=1, le=60)
+    featured: bool = False
+    status: ContentStatus = "draft"
+
+
+class BlogPostPatch(BaseModel):
+    slug: str | None = Field(default=None, min_length=1, max_length=120)
+    title: str | None = Field(default=None, min_length=1, max_length=160)
+    date: str | None = Field(default=None, min_length=10, max_length=10)
+    tag: BlogTag | None = None
+    excerpt: str | None = None
+    standfirst: str | None = None
+    body: list[BlogBlock] | None = None
+    author_name: str | None = None
+    author_role: str | None = None
+    reading_minutes: int | None = Field(default=None, ge=1, le=60)
+    featured: bool | None = None
+    status: ContentStatus | None = None
+
+
+class ChangelogCreate(BaseModel):
+    date: str = Field(min_length=10, max_length=10)
+    tag: BlogTag = "Release"
+    title: str = Field(min_length=1, max_length=160)
+    body: str = ""
+    status: ContentStatus = "published"
+
+
+class ChangelogPatch(BaseModel):
+    date: str | None = Field(default=None, min_length=10, max_length=10)
+    tag: BlogTag | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=160)
+    body: str | None = None
+    status: ContentStatus | None = None
+
+
+class PageSection(BaseModel):
+    heading: str = Field(min_length=1, max_length=200)
+    paragraphs: list[str] | None = None
+    bullets: list[str] | None = None
+
+
+class ContentPagePatch(BaseModel):
+    kicker: str | None = None
+    title: str | None = None
+    intro: str | None = None
+    updated_label: str | None = None
+    sections: list[PageSection] | None = None
+    status: ContentStatus | None = None
+
+
+class VerifyPublisherIn(BaseModel):
+    verified: bool = True
