@@ -5,6 +5,10 @@
   # Build from the website/ subdirectory (monorepo).
   base = "website"
   command = "npm run build"
+  # Next.js build output, resolved relative to `base` (→ website/.next).
+  # Must differ from `base`; declaring it here overrides any UI "Publish
+  # directory" value (file config wins over the dashboard).
+  publish = ".next"
 
 [build.environment]
   # Next 16 + React 19 need a current Node.
