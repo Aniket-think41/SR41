@@ -81,6 +81,12 @@ export interface Db {
   pod_members: PodMember[];
   resources: Resource[];
   resource_stars: { id: string; resource_id: string; user_id: string }[];
+  /** profile pins (GitHub-style), ordered by position */
+  resource_pins: { id: string; resource_id: string; user_id: string; position: number }[];
+  /** publisher follows: follower_id follows publisher_id */
+  follows: { id: string; follower_id: string; publisher_id: string }[];
+  /** org follows (watches): follower_id follows org_id */
+  org_follows: { id: string; follower_id: string; org_id: string }[];
   invitations: Invitation[];
   activities: Activity[];
   notifications: Notification[];
@@ -90,7 +96,7 @@ export interface Db {
   session_user_id: string | null;
 }
 
-const STORAGE_KEY = "skillshare.mockdb.v3"; // v3: notification inbox (F1)
+const STORAGE_KEY = "skillshare.mockdb.v7"; // v7: org follows + follower stats
 
 const t = (iso: string) => new Date(iso).toISOString();
 
@@ -753,6 +759,21 @@ const seedStars = [
   { id: "st-4", resource_id: "postgres-mcp", user_id: "u-priya" },
 ];
 
+// A couple of resources the demo user has pinned to their profile.
+const seedPins = [
+  { id: "pin-1", resource_id: "pr-reviewer", user_id: "u-aniket", position: 0 },
+  { id: "pin-2", resource_id: "res-eval-harness", user_id: "u-aniket", position: 1 },
+];
+
+// The demo user already follows Ada Rao, so the publisher page shows "Following".
+const seedFollows = [{ id: "fol-1", follower_id: "u-aniket", publisher_id: "u-ada" }];
+
+// A couple of org watchers so the org page shows a non-zero follower count.
+const seedOrgFollows = [
+  { id: "ofl-1", follower_id: "u-ada", org_id: "org-think41" },
+  { id: "ofl-2", follower_id: "u-nilesh", org_id: "org-think41" },
+];
+
 const seedActivities: Activity[] = [
   { id: "act-1", user_id: "u-aniket", org_id: "org-think41", verb: "updated", object_type: "resource", object_id: "res-eval-harness", object_title: "Retrieval Eval Harness", meta: "v0.6.0", created_at: t("2026-06-01T10:24:00Z") },
   { id: "act-2", user_id: "u-dev", org_id: "org-think41", verb: "updated", object_type: "resource", object_id: "res-release-skill", object_title: "Release Train Conductor", meta: "v1.0.0", created_at: t("2026-06-02T08:00:00Z") },
@@ -794,11 +815,17 @@ export function seed(): Db {
     pod_members: structuredClone(seedPodMembers),
     resources: structuredClone([...seedPublicResources, ...seedInternalResources]),
     resource_stars: structuredClone(seedStars),
+    resource_pins: structuredClone(seedPins),
+    follows: structuredClone(seedFollows),
+    org_follows: structuredClone(seedOrgFollows),
     invitations: structuredClone(seedInvitations),
     activities: structuredClone(seedActivities),
     notifications: structuredClone(seedNotifications),
     org_features: [],
-    session_user_id: null,
+    // Mock mode only: start signed in as the demo user so the dashboard shows
+    // data without a login round-trip. (When NEXT_PUBLIC_API_URL points at a
+    // real backend, the mock db isn't used and real auth applies.)
+    session_user_id: "u-aniket",
   };
 }
 

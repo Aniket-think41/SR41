@@ -125,7 +125,7 @@ export default function MembersPage() {
               <tr key={m.id}>
                 <td>
                   <span className="flex items-center gap-2.5">
-                    <Avatar name={m.user?.display_name ?? "?"} size="sm" />
+                    <Avatar name={m.user?.display_name ?? "?"} src={m.user?.avatar_url} size="sm" />
                     <span>
                       <span className="block text-sm font-bold text-ink">
                         {m.user?.display_name}

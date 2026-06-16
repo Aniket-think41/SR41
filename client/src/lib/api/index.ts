@@ -3,10 +3,11 @@
  * Screens never call fetch directly; they call these via React Query.
  */
 
-import { request, uploadFile } from "./http";
+import { request, uploadAvatar, uploadFile, uploadOrgLogo } from "./http";
 import type {
   Activity,
   AuthSession,
+  Contributions,
   Invitation,
   Notification,
   OrgFeature,
@@ -25,8 +26,16 @@ import type {
   User,
 } from "../types";
 
-export type OrgWithRole = Organization & { my_role: OrgRole };
-export type PublisherProfile = User & { resources: Resource[] };
+export type OrgWithRole = Organization & {
+  my_role: OrgRole;
+  followers_count?: number;
+  following?: boolean;
+};
+export type PublisherProfile = User & {
+  resources: Resource[];
+  followers_count: number;
+  following: boolean;
+};
 export type UserProfile = User & {
   stats: {
     resources: number;
@@ -34,6 +43,8 @@ export type UserProfile = User & {
     stars_received: number;
     stars_given: number;
     orgs: number;
+    followers: number;
+    following: number;
   };
 };
 
@@ -61,6 +72,7 @@ export const api = {
   logout: () => request<{ ok: true }>("POST", "/api/auth/logout"),
   me: () => request<User>("GET", "/api/auth/me"),
   updateMe: (body: Partial<User>) => request<User>("PATCH", "/api/auth/me", body),
+  uploadAvatar: (file: File) => uploadAvatar(file),
 
   /* ---- orgs ---- */
   myOrgs: () => request<OrgWithRole[]>("GET", "/api/orgs"),
@@ -69,6 +81,7 @@ export const api = {
   org: (slug: string) => request<OrgWithRole>("GET", `/api/orgs/${slug}`),
   updateOrg: (slug: string, body: Partial<Organization> & { terminology?: Terminology | null }) =>
     request<Organization>("PATCH", `/api/orgs/${slug}`, body),
+  uploadOrgLogo: (slug: string, file: File) => uploadOrgLogo(slug, file),
   orgFeatures: (slug: string) => request<OrgFeature[]>("GET", `/api/orgs/${slug}/features`),
   setFeature: (slug: string, key: string, enabled: boolean) =>
     request<OrgFeature>("PATCH", `/api/orgs/${slug}/features/${key}`, { enabled }),
@@ -87,6 +100,11 @@ export const api = {
   setMemberRole: (slug: string, userId: string, role: OrgRole) =>
     request<OrgMember>("PATCH", `/api/orgs/${slug}/members/${userId}`, { role }),
   orgActivity: (slug: string) => request<Activity[]>("GET", `/api/orgs/${slug}/activity`),
+  orgPublished: (slug: string) => request<Resource[]>("GET", `/api/orgs/${slug}/published`),
+  followOrg: (slug: string) =>
+    request<{ following: boolean; followers_count: number }>("POST", `/api/orgs/${slug}/follow`),
+  unfollowOrg: (slug: string) =>
+    request<{ following: boolean; followers_count: number }>("DELETE", `/api/orgs/${slug}/follow`),
   orgSearch: (slug: string, q: string) =>
     request<{ resources: Resource[]; projects: Project[]; pods: Pod[]; members: User[] }>(
       "GET",
@@ -151,6 +169,8 @@ export const api = {
   unpublish: (id: string) => request<Resource>("DELETE", `/api/resources/${id}/publish`),
   star: (id: string) => request<Resource>("POST", `/api/resources/${id}/star`),
   unstar: (id: string) => request<Resource>("DELETE", `/api/resources/${id}/star`),
+  pin: (id: string) => request<Resource>("POST", `/api/resources/${id}/pin`),
+  unpin: (id: string) => request<Resource>("DELETE", `/api/resources/${id}/pin`),
   upload: (filename: string) =>
     request<{ file_url: string }>("POST", "/api/resources/upload", { filename }),
   uploadFile: (file: File, kind: "image" | "video" | "file") => uploadFile(file, kind),
@@ -177,12 +197,19 @@ export const api = {
   publicResource: (id: string) => request<Resource>("GET", `/api/public/resources/${id}`),
   publisher: (username: string) =>
     request<PublisherProfile>("GET", `/api/public/publishers/${username}`),
+  followPublisher: (username: string) =>
+    request<{ following: boolean; followers_count: number }>("POST", `/api/public/publishers/${username}/follow`),
+  unfollowPublisher: (username: string) =>
+    request<{ following: boolean; followers_count: number }>("DELETE", `/api/public/publishers/${username}/follow`),
 
   /* ---- profile ---- */
   userProfile: (username: string) => request<UserProfile>("GET", `/api/users/${username}`),
   userResources: (username: string, query: ResourceQuery = {}) =>
     request<Resource[]>("GET", `/api/users/${username}/resources${qs(query as Record<string, string>)}`),
   userStarred: (username: string) => request<Resource[]>("GET", `/api/users/${username}/starred`),
+  userPinned: (username: string) => request<Resource[]>("GET", `/api/users/${username}/pinned`),
+  userContributions: (username: string) =>
+    request<Contributions>("GET", `/api/users/${username}/contributions`),
   userActivity: (username: string) => request<Activity[]>("GET", `/api/users/${username}/activity`),
   userOrgs: (username: string) => request<OrgWithRole[]>("GET", `/api/users/${username}/orgs`),
 };

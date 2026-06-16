@@ -17,6 +17,8 @@ Personal Access Token (skst_…) and stores it in
     skillshare add note --org think41 --title "..." -f notes.md \
         --image diagram.png --video demo.mp4 --link https://docs.example.com
     skillshare star <id> / publish <id> / import <id> --org <slug>
+    skillshare pin <id> / unpin <id> / pins      curate your profile's pinned set
+    skillshare avatar me.png                      set your profile photo
 """
 
 import argparse
@@ -362,6 +364,73 @@ def cmd_star(args) -> None:
     print(f"★ starred {BOLD}{r['title']}{RESET} ({r['stars_count']} stars)")
 
 
+def cmd_pin(args) -> None:
+    r = request("POST", f"/api/resources/{args.id}/pin")
+    print(f"📌 pinned {BOLD}{r['title']}{RESET} to your profile")
+
+
+def cmd_unpin(args) -> None:
+    r = request("DELETE", f"/api/resources/{args.id}/pin")
+    print(f"unpinned {BOLD}{r['title']}{RESET}")
+
+
+def cmd_pins(_args) -> None:
+    me = request("GET", "/api/auth/me")
+    print_resources(request("GET", f"/api/users/{me['username']}/pinned"))
+
+
+def cmd_avatar(args) -> None:
+    """Upload a local image and set it as the profile picture."""
+    p = Path(args.file).expanduser()
+    if not p.is_file():
+        die(f"file not found: {args.file}")
+    t = token()
+    if not t:
+        die("not logged in — run `skillshare login` (or set SKILLSHARE_TOKEN)")
+    try:
+        with p.open("rb") as fh:
+            res = httpx.post(
+                f"{api_url()}/api/auth/me/avatar",
+                headers={"Authorization": f"Bearer {t}"},
+                files={"file": (p.name, fh)},
+                timeout=120,
+            )
+    except httpx.HTTPError as e:
+        die(f"cannot reach {api_url()} ({e.__class__.__name__})")
+    if res.status_code >= 400:
+        try:
+            die(f"{res.json()['error']['code']}: {res.json()['error']['message']}")
+        except (KeyError, ValueError):
+            die(f"HTTP {res.status_code}: {res.text[:200]}")
+    print(f"updated profile photo → {res.json().get('avatar_url')}")
+
+
+def cmd_org_logo(args) -> None:
+    """Upload a local image and set it as an org's logo (admins only)."""
+    p = Path(args.file).expanduser()
+    if not p.is_file():
+        die(f"file not found: {args.file}")
+    t = token()
+    if not t:
+        die("not logged in — run `skillshare login` (or set SKILLSHARE_TOKEN)")
+    try:
+        with p.open("rb") as fh:
+            res = httpx.post(
+                f"{api_url()}/api/orgs/{args.org}/logo",
+                headers={"Authorization": f"Bearer {t}"},
+                files={"file": (p.name, fh)},
+                timeout=120,
+            )
+    except httpx.HTTPError as e:
+        die(f"cannot reach {api_url()} ({e.__class__.__name__})")
+    if res.status_code >= 400:
+        try:
+            die(f"{res.json()['error']['code']}: {res.json()['error']['message']}")
+        except (KeyError, ValueError):
+            die(f"HTTP {res.status_code}: {res.text[:200]}")
+    print(f"updated {BOLD}{args.org}{RESET} logo → {res.json().get('logo_url')}")
+
+
 def cmd_publish(args) -> None:
     r = request("POST", f"/api/resources/{args.id}/publish")
     print(f"🌐 published {BOLD}{r['title']}{RESET} to the public marketplace")
@@ -370,6 +439,26 @@ def cmd_publish(args) -> None:
 def cmd_import(args) -> None:
     r = request("POST", f"/api/resources/{args.id}/import", body={"org_slug": args.org})
     print(f"imported {BOLD}{r['title']}{RESET} into {args.org} [{r['id']}]")
+
+
+def cmd_follow(args) -> None:
+    res = request("POST", f"/api/public/publishers/{args.username}/follow")
+    print(f"following {BOLD}@{args.username}{RESET} — you'll be notified on new releases ({res['followers_count']} followers)")
+
+
+def cmd_unfollow(args) -> None:
+    res = request("DELETE", f"/api/public/publishers/{args.username}/follow")
+    print(f"unfollowed {BOLD}@{args.username}{RESET} ({res['followers_count']} followers)")
+
+
+def cmd_follow_org(args) -> None:
+    res = request("POST", f"/api/orgs/{args.org}/follow")
+    print(f"following org {BOLD}{args.org}{RESET} — notified on new releases ({res['followers_count']} followers)")
+
+
+def cmd_unfollow_org(args) -> None:
+    res = request("DELETE", f"/api/orgs/{args.org}/follow")
+    print(f"unfollowed org {BOLD}{args.org}{RESET} ({res['followers_count']} followers)")
 
 
 _VERB_GLYPH = {"created": "✦", "published": "🌐"}
@@ -585,6 +674,25 @@ def main() -> None:
     sp.add_argument("id")
     sp.set_defaults(fn=cmd_star)
 
+    sp = sub.add_parser("pin", help="pin a resource to your profile (max 6)")
+    sp.add_argument("id")
+    sp.set_defaults(fn=cmd_pin)
+
+    sp = sub.add_parser("unpin", help="remove a resource from your pinned set")
+    sp.add_argument("id")
+    sp.set_defaults(fn=cmd_unpin)
+
+    sub.add_parser("pins", help="list the resources pinned to your profile").set_defaults(fn=cmd_pins)
+
+    sp = sub.add_parser("avatar", help="upload an image and set it as your profile photo")
+    sp.add_argument("file")
+    sp.set_defaults(fn=cmd_avatar)
+
+    sp = sub.add_parser("org-logo", help="upload an image and set it as an org's logo (admin)")
+    sp.add_argument("org", help="org slug")
+    sp.add_argument("file")
+    sp.set_defaults(fn=cmd_org_logo)
+
     sp = sub.add_parser("publish", help="publish a resource to the marketplace")
     sp.add_argument("id")
     sp.set_defaults(fn=cmd_publish)
@@ -593,6 +701,22 @@ def main() -> None:
     sp.add_argument("id")
     sp.add_argument("--org", required=True, help="target org slug")
     sp.set_defaults(fn=cmd_import)
+
+    sp = sub.add_parser("follow", help="follow a publisher (get notified on new releases)")
+    sp.add_argument("username")
+    sp.set_defaults(fn=cmd_follow)
+
+    sp = sub.add_parser("unfollow", help="unfollow a publisher")
+    sp.add_argument("username")
+    sp.set_defaults(fn=cmd_unfollow)
+
+    sp = sub.add_parser("follow-org", help="follow (watch) an org for release notifications")
+    sp.add_argument("org", help="org slug")
+    sp.set_defaults(fn=cmd_follow_org)
+
+    sp = sub.add_parser("unfollow-org", help="unfollow an org")
+    sp.add_argument("org", help="org slug")
+    sp.set_defaults(fn=cmd_unfollow_org)
 
     args = p.parse_args()
     args.fn(args)

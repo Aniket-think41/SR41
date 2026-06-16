@@ -3,14 +3,15 @@
 import re
 
 import httpx
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from pydantic import BaseModel, Field
 
+from .. import storage
 from ..config import get_settings
 from ..database import get_db
-from ..errors import conflict, forbidden, not_found, unauthorized
+from ..errors import conflict, forbidden, not_found, unauthorized, validation
 from ..models import ApiToken, User
 from ..schemas import GoogleIn, LoginIn, MePatch, SignupIn
 from ..security import (
@@ -151,6 +152,32 @@ def update_me(body: MePatch, user: User = Depends(get_current_user), db: Session
         value = getattr(body, field)
         if value is not None:
             setattr(user, field, value)
+    db.commit()
+    return _me_out(user)
+
+
+@router.post("/me/avatar")
+async def upload_avatar(
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Upload a profile picture. Stored via the configured backend — local disk
+    by default (no AWS needed), S3/R2 when STORAGE_BACKEND=s3 — and the returned
+    public URL is saved to the user's avatar_url. Returns the updated self."""
+    if not storage.ext_allowed("image", file.filename or ""):
+        allowed = ", ".join(sorted(storage.ALLOWED_EXT["image"]))
+        raise validation(f"Avatar must be an image ({allowed})")
+    data = await file.read()
+    limit = settings.max_upload_mb * 1024 * 1024
+    if len(data) > limit:
+        raise validation(f"Image exceeds the {settings.max_upload_mb} MB limit")
+    if not data:
+        raise validation("Empty file")
+    user.avatar_url = storage.save_bytes(
+        data, kind="image", username=user.username,
+        filename=file.filename or "avatar.png", content_type=file.content_type,
+    )
     db.commit()
     return _me_out(user)
 

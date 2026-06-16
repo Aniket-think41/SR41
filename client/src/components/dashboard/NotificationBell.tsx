@@ -101,7 +101,7 @@ export function NotificationBell() {
                   n.read_at ? "" : "bg-primary-50/40"
                 }`}
               >
-                <Avatar name={n.actor?.display_name ?? "?"} size="xs" className="mt-0.5 shrink-0" />
+                <Avatar name={n.actor?.display_name ?? "?"} src={n.actor?.avatar_url} size="xs" className="mt-0.5 shrink-0" />
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm leading-snug">
                     <span className="font-bold text-ink">{n.actor?.display_name ?? "Someone"}</span>{" "}

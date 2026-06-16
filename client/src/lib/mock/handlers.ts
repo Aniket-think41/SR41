@@ -56,6 +56,9 @@ function enrich(r: Resource, db: Db): Resource {
     starred_by_me: me
       ? db.resource_stars.some((s) => s.resource_id === r.id && s.user_id === me)
       : false,
+    pinned_by_me: me
+      ? db.resource_pins.some((p) => p.resource_id === r.id && p.user_id === me)
+      : false,
   };
 }
 
@@ -161,6 +164,7 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
       location: body.location ?? me.location,
       website: body.website ?? me.website,
       is_publisher: body.is_publisher ?? me.is_publisher,
+      avatar_url: body.avatar_url !== undefined ? (body.avatar_url as string | null) : me.avatar_url,
       updated_at: now(),
     });
     saveDb();
@@ -202,7 +206,29 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     const me = currentUser(db);
     const membership = db.org_members.find((m) => m.org_id === org.id && m.user_id === me.id);
     if (!membership) throw new HttpError(403, "FORBIDDEN", "You are not a member of this organization");
-    return { ...org, my_role: membership.role };
+    return {
+      ...org,
+      my_role: membership.role,
+      followers_count: db.org_follows.filter((f) => f.org_id === org.id).length,
+      following: db.org_follows.some((f) => f.org_id === org.id && f.follower_id === me.id),
+    };
+  }],
+
+  ["POST", "/api/orgs/:slug/follow", (p, _b, _q, db) => {
+    const org = orgBySlug(db, p.slug);
+    const me = currentUser(db);
+    if (!db.org_follows.some((f) => f.org_id === org.id && f.follower_id === me.id))
+      db.org_follows.push({ id: uid("ofl"), follower_id: me.id, org_id: org.id });
+    saveDb();
+    return { following: true, followers_count: db.org_follows.filter((f) => f.org_id === org.id).length };
+  }],
+
+  ["DELETE", "/api/orgs/:slug/follow", (p, _b, _q, db) => {
+    const org = orgBySlug(db, p.slug);
+    const me = currentUser(db);
+    db.org_follows = db.org_follows.filter((f) => !(f.org_id === org.id && f.follower_id === me.id));
+    saveDb();
+    return { following: false, followers_count: db.org_follows.filter((f) => f.org_id === org.id).length };
   }],
 
   ["PATCH", "/api/orgs/:slug", (p, body, _q, db) => {
@@ -351,6 +377,23 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
       pods: pods.filter((x) => match(x.name)).slice(0, 4),
       members: members.filter((u) => match(u.display_name) || match(u.username)).slice(0, 4),
     };
+  }],
+
+  // Org page — everything this org has published to the marketplace.
+  ["GET", "/api/orgs/:slug/published", (p, _b, _q, db) => {
+    const org = orgBySlug(db, p.slug);
+    const projectIds = db.projects.filter((x) => x.org_id === org.id).map((x) => x.id);
+    const podIds = db.pods.filter((x) => projectIds.includes(x.project_id)).map((x) => x.id);
+    return db.resources
+      .filter(
+        (r) =>
+          r.is_public &&
+          ((r.scope_type === "ORG" && r.scope_id === org.id) ||
+            (r.scope_type === "PROJECT" && projectIds.includes(r.scope_id ?? "")) ||
+            (r.scope_type === "POD" && podIds.includes(r.scope_id ?? "")))
+      )
+      .sort((a, b) => b.stars_count - a.stars_count)
+      .map((r) => enrich(r, db));
   }],
 
   ["GET", "/api/orgs/:slug/activity", (p, _b, _q, db) => {
@@ -649,10 +692,26 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
       throw new HttpError(403, "FORBIDDEN", "Enable publisher mode in your profile to publish to the marketplace");
     if (!featureEnabled(db, scopeOrgId(db, r), "publishing"))
       throw new HttpError(403, "FORBIDDEN", "Marketplace publishing is disabled for this organization");
+    const wasPublic = r.is_public;
     r.is_public = true;
     r.updated_at = now();
     const orgId = scopeOrgId(db, r);
     if (orgId) logActivity(db, { user_id: me.id, org_id: orgId, verb: "published", object_type: "resource", object_id: r.id, object_title: r.title });
+    // Newly public → notify the author's followers (mirrors backend
+    // notify_followers). The mock inbox is single-user (no recipient field), so
+    // we add one entry per follow; in seed only Ada has a follower (the demo
+    // user), so this fires when viewing the real cross-user flow.
+    if (!wasPublic) {
+      for (const f of db.follows.filter((x) => x.publisher_id === r.author_id && x.follower_id !== r.author_id)) {
+        void f;
+        db.notifications.unshift({
+          id: uid("ntf"), actor_id: r.author_id, org_id: orgId,
+          scope_type: "PUBLIC", scope_id: null, verb: "published", object_type: "resource",
+          object_id: r.id, object_title: r.title, meta: "from a publisher you follow",
+          read_at: null, created_at: now(),
+        });
+      }
+    }
     saveDb();
     return enrich(r, db);
   }],
@@ -685,6 +744,29 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     const before = db.resource_stars.length;
     db.resource_stars = db.resource_stars.filter((s) => !(s.resource_id === r.id && s.user_id === me.id));
     if (db.resource_stars.length < before) r.stars_count = Math.max(0, r.stars_count - 1);
+    saveDb();
+    return enrich(r, db);
+  }],
+
+  ["POST", "/api/resources/:id/pin", (p, _b, _q, db) => {
+    const me = currentUser(db);
+    const r = db.resources.find((x) => x.id === p.id);
+    if (!r) throw notFound("Resource");
+    if (!db.resource_pins.some((x) => x.resource_id === r.id && x.user_id === me.id)) {
+      const count = db.resource_pins.filter((x) => x.user_id === me.id).length;
+      if (count >= 6)
+        throw new HttpError(422, "VALIDATION_ERROR", "You can pin up to 6 resources — unpin one first");
+      db.resource_pins.push({ id: uid("pin"), resource_id: r.id, user_id: me.id, position: count });
+    }
+    saveDb();
+    return enrich(r, db);
+  }],
+
+  ["DELETE", "/api/resources/:id/pin", (p, _b, _q, db) => {
+    const me = currentUser(db);
+    const r = db.resources.find((x) => x.id === p.id);
+    if (!r) throw notFound("Resource");
+    db.resource_pins = db.resource_pins.filter((x) => !(x.resource_id === r.id && x.user_id === me.id));
     saveDb();
     return enrich(r, db);
   }],
@@ -737,12 +819,35 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
   ["GET", "/api/public/publishers/:username", (p, _b, _q, db) => {
     const user = db.users.find((u) => u.username === p.username);
     if (!user) throw notFound("Publisher");
+    const me = db.session_user_id;
     return {
       ...user,
       resources: db.resources
         .filter((r) => r.is_public && r.author_id === user.id)
         .map((r) => enrich(r, db)),
+      followers_count: db.follows.filter((f) => f.publisher_id === user.id).length,
+      following: !!me && db.follows.some((f) => f.publisher_id === user.id && f.follower_id === me),
     };
+  }],
+
+  ["POST", "/api/public/publishers/:username/follow", (p, _b, _q, db) => {
+    const me = currentUser(db);
+    const user = db.users.find((u) => u.username === p.username);
+    if (!user) throw notFound("Publisher");
+    if (user.id === me.id) throw new HttpError(422, "VALIDATION_ERROR", "You can't follow yourself");
+    if (!db.follows.some((f) => f.publisher_id === user.id && f.follower_id === me.id))
+      db.follows.push({ id: uid("fol"), follower_id: me.id, publisher_id: user.id });
+    saveDb();
+    return { following: true, followers_count: db.follows.filter((f) => f.publisher_id === user.id).length };
+  }],
+
+  ["DELETE", "/api/public/publishers/:username/follow", (p, _b, _q, db) => {
+    const me = currentUser(db);
+    const user = db.users.find((u) => u.username === p.username);
+    if (!user) throw notFound("Publisher");
+    db.follows = db.follows.filter((f) => !(f.publisher_id === user.id && f.follower_id === me.id));
+    saveDb();
+    return { following: false, followers_count: db.follows.filter((f) => f.publisher_id === user.id).length };
   }],
 
   ["GET", "/api/public/search", (_p, _b, q, db) =>
@@ -762,6 +867,8 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
         stars_received: mine.reduce((acc, r) => acc + r.stars_count, 0),
         stars_given: db.resource_stars.filter((s) => s.user_id === user.id).length,
         orgs: db.org_members.filter((m) => m.user_id === user.id).length,
+        followers: db.follows.filter((f) => f.publisher_id === user.id).length,
+        following: db.follows.filter((f) => f.follower_id === user.id).length,
       },
     };
   }],
@@ -777,6 +884,59 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     if (!user) throw notFound("User");
     const ids = db.resource_stars.filter((s) => s.user_id === user.id).map((s) => s.resource_id);
     return db.resources.filter((r) => ids.includes(r.id)).map((r) => enrich(r, db));
+  }],
+
+  ["GET", "/api/users/:username/pinned", (p, _b, _q, db) => {
+    const user = db.users.find((u) => u.username === p.username);
+    if (!user) throw notFound("User");
+    const self = db.session_user_id === user.id;
+    return db.resource_pins
+      .filter((x) => x.user_id === user.id)
+      .sort((a, b) => a.position - b.position)
+      .map((x) => db.resources.find((r) => r.id === x.resource_id))
+      .filter((r): r is Resource => !!r && (self || r.is_public))
+      .map((r) => enrich(r, db));
+  }],
+
+  // GitHub-style contribution heatmap: a "contribution" is a resource authored
+  // or a star given, bucketed per day over the trailing window (default 26wk).
+  ["GET", "/api/users/:username/contributions", (p, _b, q, db) => {
+    const user = db.users.find((u) => u.username === p.username);
+    if (!user) throw notFound("User");
+    const self = db.session_user_id === user.id;
+    const weeks = Math.min(53, Math.max(1, Number(q.get("weeks") ?? 26)));
+    const totalDays = weeks * 7;
+    const dayMs = 86400_000;
+    const endDate = new Date();
+    const end = endDate.toISOString().slice(0, 10);
+    const startMs = endDate.getTime() - (totalDays - 1) * dayMs;
+    const startDay = new Date(startMs).toISOString().slice(0, 10);
+
+    const counts: Record<string, number> = {};
+    const bump = (iso: string) => {
+      const d = iso.slice(0, 10);
+      if (d >= startDay && d <= end) counts[d] = (counts[d] ?? 0) + 1;
+    };
+    db.resources
+      .filter((r) => r.author_id === user.id && (self || r.is_public))
+      .forEach((r) => bump(r.created_at));
+    // stars don't carry a created_at in the mock store; approximate as today so
+    // recent endorsements still register a contribution.
+    db.resource_stars.filter((s) => s.user_id === user.id).forEach(() => bump(end));
+
+    const days = Array.from({ length: totalDays }, (_, i) => {
+      const d = new Date(startMs + i * dayMs).toISOString().slice(0, 10);
+      return { date: d, count: counts[d] ?? 0 };
+    });
+    const values = Object.values(counts);
+    return {
+      weeks,
+      start: startDay,
+      end,
+      total: values.reduce((a, b) => a + b, 0),
+      max: values.length ? Math.max(...values) : 0,
+      days,
+    };
   }],
 
   ["GET", "/api/users/:username/activity", (p, _b, _q, db) => {

@@ -156,6 +156,22 @@ export interface Resource {
   scope_label?: ScopeType;
   author?: User;
   starred_by_me?: boolean;
+  /** true when the signed-in user has pinned this to their profile */
+  pinned_by_me?: boolean;
+}
+
+/** GitHub-style contribution heatmap (profile). One bucket per day. */
+export interface ContributionDay {
+  date: string; // YYYY-MM-DD
+  count: number;
+}
+export interface Contributions {
+  weeks: number;
+  start: string;
+  end: string;
+  total: number;
+  max: number;
+  days: ContributionDay[];
 }
 
 export interface Invitation {
@@ -207,7 +223,8 @@ export interface Activity {
 export interface Notification {
   id: string;
   actor_id: string;
-  org_id: string;
+  /** null for follower notifications about a PUBLIC-scoped resource */
+  org_id: string | null;
   scope_type: ScopeType;
   scope_id: string | null;
   verb: "created" | "published";

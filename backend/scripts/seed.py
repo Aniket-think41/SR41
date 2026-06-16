@@ -31,6 +31,7 @@ from app.models import (  # noqa: E402
     Project,
     ProjectMember,
     Resource,
+    ResourcePin,
     ResourceStar,
     User,
 )
@@ -494,6 +495,22 @@ def ensure_columns() -> None:
             conn.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0"))
         print("Migrated: added users.is_admin column.")
 
+    # notifications.org_id became nullable (follower notifications carry no org).
+    # SQLite can't drop a NOT NULL in place; the table is regenerated from
+    # activity, so rebuild it when it's empty and still has the old constraint.
+    if "notifications" in insp.get_table_names():
+        org_col = next((c for c in insp.get_columns("notifications") if c["name"] == "org_id"), None)
+        if org_col is not None and not org_col["nullable"]:
+            with engine.begin() as conn:
+                n = conn.execute(text("SELECT COUNT(*) FROM notifications")).scalar()
+                if n == 0:
+                    conn.execute(text("DROP TABLE notifications"))
+            if n == 0:
+                Base.metadata.create_all(bind=engine)
+                print("Migrated: notifications.org_id is now nullable (rebuilt).")
+            else:
+                print("WARNING: notifications has rows; org_id NOT NULL left as-is.")
+
 
 def main() -> None:
     reset = "--reset" in sys.argv
@@ -514,6 +531,12 @@ def main() -> None:
         admin = db.query(User).filter(User.email == "aniket.lnu@think41.com").first()
         if admin and not admin.is_admin:
             admin.is_admin = True
+            db.commit()
+        # Demo profile pins for aniket — idempotent, fills in on pre-existing DBs.
+        if not db.query(ResourcePin.id).filter(ResourcePin.user_id == "u-aniket").first():
+            for pos, rid in enumerate(["pr-reviewer", "res-eval-harness"]):
+                if db.get(Resource, rid):
+                    db.add(ResourcePin(user_id="u-aniket", resource_id=rid, position=pos))
             db.commit()
         print("Marketing content (blog, changelog, legal pages) is up to date.")
     finally:

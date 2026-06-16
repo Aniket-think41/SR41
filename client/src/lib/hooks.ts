@@ -19,6 +19,7 @@ export const qk = {
   orgMembers: (slug: string) => ["org", slug, "members"] as const,
   invitations: (slug: string) => ["org", slug, "invitations"] as const,
   orgActivity: (slug: string) => ["org", slug, "activity"] as const,
+  orgPublished: (slug: string) => ["org", slug, "published"] as const,
   orgResources: (slug: string, q?: ResourceQuery) => ["org", slug, "resources", q ?? {}] as const,
   projects: (slug: string) => ["org", slug, "projects"] as const,
   project: (id: string) => ["project", id] as const,
@@ -30,6 +31,7 @@ export const qk = {
   publicResources: (q?: ResourceQuery) => ["public", "resources", q ?? {}] as const,
   publicResource: (id: string) => ["public", "resource", id] as const,
   profile: (username: string) => ["profile", username] as const,
+  publisher: (username: string) => ["publisher", username] as const,
   notifications: (unreadOnly = false) => ["notifications", { unreadOnly }] as const,
   notificationsUnread: ["notifications", "unread_count"] as const,
 };

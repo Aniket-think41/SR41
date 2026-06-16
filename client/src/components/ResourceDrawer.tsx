@@ -9,7 +9,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
-  X, Star, Pencil, Trash2, Globe, Copy, Download, Check, ExternalLink,
+  X, Star, Pin, PinOff, Pencil, Trash2, Globe, Copy, Download, Check, ExternalLink,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/api/http";
@@ -61,6 +61,14 @@ function DetailView({ resource: initial, onClose }: { resource: Resource; onClos
     mutationFn: () => (r.starred_by_me ? api.unstar(r.id) : api.star(r.id)),
     onSuccess: invalidate,
   });
+  const pinMut = useMutation({
+    mutationFn: () => (r.pinned_by_me ? api.unpin(r.id) : api.pin(r.id)),
+    onSuccess: async () => {
+      await invalidate();
+      toast(r.pinned_by_me ? "Unpinned from your profile" : "Pinned to your profile");
+    },
+    onError: (e) => toast(errorMessage(e), "error"),
+  });
   const publishMut = useMutation({
     mutationFn: () => (r.is_public ? api.unpublish(r.id) : api.publish(r.id)),
     onSuccess: async () => {
@@ -102,7 +110,7 @@ function DetailView({ resource: initial, onClose }: { resource: Resource; onClos
 
         <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted">
           <span className="flex items-center gap-1.5">
-            <Avatar name={r.author?.display_name ?? "?"} size="xs" />
+            <Avatar name={r.author?.display_name ?? "?"} src={r.author?.avatar_url} size="xs" />
             <span className="font-semibold text-ink">{r.author?.display_name}</span>
           </span>
           <span className="code">v{r.version}</span>
@@ -179,6 +187,16 @@ function DetailView({ resource: initial, onClose }: { resource: Resource; onClos
         >
           <Star className="h-3.5 w-3.5" fill={r.starred_by_me ? "currentColor" : "none"} />
           {r.starred_by_me ? "Starred" : "Star"}
+        </button>
+
+        <button
+          onClick={() => pinMut.mutate()}
+          className={`btn btn-sm ${r.pinned_by_me ? "btn-primary" : "btn-secondary"}`}
+          disabled={pinMut.isPending}
+          title={r.pinned_by_me ? "Unpin from your profile" : "Pin to your profile"}
+        >
+          {r.pinned_by_me ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+          {r.pinned_by_me ? "Pinned" : "Pin"}
         </button>
 
         {canEdit && (

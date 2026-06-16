@@ -4,9 +4,10 @@ import re
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy.orm import Session
 
+from .. import storage
 from ..config import get_settings
 from ..database import get_db
 from ..errors import conflict, forbidden, not_found, validation
@@ -16,6 +17,7 @@ from ..models import (
     License,
     Organization,
     OrgFeature,
+    OrgFollow,
     OrgMember,
     Pod,
     Project,
@@ -72,11 +74,41 @@ def create_org(body: OrgCreate, user: User = Depends(get_current_user), db: Sess
     return org_out(org)
 
 
+def _org_follow_state(db: Session, org: Organization, user: User) -> dict:
+    return {
+        "followers_count": db.query(OrgFollow).filter(OrgFollow.org_id == org.id).count(),
+        "following": bool(
+            db.query(OrgFollow.id)
+            .filter(OrgFollow.org_id == org.id, OrgFollow.follower_id == user.id)
+            .first()
+        ),
+    }
+
+
 @router.get("/{slug}")
 def get_org(slug: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     org = org_by_slug(db, slug)
     m = require_org_member(db, org, user)
-    return org_out(org, m.role)
+    return {**org_out(org, m.role), **_org_follow_state(db, org, user)}
+
+
+@router.post("/{slug}/follow")
+def follow_org(slug: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Follow (watch) an org — get notified when it publishes to the marketplace.
+    Distinct from membership; members already get publish notifications."""
+    org = org_by_slug(db, slug)
+    if not db.query(OrgFollow).filter(OrgFollow.org_id == org.id, OrgFollow.follower_id == user.id).first():
+        db.add(OrgFollow(follower_id=user.id, org_id=org.id))
+        db.commit()
+    return {"following": True, "followers_count": db.query(OrgFollow).filter(OrgFollow.org_id == org.id).count()}
+
+
+@router.delete("/{slug}/follow")
+def unfollow_org(slug: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    org = org_by_slug(db, slug)
+    db.query(OrgFollow).filter(OrgFollow.org_id == org.id, OrgFollow.follower_id == user.id).delete()
+    db.commit()
+    return {"following": False, "followers_count": db.query(OrgFollow).filter(OrgFollow.org_id == org.id).count()}
 
 
 @router.patch("/{slug}")
@@ -95,6 +127,34 @@ def update_org(slug: str, body: OrgPatch, user: User = Depends(get_current_user)
         org.terminology = body.terminology.model_dump()
     db.commit()
     return org_out(org)
+
+
+@router.post("/{slug}/logo")
+async def upload_logo(
+    slug: str,
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Upload an organization logo (admins only). Stored via the configured
+    backend — local disk by default, S3/R2 when configured — and saved to the
+    org's logo_url. Returns the updated org."""
+    org = org_by_slug(db, slug)
+    m = require_org_admin(db, org, user)
+    if not storage.ext_allowed("image", file.filename or ""):
+        allowed = ", ".join(sorted(storage.ALLOWED_EXT["image"]))
+        raise validation(f"Logo must be an image ({allowed})")
+    data = await file.read()
+    if len(data) > settings.max_upload_mb * 1024 * 1024:
+        raise validation(f"Image exceeds the {settings.max_upload_mb} MB limit")
+    if not data:
+        raise validation("Empty file")
+    org.logo_url = storage.save_bytes(
+        data, kind="image", username=f"org-{org.slug}",
+        filename=file.filename or "logo.png", content_type=file.content_type,
+    )
+    db.commit()
+    return org_out(org, m.role)
 
 
 # ---- members & invitations ----
@@ -191,6 +251,31 @@ def set_member_role(
     m.role = body.role
     db.commit()
     return org_member_out(m)
+
+
+# ---- published resources (org public page) ----
+
+@router.get("/{slug}/published")
+def published(slug: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Resources this org has published to the public marketplace — its whole
+    library (org / project / pod scopes) filtered to is_public. Backs the
+    org page reachable from a member's profile. Members only."""
+    org = org_by_slug(db, slug)
+    require_org_member(db, org, user)
+    project_ids = [p.id for p in db.query(Project).filter(Project.org_id == org.id).all()]
+    pod_ids = [p.id for p in db.query(Pod).filter(Pod.project_id.in_(project_ids or [""])).all()]
+    rows = (
+        db.query(Resource)
+        .filter(
+            Resource.is_public.is_(True),
+            ((Resource.scope_type == "ORG") & (Resource.scope_id == org.id))
+            | ((Resource.scope_type == "PROJECT") & Resource.scope_id.in_(project_ids or [""]))
+            | ((Resource.scope_type == "POD") & Resource.scope_id.in_(pod_ids or [""])),
+        )
+        .all()
+    )
+    rows.sort(key=lambda r: r.stars_count, reverse=True)
+    return [resource_out(db, r, user) for r in rows]
 
 
 # ---- activity & search ----

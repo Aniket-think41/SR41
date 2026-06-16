@@ -21,6 +21,7 @@ from .models import (
     Project,
     ProjectMember,
     Resource,
+    ResourcePin,
     ResourceStar,
     User,
 )
@@ -63,10 +64,17 @@ def org_out(o: Organization, my_role: str | None = None) -> dict:
 
 def resource_out(db: Session, r: Resource, me: User | None) -> dict:
     starred = False
+    pinned = False
     if me:
         starred = (
             db.query(ResourceStar.id)
             .filter(ResourceStar.resource_id == r.id, ResourceStar.user_id == me.id)
+            .first()
+            is not None
+        )
+        pinned = (
+            db.query(ResourcePin.id)
+            .filter(ResourcePin.resource_id == r.id, ResourcePin.user_id == me.id)
             .first()
             is not None
         )
@@ -94,6 +102,7 @@ def resource_out(db: Session, r: Resource, me: User | None) -> dict:
         "scope_label": r.scope_type,
         "author": user_out(r.author) if r.author else None,
         "starred_by_me": starred,
+        "pinned_by_me": pinned,
     }
 
 

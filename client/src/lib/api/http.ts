@@ -10,7 +10,7 @@
  * No screen, hook, or component changes.
  */
 
-import type { ApiError } from "../types";
+import type { ApiError, Organization, User } from "../types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 export const USING_MOCK = !API_URL;
@@ -70,6 +70,63 @@ export async function uploadFile(
     throw err;
   }
   return (await res.json()) as { file_url: string };
+}
+
+/**
+ * Upload a new profile picture and get back the updated user. Real mode posts
+ * multipart to /api/auth/me/avatar (stored by the switchable storage backend —
+ * local disk in dev, S3/R2 in prod). Mock mode has no server, so we make a
+ * local object URL and persist it via PATCH so previews work in the browser.
+ */
+export async function uploadAvatar(file: File): Promise<User> {
+  if (USING_MOCK) {
+    const { handle } = await import("../mock/handlers");
+    return handle("PATCH", "/api/auth/me", { avatar_url: URL.createObjectURL(file) }) as Promise<User>;
+  }
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_URL}/api/auth/me/avatar`, {
+    method: "POST",
+    headers: { ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}) },
+    body: form,
+    credentials: "include",
+  });
+  if (!res.ok) {
+    let err: ApiError;
+    try {
+      err = (await res.json()) as ApiError;
+    } catch {
+      err = { error: { code: "INTERNAL_ERROR", message: res.statusText, status: res.status } };
+    }
+    throw err;
+  }
+  return (await res.json()) as User;
+}
+
+/** Upload an organization logo (admins only). Same storage path as avatars. */
+export async function uploadOrgLogo(slug: string, file: File): Promise<Organization> {
+  if (USING_MOCK) {
+    const { handle } = await import("../mock/handlers");
+    return handle("PATCH", `/api/orgs/${slug}`, { logo_url: URL.createObjectURL(file) }) as Promise<Organization>;
+  }
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_URL}/api/orgs/${slug}/logo`, {
+    method: "POST",
+    headers: { ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}) },
+    body: form,
+    credentials: "include",
+  });
+  if (!res.ok) {
+    let err: ApiError;
+    try {
+      err = (await res.json()) as ApiError;
+    } catch {
+      err = { error: { code: "INTERNAL_ERROR", message: res.statusText, status: res.status } };
+    }
+    throw err;
+  }
+  return (await res.json()) as Organization;
 }
 
 export async function request<T>(

@@ -147,7 +147,7 @@ export function CommandPalette() {
                   onClick={() => go(`/dashboard/members`)}
                   className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-surface"
                 >
-                  <Avatar name={u.display_name} size="xs" />
+                  <Avatar name={u.display_name} src={u.avatar_url} size="xs" />
                   <span className="flex-1 truncate text-sm font-semibold text-ink">{u.display_name}</span>
                   <span className="text-xs text-muted">@{u.username}</span>
                 </button>

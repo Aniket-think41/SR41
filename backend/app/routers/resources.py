@@ -10,7 +10,19 @@ from ..config import get_settings
 from ..database import get_db
 from ..errors import forbidden, not_found, validation
 from ..features import feature_enabled
-from ..models import Organization, Pod, Project, Resource, ResourceStar, User
+from ..models import (
+    Follow,
+    Notification,
+    Organization,
+    OrgFollow,
+    OrgMember,
+    Pod,
+    Project,
+    Resource,
+    ResourcePin,
+    ResourceStar,
+    User,
+)
 from .. import storage
 from ..permissions import (
     org_by_slug,
@@ -33,6 +45,7 @@ settings = get_settings()
 
 VALID_TYPES = {"SKILL", "MCP", "NOTE"}
 VALID_SCOPES = {"ORG", "PROJECT", "POD", "PUBLIC"}
+MAX_PINS = 6  # GitHub-style: a small, curated set on the profile
 
 
 def _require_scope_write(db: Session, scope_type: str, scope_id: str | None, user: User) -> None:
@@ -196,6 +209,40 @@ def pod_resources(
 
 # ---- publish / star ----
 
+def _notify_followers(db: Session, publisher: User, r: Resource) -> None:
+    """Tell followers a new resource shipped to the marketplace — both the
+    publisher's followers and (for org-scoped resources) the org's followers.
+    Org members are excluded: they already get the membership notification.
+    org_id may be None (PUBLIC-scoped) — hence Notification.org_id is nullable."""
+    org = scope_org(db, r)
+    recipients: set[str] = {
+        f.follower_id for f in db.query(Follow).filter(Follow.publisher_id == publisher.id).all()
+    }
+    if org:
+        recipients |= {
+            f.follower_id for f in db.query(OrgFollow).filter(OrgFollow.org_id == org.id).all()
+        }
+        # Members were already notified by the membership fan-out — don't double up.
+        member_ids = {m.user_id for m in db.query(OrgMember).filter(OrgMember.org_id == org.id).all()}
+        recipients -= member_ids
+    recipients.discard(publisher.id)
+    for uid in recipients:
+        db.add(
+            Notification(
+                user_id=uid,
+                actor_id=publisher.id,
+                org_id=org.id if org else None,
+                scope_type="PUBLIC",
+                scope_id=None,
+                verb="published",
+                object_type="resource",
+                object_id=r.id,
+                object_title=r.title,
+                meta="from a publisher you follow",
+            )
+        )
+
+
 @router.post("/resources/{resource_id}/publish")
 def publish(resource_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     r = resource_or_404(db, resource_id)
@@ -207,8 +254,12 @@ def publish(resource_id: str, user: User = Depends(get_current_user), db: Sessio
     # (an admin pushing a teammate's work), not your own.
     if r.author_id != user.id and not feature_enabled(db, scope_org(db, r), "publishing"):
         raise forbidden("Marketplace publishing is disabled for this organization")
+    was_public = r.is_public
     r.is_public = True
     _log_resource(db, user, r, "published", notify_scope="ORG")
+    # Newly public → notify the author's followers (only on the transition).
+    if not was_public:
+        _notify_followers(db, db.get(User, r.author_id) or user, r)
     db.commit()
     return resource_out(db, r, user)
 
@@ -248,6 +299,38 @@ def unstar(resource_id: str, user: User = Depends(get_current_user), db: Session
     )
     if deleted:
         r.stars_count = max(0, r.stars_count - 1)
+    db.commit()
+    return resource_out(db, r, user)
+
+
+# ---- pins (profile curation) ----
+
+@router.post("/resources/{resource_id}/pin")
+def pin(resource_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Pin a resource to your profile. You can pin anything you can see; the set
+    is capped at MAX_PINS and ordered by pin time (position)."""
+    r = resource_or_404(db, resource_id)
+    require_resource_read(db, r, user)
+    exists = (
+        db.query(ResourcePin)
+        .filter(ResourcePin.resource_id == r.id, ResourcePin.user_id == user.id)
+        .first()
+    )
+    if not exists:
+        count = db.query(ResourcePin).filter(ResourcePin.user_id == user.id).count()
+        if count >= MAX_PINS:
+            raise validation(f"You can pin up to {MAX_PINS} resources — unpin one first")
+        db.add(ResourcePin(user_id=user.id, resource_id=r.id, position=count))
+        db.commit()
+    return resource_out(db, r, user)
+
+
+@router.delete("/resources/{resource_id}/pin")
+def unpin(resource_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    r = resource_or_404(db, resource_id)
+    db.query(ResourcePin).filter(
+        ResourcePin.resource_id == r.id, ResourcePin.user_id == user.id
+    ).delete()
     db.commit()
     return resource_out(db, r, user)
 

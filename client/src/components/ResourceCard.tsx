@@ -91,7 +91,7 @@ export function ResourceCard({
 
         <div className="mt-4 flex items-center justify-between border-t border-line pt-3.5">
           <span className="flex min-w-0 items-center gap-2">
-            <Avatar name={r.author?.display_name ?? "?"} size="xs" />
+            <Avatar name={r.author?.display_name ?? "?"} src={r.author?.avatar_url} size="xs" />
             <span className="truncate text-xs font-medium text-ink">
               {r.author?.display_name}
               {r.author?.verified && (

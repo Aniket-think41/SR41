@@ -5,9 +5,9 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..errors import not_found
-from ..models import BlogPost, ChangelogEntry, ContentPage, Resource, User
-from ..security import get_current_user_optional
+from ..errors import not_found, validation
+from ..models import BlogPost, ChangelogEntry, ContentPage, Follow, Resource, User
+from ..security import get_current_user, get_current_user_optional
 from ..serialize import (
     blog_post_out,
     changelog_out,
@@ -92,7 +92,52 @@ def publisher(
     if not pub:
         raise not_found("Publisher")
     rows = db.query(Resource).filter(Resource.is_public.is_(True), Resource.author_id == pub.id).all()
-    return {**user_out(pub), "resources": [resource_out(db, r, user) for r in rows]}
+    followers_count = db.query(Follow).filter(Follow.publisher_id == pub.id).count()
+    following = bool(
+        user
+        and db.query(Follow.id)
+        .filter(Follow.publisher_id == pub.id, Follow.follower_id == user.id)
+        .first()
+    )
+    return {
+        **user_out(pub),
+        "resources": [resource_out(db, r, user) for r in rows],
+        "followers_count": followers_count,
+        "following": following,
+    }
+
+
+def _publisher_or_404(db: Session, username: str) -> User:
+    pub = db.query(User).filter(User.username == username).first()
+    if not pub:
+        raise not_found("Publisher")
+    return pub
+
+
+@router.post("/publishers/{username}/follow")
+def follow_publisher(username: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Follow a publisher — you'll be notified when they publish to the
+    marketplace (see resources.publish → notify_followers)."""
+    pub = _publisher_or_404(db, username)
+    if pub.id == user.id:
+        raise validation("You can't follow yourself")
+    exists = (
+        db.query(Follow)
+        .filter(Follow.publisher_id == pub.id, Follow.follower_id == user.id)
+        .first()
+    )
+    if not exists:
+        db.add(Follow(follower_id=user.id, publisher_id=pub.id))
+        db.commit()
+    return {"following": True, "followers_count": db.query(Follow).filter(Follow.publisher_id == pub.id).count()}
+
+
+@router.delete("/publishers/{username}/follow")
+def unfollow_publisher(username: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    pub = _publisher_or_404(db, username)
+    db.query(Follow).filter(Follow.publisher_id == pub.id, Follow.follower_id == user.id).delete()
+    db.commit()
+    return {"following": False, "followers_count": db.query(Follow).filter(Follow.publisher_id == pub.id).count()}
 
 
 @router.get("/search")

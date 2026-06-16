@@ -83,7 +83,7 @@ export function TopBar() {
         <NotificationBell />
 
         <Link href="/dashboard/profile" aria-label="My profile">
-          <Avatar name={user?.display_name ?? "?"} size="sm" />
+          <Avatar name={user?.display_name ?? "?"} src={user?.avatar_url} size="sm" />
         </Link>
       </div>
     </header>

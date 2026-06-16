@@ -100,16 +100,20 @@ function Detail({ params }: { params: Promise<{ id: string }> }) {
           <p className="mt-2 max-w-2xl text-[0.95rem] leading-relaxed text-body">{r.description}</p>
 
           <div className="mt-5 flex flex-wrap items-center gap-x-6 gap-y-3">
-            <span className="flex items-center gap-2">
-              <Avatar name={r.author?.display_name ?? "?"} size="sm" />
+            <Link
+              href={r.author?.username ? `/dashboard/publishers/${r.author.username}` : "#"}
+              className="group flex items-center gap-2"
+              title={`View ${r.author?.display_name}'s publisher page`}
+            >
+              <Avatar name={r.author?.display_name ?? "?"} src={r.author?.avatar_url} size="sm" />
               <span>
-                <span className="block text-sm font-bold text-ink">
+                <span className="block text-sm font-bold text-ink group-hover:text-primary group-hover:underline">
                   {r.author?.display_name}
                   {r.author?.verified && <span className="ml-1 text-primary" title="Think41-verified">✦</span>}
                 </span>
                 <span className="block text-xs text-muted">@{r.author?.username}</span>
               </span>
-            </span>
+            </Link>
             <span className="text-sm text-muted">↓ {fmt(r.installs_count ?? 0)} installs</span>
             <span className="text-sm text-muted">★ {fmt(r.stars_count)} stars</span>
             <span className="text-sm text-muted">Updated {longDate(r.updated_at)}</span>

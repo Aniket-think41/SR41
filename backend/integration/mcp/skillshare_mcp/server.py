@@ -157,8 +157,36 @@ def get_publisher(username: str) -> dict:
         "display_name": p["display_name"],
         "bio": p["bio"],
         "verified": p.get("verified", False),
+        "followers_count": p.get("followers_count", 0),
+        "following": p.get("following", False),
         "resources": [_summary(r) for r in p["resources"]],
     }
+
+
+@mcp.tool()
+def follow_publisher(username: str) -> dict:
+    """Follow a marketplace publisher. The user gets an inbox notification
+    (check_updates) whenever that publisher ships something new. Requires a token."""
+    return _request("POST", f"/api/public/publishers/{username}/follow")
+
+
+@mcp.tool()
+def unfollow_publisher(username: str) -> dict:
+    """Stop following a publisher. Requires a token."""
+    return _request("DELETE", f"/api/public/publishers/{username}/follow")
+
+
+@mcp.tool()
+def follow_org(org_slug: str) -> dict:
+    """Follow (watch) an organization — get an inbox notification when it
+    publishes to the marketplace. Requires a token."""
+    return _request("POST", f"/api/orgs/{org_slug}/follow")
+
+
+@mcp.tool()
+def unfollow_org(org_slug: str) -> dict:
+    """Stop following an organization. Requires a token."""
+    return _request("DELETE", f"/api/orgs/{org_slug}/follow")
 
 
 # ---------- read: my orgs (token required) ----------
@@ -305,6 +333,26 @@ def upload_file(path: str, kind: str = "file") -> dict:
 def star_resource(resource_id: str) -> dict:
     """Star a resource so it shows on your profile's Stars tab."""
     return _summary(_request("POST", f"/api/resources/{resource_id}/star"))
+
+
+@mcp.tool()
+def pin_resource(resource_id: str) -> dict:
+    """Pin a resource to the top of your profile (GitHub-style, max 6). Use this
+    to feature standout skills/MCPs/notes — distinct from a star (endorsement)."""
+    return _summary(_request("POST", f"/api/resources/{resource_id}/pin"))
+
+
+@mcp.tool()
+def unpin_resource(resource_id: str) -> dict:
+    """Remove a resource from your profile's pinned set."""
+    return _summary(_request("DELETE", f"/api/resources/{resource_id}/pin"))
+
+
+@mcp.tool()
+def list_pinned() -> list[dict]:
+    """List the resources pinned to your profile, in pin order."""
+    me = _request("GET", "/api/auth/me")
+    return [_summary(r) for r in _request("GET", f"/api/users/{me['username']}/pinned")]
 
 
 @mcp.tool()

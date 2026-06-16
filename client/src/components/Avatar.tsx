@@ -13,13 +13,26 @@ const PALETTE = ["#735ae5", "#2f6df0", "#e2552b", "#0a0840", "#15803d", "#b45309
 
 export function Avatar({
   name,
+  src,
   size = "md",
   className = "",
 }: {
   name: string;
+  /** when set, render the image; falls back to initials if it's empty/null */
+  src?: string | null;
   size?: keyof typeof SIZES;
   className?: string;
 }) {
+  if (src) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={src}
+        alt={name}
+        className={`shrink-0 select-none rounded-full object-cover ${SIZES[size]} ${className}`}
+      />
+    );
+  }
   const hue = PALETTE[[...name].reduce((a, c) => a + c.charCodeAt(0), 0) % PALETTE.length];
   return (
     <span

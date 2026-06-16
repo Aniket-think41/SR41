@@ -144,7 +144,7 @@ export default function DashboardHome() {
           <ol className="relative space-y-4 before:absolute before:bottom-2 before:left-[11px] before:top-2 before:w-px before:bg-line">
             {(activity ?? []).slice(0, 8).map((a) => (
               <li key={a.id} className="relative flex items-start gap-3 pl-0.5">
-                <Avatar name={a.user?.display_name ?? "?"} size="xs" className="relative z-10 ring-2 ring-white" />
+                <Avatar name={a.user?.display_name ?? "?"} src={a.user?.avatar_url} size="xs" className="relative z-10 ring-2 ring-white" />
                 <div className="min-w-0 flex-1 text-sm">
                   <p className="break-words leading-snug">
                     <span className="font-bold text-ink">{a.user?.display_name}</span>{" "}

@@ -160,6 +160,20 @@ class ResourceStar(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class ResourcePin(Base):
+    """A resource a user has pinned to the top of their profile (GitHub-style).
+    Ordered by `position`; capped in the router (resources §). Distinct from a
+    star: a star is endorsement, a pin is curation of your own profile."""
+
+    __tablename__ = "resource_pins"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("pin"))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
+    resource_id: Mapped[str] = mapped_column(String, ForeignKey("resources.id"), index=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
 class Invitation(Base):
     __tablename__ = "invitations"
 
@@ -188,18 +202,45 @@ class Activity(Base):
     user: Mapped[User] = relationship(lazy="joined")
 
 
+class Follow(Base):
+    """A user following a publisher. When the publisher ships something to the
+    marketplace, each follower gets a notification (see resources.publish)."""
+
+    __tablename__ = "follows"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("fol"))
+    follower_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
+    publisher_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class OrgFollow(Base):
+    """A user following an organization (a "watch"). Non-member followers get a
+    notification when the org publishes to the marketplace; members already get
+    the membership notification, so they're excluded from the follower fan-out."""
+
+    __tablename__ = "org_follows"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("ofl"))
+    follower_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
+    org_id: Mapped[str] = mapped_column(String, ForeignKey("organizations.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
 class Notification(Base):
     """Per-recipient notification, fanned out from an Activity to the members of
-    the scope it happened in (F1). One row per recipient; `read_at` tracks unread
-    state. The actor is never a recipient of their own action."""
+    the scope it happened in (F1), or to a publisher's followers on a marketplace
+    publish. One row per recipient; `read_at` tracks unread state. The actor is
+    never a recipient of their own action."""
 
     __tablename__ = "notifications"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("ntf"))
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)  # recipient
     actor_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
-    org_id: Mapped[str] = mapped_column(String, ForeignKey("organizations.id"), index=True)
-    scope_type: Mapped[str] = mapped_column(String)  # ORG | PROJECT | POD
+    # Nullable: follower notifications about a PUBLIC-scoped resource have no org.
+    org_id: Mapped[str | None] = mapped_column(String, ForeignKey("organizations.id"), index=True, nullable=True)
+    scope_type: Mapped[str] = mapped_column(String)  # ORG | PROJECT | POD | PUBLIC
     scope_id: Mapped[str | None] = mapped_column(String, nullable=True)
     verb: Mapped[str] = mapped_column(String)  # created | published
     object_type: Mapped[str] = mapped_column(String)  # resource | …

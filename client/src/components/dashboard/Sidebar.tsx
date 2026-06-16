@@ -100,7 +100,7 @@ export function Sidebar() {
       <div className="border-t border-line p-3">
         <div className={`flex items-center gap-2.5 ${collapsed ? "flex-col" : ""}`}>
           <Link href="/dashboard/profile" title="My profile">
-            <Avatar name={user?.display_name ?? "?"} size="sm" />
+            <Avatar name={user?.display_name ?? "?"} src={user?.avatar_url} size="sm" />
           </Link>
           {!collapsed && (
             <>

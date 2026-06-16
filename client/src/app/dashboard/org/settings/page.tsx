@@ -6,9 +6,9 @@
  */
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Users, ArrowRight, RefreshCcw } from "lucide-react";
+import { Loader2, Users, ArrowRight, RefreshCcw, Camera } from "lucide-react";
 import { api } from "@/lib/api";
 import { errorMessage, USING_MOCK } from "@/lib/api/http";
 import { useCurrentOrg } from "@/lib/hooks";
@@ -33,16 +33,36 @@ export default function OrgSettingsPage() {
   }
 
   const isAdmin = org?.my_role === "ADMIN";
+  const logoInput = useRef<HTMLInputElement>(null);
+
+  const refreshOrg = async () => {
+    await qc.invalidateQueries({ queryKey: ["orgs"] });
+    await qc.invalidateQueries({ queryKey: ["org", org!.slug] });
+  };
 
   const saveMut = useMutation({
     mutationFn: () => api.updateOrg(org!.slug, { name: name.trim(), description: description.trim() }),
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["orgs"] });
-      await qc.invalidateQueries({ queryKey: ["org", org!.slug] });
+      await refreshOrg();
       toast("Organization updated");
     },
     onError: (e) => toast(errorMessage(e), "error"),
   });
+
+  const logoMut = useMutation({
+    mutationFn: (file: File) => api.uploadOrgLogo(org!.slug, file),
+    onSuccess: async () => {
+      await refreshOrg();
+      toast("Logo updated");
+    },
+    onError: (e) => toast(errorMessage(e), "error"),
+  });
+
+  const onPickLogo = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) logoMut.mutate(f);
+    e.target.value = "";
+  };
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -53,7 +73,22 @@ export default function OrgSettingsPage() {
 
       <div className="card p-6">
         <div className="flex items-center gap-4">
-          <Avatar name={org?.name ?? "?"} size="lg" className="!rounded-2xl" />
+          <div className="relative w-fit">
+            <Avatar name={org?.name ?? "?"} src={org?.logo_url} size="lg" className="!rounded-2xl" />
+            {isAdmin && (
+              <>
+                <button
+                  onClick={() => logoInput.current?.click()}
+                  disabled={logoMut.isPending}
+                  title="Upload a logo"
+                  className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full bg-ink text-white shadow ring-2 ring-white transition hover:bg-primary disabled:opacity-60"
+                >
+                  {logoMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
+                </button>
+                <input ref={logoInput} type="file" accept="image/*" className="hidden" onChange={onPickLogo} />
+              </>
+            )}
+          </div>
           <div>
             <h2 className="font-display text-lg font-semibold">{org?.name}</h2>
             <p className="code text-xs text-muted">skillshare.think41.com/{org?.slug}</p>

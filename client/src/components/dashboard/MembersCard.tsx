@@ -51,7 +51,7 @@ export function MembersCard({
       <ul className="mt-4 divide-y divide-line">
         {members.map((m) => (
           <li key={m.id} className="flex items-center gap-3 py-3">
-            <Avatar name={m.user?.display_name ?? "?"} size="sm" />
+            <Avatar name={m.user?.display_name ?? "?"} src={m.user?.avatar_url} size="sm" />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-bold text-ink">{m.user?.display_name}</span>
               <span className="block truncate text-xs text-muted">@{m.user?.username}</span>

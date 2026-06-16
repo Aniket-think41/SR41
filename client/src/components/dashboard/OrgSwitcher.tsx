@@ -48,7 +48,7 @@ export function OrgSwitcher({ collapsed }: { collapsed: boolean }) {
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        <Avatar name={org?.name ?? "?"} size="sm" className="!rounded-xl" />
+        <Avatar name={org?.name ?? "?"} src={org?.logo_url} size="sm" className="!rounded-xl" />
         {!collapsed && (
           <>
             <span className="min-w-0 flex-1">
@@ -81,7 +81,7 @@ export function OrgSwitcher({ collapsed }: { collapsed: boolean }) {
               }}
               className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left hover:bg-surface"
             >
-              <Avatar name={o.name} size="xs" className="!rounded-lg" />
+              <Avatar name={o.name} src={o.logo_url} size="xs" className="!rounded-lg" />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-semibold text-ink">{o.name}</span>
                 <span className="block text-[0.65rem] uppercase tracking-wider text-muted">{o.my_role}</span>

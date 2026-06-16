@@ -52,7 +52,7 @@ export default function PodDetail({
           {/* Member avatars */}
           <div className="flex items-center -space-x-2" title={`${members?.length ?? 0} members`}>
             {(members ?? []).slice(0, 4).map((m) => (
-              <Avatar key={m.id} name={m.user?.display_name ?? "?"} size="sm" className="ring-2 ring-surface" />
+              <Avatar key={m.id} name={m.user?.display_name ?? "?"} src={m.user?.avatar_url} size="sm" className="ring-2 ring-surface" />
             ))}
             {(members?.length ?? 0) > 4 && (
               <span className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-2 text-[0.65rem] font-bold text-body ring-2 ring-surface">
