@@ -1,0 +1,17 @@
+# Netlify configuration for the SkillShare marketing site.
+# The repo is a monorepo (backend / website / client); this builds website/.
+
+[build]
+  # Build from the website/ subdirectory (monorepo).
+  base = "website"
+  command = "npm run build"
+
+[build.environment]
+  # Next 16 + React 19 need a current Node.
+  NODE_VERSION = "20"
+
+# Official Next.js runtime — handles App Router SSR, ISR (revalidate 60),
+# Server Actions (marketplace "Load more"), and the redirects() in
+# next.config.ts. Do NOT set [build].publish manually; the plugin manages it.
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
