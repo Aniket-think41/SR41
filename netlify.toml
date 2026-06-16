@@ -16,6 +16,6 @@
 
 # Official Next.js runtime — handles App Router SSR, ISR (revalidate 60),
 # Server Actions (marketplace "Load more"), and the redirects() in
-# next.config.ts. Do NOT set [build].publish manually; the plugin manages it.
+# next.config.ts.
 [[plugins]]
   package = "@netlify/plugin-nextjs"
