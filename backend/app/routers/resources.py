@@ -38,7 +38,7 @@ from ..permissions import (
 )
 from ..schemas import ImportIn, ResourceCreate, ResourcePatch, UploadIn
 from ..security import get_current_user
-from ..serialize import filter_resources, log_activity, resource_out, sort_resources
+from ..serialize import log_activity, resource_out, search_rank
 
 router = APIRouter(prefix="/api", tags=["resources"])
 settings = get_settings()
@@ -163,7 +163,7 @@ def org_resources(
     org = org_by_slug(db, slug)
     require_org_member(db, org, user)
     rows = db.query(Resource).filter(Resource.scope_type == "ORG", Resource.scope_id == org.id).all()
-    rows = sort_resources(filter_resources(rows, params["q"], params["type_"], params["tag"]), params["sort"])
+    rows = search_rank(rows, params["q"], params["type_"], params["tag"], params["sort"])
     return [resource_out(db, r, user) for r in rows]
 
 
@@ -175,7 +175,7 @@ def project_resources(
     project = project_or_404(db, project_id)
     require_project_access(db, project, user)
     rows = db.query(Resource).filter(Resource.scope_type == "PROJECT", Resource.scope_id == project.id).all()
-    rows = sort_resources(filter_resources(rows, params["q"], params["type_"], params["tag"]), params["sort"])
+    rows = search_rank(rows, params["q"], params["type_"], params["tag"], params["sort"])
     return [resource_out(db, r, user) for r in rows]
 
 
@@ -203,7 +203,7 @@ def pod_resources(
     else:  # all
         clause = conditions["pod"] | conditions["project"] | conditions["org"]
     rows = db.query(Resource).filter(clause).all()
-    rows = sort_resources(filter_resources(rows, params["q"], params["type_"], params["tag"]), params["sort"])
+    rows = search_rank(rows, params["q"], params["type_"], params["tag"], params["sort"])
     return [resource_out(db, r, user) for r in rows]
 
 

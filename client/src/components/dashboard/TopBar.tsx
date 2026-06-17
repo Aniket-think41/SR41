@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import { qk, useCurrentOrg, useFeature, useSession } from "@/lib/hooks";
 import { useUi } from "@/lib/store";
 import { Avatar } from "../Avatar";
+import { FeedbackButton } from "./FeedbackButton";
 import { NotificationBell } from "./NotificationBell";
 
 /** Breadcrumb: Org › Project › Pod — clickable (frontend spec §3.2). */
@@ -79,6 +80,8 @@ export function TopBar() {
             <span className="kbd hidden sm:inline">⌘K</span>
           </button>
         )}
+
+        <FeedbackButton />
 
         <NotificationBell />
 

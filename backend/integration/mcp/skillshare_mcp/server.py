@@ -363,6 +363,48 @@ def import_resource(resource_id: str, org_slug: str) -> dict:
 
 
 @mcp.tool()
+def submit_feedback(
+    message: str,
+    rating: int = 0,
+    category: str = "general",
+    resource_id: str = "",
+) -> dict:
+    """Send the user's product feedback to the SkillShare team. Use this when the
+    user expresses an opinion about SkillShare itself — a bug, a feature idea,
+    praise, or a question — or wants to give feedback on a specific resource.
+    Always confirm the wording with the user before sending; submit it as they
+    said it, don't editorialize.
+
+    Args:
+        message: the feedback text (required).
+        rating: optional 1-5 satisfaction rating (0 = omit).
+        category: "bug" | "idea" | "praise" | "question" | "other" | "general".
+        resource_id: set to attach the feedback to a specific resource; leave
+            empty for general platform feedback.
+    """
+    if not message.strip():
+        raise SkillShareError("feedback message is required")
+    if rating and not 1 <= rating <= 5:
+        raise SkillShareError("rating must be between 1 and 5")
+    if category not in ("bug", "idea", "praise", "question", "other", "general"):
+        raise SkillShareError("invalid category")
+    body: dict = {"message": message.strip(), "category": category, "source": "mcp"}
+    if rating:
+        body["rating"] = rating
+    if resource_id:
+        body.update({"target_type": "resource", "target_id": resource_id})
+    fb = _request("POST", "/api/feedback", json=body)
+    return {
+        "id": fb["id"],
+        "rating": fb.get("rating"),
+        "category": fb["category"],
+        "target_type": fb["target_type"],
+        "target_id": fb.get("target_id"),
+        "status": fb["status"],
+    }
+
+
+@mcp.tool()
 def check_updates(unread_only: bool = True, limit: int = 30) -> list[dict]:
     """Check the user's notification inbox — resources added or published in
     orgs/projects/pods they belong to (they are never notified of their own
@@ -378,6 +420,13 @@ def check_updates(unread_only: bool = True, limit: int = 30) -> list[dict]:
     if unread_only:
         params["unread_only"] = "true"
     rows = _request("GET", "/api/notifications", params=params)
+    # Pop a themed desktop card for anything new (deduped with `skillshare watch`
+    # via a shared state file). Best-effort — never break the tool call.
+    try:
+        from skillshare_cli.notify import announce_inbox
+        announce_inbox(rows)
+    except Exception:
+        pass
     return [
         {
             "id": n["id"],
@@ -434,6 +483,12 @@ def scan_local(sources: list[str] | None = None, notes_dir: str = "", include_di
         include_dismissed: include artifacts the user previously dismissed.
     """
     rows = _reconciled(sources, notes_dir, include_dismissed)
+    # Pop a card if there are NEW local artifacts worth sharing (deduped via shared state).
+    try:
+        from skillshare_cli.notify import announce_shareable
+        announce_shareable(rows)
+    except Exception:
+        pass
     out = []
     for r in rows:
         c = r["candidate"]

@@ -11,6 +11,7 @@ import { FEATURES, getDb, saveDb, uid, resetDb, type Db } from "./db";
 import type {
   Activity,
   ApiError,
+  Feedback,
   Invitation,
   OrgRole,
   Pod,
@@ -438,6 +439,48 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     }
     saveDb();
     return { ok: true, marked };
+  }],
+
+  /* ---- feedback ---- */
+  ["POST", "/api/feedback", (_p, body, _q, db) => {
+    const me = currentUser(db);
+    const message = String(body.message ?? "").trim();
+    if (!message) throw new HttpError(422, "VALIDATION_ERROR", "Feedback message is required");
+    const targetType = body.target_type === "resource" ? "resource" : "platform";
+    let targetId: string | null = null;
+    if (targetType === "resource") {
+      targetId = String(body.target_id ?? "");
+      if (!targetId) throw new HttpError(422, "VALIDATION_ERROR", "target_id is required for resource feedback");
+      if (!db.resources.some((r) => r.id === targetId)) throw notFound("Resource");
+    }
+    const rating = body.rating == null ? null : Number(body.rating);
+    if (rating != null && (rating < 1 || rating > 5))
+      throw new HttpError(422, "VALIDATION_ERROR", "rating must be 1-5");
+    const fb: Feedback = {
+      id: uid("fb"),
+      user_id: me.id,
+      target_type: targetType,
+      target_id: targetId,
+      rating,
+      category: (body.category as Feedback["category"]) ?? "general",
+      message,
+      source: (body.source as Feedback["source"]) ?? "dashboard",
+      context: (body.context as Record<string, unknown>) ?? null,
+      status: "open",
+      created_at: now(),
+      updated_at: now(),
+    };
+    db.feedback = db.feedback ?? [];
+    db.feedback.unshift(fb);
+    saveDb();
+    return fb;
+  }],
+
+  ["GET", "/api/feedback/mine", (_p, _b, _q, db) => {
+    const me = currentUser(db);
+    return (db.feedback ?? [])
+      .filter((f) => f.user_id === me.id)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
   }],
 
   /* ---- 3.3 Projects ---- */
@@ -975,28 +1018,125 @@ function scopeOrgId(db: Db, r: Resource): string | null {
 }
 
 /** Shared list filtering: ?q= &type= &tag= &sort= */
+/* ---------------- relevance search ----------------
+ * Mirrors the backend ranker (backend/app/serialize.py relevance_rank /
+ * _score_resource). Pure substring matching missed semantically close terms —
+ * "code reviewer" never surfaced "PR Reviewer". We tokenize, apply a light
+ * stemmer, expand a small synonym map, fall back to fuzzy token matching, and
+ * rank by a weighted score (title > tags > description). */
+const STOPWORDS = new Set(["a", "an", "the", "and", "or", "for", "with", "to", "of", "in", "on", "is", "my", "your"]);
+const SYNONYMS: Record<string, string[]> = {
+  pr: ["pull", "request"], pull: ["pr"],
+  db: ["database", "postgres", "sql"], database: ["db", "postgres", "sql"],
+  postgres: ["postgresql", "pg", "database"], postgresql: ["postgres", "pg", "database"],
+  ci: ["pipeline", "build"], cd: ["deploy", "release"],
+  doc: ["documentation"], docs: ["documentation"],
+  auth: ["authentication", "login"], k8s: ["kubernetes"],
+  ui: ["frontend", "interface"], frontend: ["ui"],
+  rag: ["retrieval"], retrieval: ["rag"],
+};
+const SUFFIXES = ["ing", "ers", "er", "ed", "es", "s"];
+
+function stem(t: string): string {
+  for (const suf of SUFFIXES) {
+    if (t.length > suf.length + 2 && t.endsWith(suf)) return t.slice(0, -suf.length);
+  }
+  return t;
+}
+const tokenize = (text: string): string[] => (text.toLowerCase().match(/[a-z0-9]+/g) ?? []).map(stem);
+function queryTokens(q: string): string[] {
+  const seen: string[] = [];
+  for (const m of q.toLowerCase().match(/[a-z0-9]+/g) ?? []) {
+    if (STOPWORDS.has(m)) continue;
+    const t = stem(m);
+    if (t && !seen.includes(t)) seen.push(t);
+  }
+  return seen;
+}
+function expansions(token: string): Set<string> {
+  const out = new Set<string>([token]);
+  for (const s of SYNONYMS[token] ?? []) out.add(stem(s));
+  return out;
+}
+// Normalized similarity (1 − Levenshtein/maxLen) — approximates difflib's ratio
+// closely enough to catch the same near-misses at the 0.82 threshold.
+function similarity(a: string, b: string): number {
+  if (a === b) return 1;
+  const m = a.length, n = b.length;
+  if (!m || !n) return 0;
+  let prev = Array.from({ length: n + 1 }, (_, i) => i);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+    }
+    prev = cur;
+  }
+  return 1 - prev[n] / Math.max(m, n);
+}
+function scoreResource(qTokens: string[], r: Resource): number {
+  const fields: [Set<string>, number][] = [
+    [new Set(tokenize(r.title)), 3],
+    [new Set(r.tags.flatMap(tokenize)), 2],
+    [new Set(tokenize(r.description)), 1],
+  ];
+  let total = 0, matched = 0;
+  for (const qt of qTokens) {
+    const exp = expansions(qt);
+    let best = 0;
+    for (const [tokens, weight] of fields) {
+      if (!tokens.size) continue;
+      if (tokens.has(qt) || [...exp].some((e) => tokens.has(e))) {
+        best = Math.max(best, weight);
+        continue;
+      }
+      if (qt.length >= 4) {
+        for (const dt of tokens) {
+          if (dt.length >= 4 && Math.abs(dt.length - qt.length) <= 3) {
+            const ratio = similarity(qt, dt);
+            if (ratio >= 0.82) best = Math.max(best, weight * ratio * 0.7);
+          }
+        }
+      }
+    }
+    if (best > 0) {
+      matched++;
+      total += best;
+    }
+  }
+  if (matched === 0) return 0;
+  if (matched === qTokens.length) total *= 1.5;
+  return total;
+}
+
 function filterResources(list: Resource[], q: URLSearchParams, db: Db): Resource[] {
   let out = [...list];
   const type = q.get("type")?.toUpperCase();
   if (type && type !== "ALL") out = out.filter((r) => r.type === type);
   const tag = q.get("tag");
   if (tag) out = out.filter((r) => r.tags.includes(tag));
-  const needle = q.get("q")?.toLowerCase().trim();
-  if (needle) {
-    out = out.filter(
-      (r) =>
-        r.title.toLowerCase().includes(needle) ||
-        r.description.toLowerCase().includes(needle) ||
-        r.tags.some((t) => t.toLowerCase().includes(needle))
-    );
+
+  const needle = q.get("q")?.trim();
+  const tokens = needle ? queryTokens(needle) : [];
+  if (tokens.length) {
+    out = out
+      .map((r) => ({ r, score: scoreResource(tokens, r) }))
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map((x) => x.r);
   }
-  const sort = q.get("sort") ?? "updated";
-  out.sort((a, b) => {
-    if (sort === "stars") return b.stars_count - a.stars_count;
-    if (sort === "installs") return (b.installs_count ?? 0) - (a.installs_count ?? 0);
-    if (sort === "newest") return b.created_at.localeCompare(a.created_at);
-    return b.updated_at.localeCompare(a.updated_at);
-  });
+
+  // Relevance order leads when there's a query and no explicit sort chosen.
+  const sort = q.get("sort") ?? (tokens.length ? "relevance" : "updated");
+  if (sort !== "relevance") {
+    out.sort((a, b) => {
+      if (sort === "stars") return b.stars_count - a.stars_count;
+      if (sort === "installs") return (b.installs_count ?? 0) - (a.installs_count ?? 0);
+      if (sort === "newest") return b.created_at.localeCompare(a.created_at);
+      return b.updated_at.localeCompare(a.updated_at);
+    });
+  }
   return out.map((r) => enrich(r, db));
 }
 

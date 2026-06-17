@@ -8,6 +8,8 @@ import type {
   Activity,
   AuthSession,
   Contributions,
+  Feedback,
+  FeedbackInput,
   Invitation,
   Notification,
   OrgFeature,
@@ -52,7 +54,7 @@ export interface ResourceQuery {
   q?: string;
   type?: ResourceType | "ALL";
   tag?: string;
-  sort?: "updated" | "newest" | "stars" | "installs";
+  sort?: "relevance" | "updated" | "newest" | "stars" | "installs";
   scope?: "all" | "pod" | "project" | "org";
 }
 
@@ -190,6 +192,11 @@ export const api = {
     request<{ count: number }>("GET", "/api/notifications/unread_count"),
   markNotificationsRead: (body: { ids?: string[]; all?: boolean }) =>
     request<{ ok: true; marked: number }>("POST", "/api/notifications/read", body),
+
+  /* ---- feedback ---- */
+  submitFeedback: (body: FeedbackInput) =>
+    request<Feedback>("POST", "/api/feedback", { source: "dashboard", ...body }),
+  myFeedback: () => request<Feedback[]>("GET", "/api/feedback/mine"),
 
   /* ---- public marketplace ---- */
   publicResources: (query: ResourceQuery = {}) =>

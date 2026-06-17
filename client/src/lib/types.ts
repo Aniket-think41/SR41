@@ -184,6 +184,43 @@ export interface Invitation {
   accepted_at: string | null;
 }
 
+/** Product feedback — a rating + message users send from the dashboard, CLI,
+ *  or MCP. Either general ("platform") or about a specific resource. */
+export type FeedbackCategory =
+  | "bug"
+  | "idea"
+  | "praise"
+  | "question"
+  | "other"
+  | "general";
+
+export interface FeedbackInput {
+  message: string;
+  rating?: number | null;
+  category?: FeedbackCategory;
+  target_type?: "platform" | "resource";
+  target_id?: string | null;
+  source?: "dashboard" | "cli" | "mcp";
+  context?: Record<string, unknown> | null;
+}
+
+export interface Feedback {
+  id: string;
+  user_id: string;
+  target_type: "platform" | "resource";
+  target_id: string | null;
+  target?: { id: string; title: string | null; type: string | null } | null;
+  rating: number | null;
+  category: FeedbackCategory;
+  message: string;
+  source: "dashboard" | "cli" | "mcp";
+  context?: Record<string, unknown> | null;
+  status: "open" | "reviewed";
+  created_at: string;
+  updated_at: string;
+  user?: User;
+}
+
 /** BACKEND SPEC §7 — error envelope */
 export interface ApiError {
   error: {

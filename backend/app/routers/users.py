@@ -19,7 +19,7 @@ from ..models import (
     now,
 )
 from ..security import get_current_user
-from ..serialize import activity_out, filter_resources, org_out, resource_out, sort_resources, user_out
+from ..serialize import activity_out, org_out, resource_out, search_rank, user_out
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -68,7 +68,7 @@ def user_resources(
     db: Session = Depends(get_db),
 ):
     target = _user_or_404(db, username)
-    rows = sort_resources(filter_resources(_visible_resources(db, target, viewer), q, type, tag), sort)
+    rows = search_rank(_visible_resources(db, target, viewer), q, type, tag, sort)
     return [resource_out(db, r, viewer) for r in rows]
 
 

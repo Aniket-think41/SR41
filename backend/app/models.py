@@ -273,6 +273,33 @@ class LocalArtifactState(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
 
+class Feedback(Base):
+    """User-submitted product feedback — a star rating + free-text message, with
+    an optional category, collected from wherever the user is working: the
+    dashboard, the CLI, or the MCP server (`source`). Feedback can be about the
+    platform in general (`target_type="platform"`) or a specific resource
+    (`target_type="resource"`, `target_id=<resource id>`). `context` carries
+    free-form client hints (page, app version). Admins triage via
+    /api/admin/feedback, flipping `status` open → reviewed."""
+
+    __tablename__ = "feedback"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("fb"))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
+    target_type: Mapped[str] = mapped_column(String, default="platform", index=True)  # platform | resource
+    target_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)  # resource id when resource-scoped
+    rating: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 1..5, optional
+    category: Mapped[str] = mapped_column(String, default="general")  # bug | idea | praise | question | other | general
+    message: Mapped[str] = mapped_column(Text, default="")
+    source: Mapped[str] = mapped_column(String, default="dashboard")  # dashboard | cli | mcp
+    context: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # {page, app_version, …}
+    status: Mapped[str] = mapped_column(String, default="open", index=True)  # open | reviewed
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+    user: Mapped[User] = relationship(lazy="joined")
+
+
 class OrgFeature(Base):
     """Per-org feature override (BACKEND_SPEC §2.12). Catalog lives in code."""
 

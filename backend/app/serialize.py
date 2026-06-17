@@ -4,6 +4,9 @@ Wire-format serializers — produce exactly the JSON shapes the client types
 scope_label / author / starred_by_me and the denormalized counts.
 """
 
+import difflib
+import re
+
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -12,6 +15,7 @@ from .models import (
     BlogPost,
     ChangelogEntry,
     ContentPage,
+    Feedback,
     Invitation,
     Notification,
     Organization,
@@ -62,6 +66,17 @@ def org_out(o: Organization, my_role: str | None = None) -> dict:
     return out
 
 
+def scope_name(db: Session, scope_type: str, scope_id: str | None) -> str | None:
+    """Human label for a scope — the org/project/pod's name, not just its type."""
+    if not scope_id:
+        return None
+    model = {"ORG": Organization, "PROJECT": Project, "POD": Pod}.get(scope_type)
+    if not model:
+        return None
+    obj = db.get(model, scope_id)
+    return obj.name if obj else None
+
+
 def resource_out(db: Session, r: Resource, me: User | None) -> dict:
     starred = False
     pinned = False
@@ -92,6 +107,7 @@ def resource_out(db: Session, r: Resource, me: User | None) -> dict:
         "attachments": r.attachments or [],
         "scope_type": r.scope_type,
         "scope_id": r.scope_id,
+        "scope_name": scope_name(db, r.scope_type, r.scope_id),
         "author_id": r.author_id,
         "is_public": r.is_public,
         "source_fingerprint": r.source_fingerprint,
@@ -261,6 +277,8 @@ def notification_out(db: Session, n: Notification) -> dict:
     dashboard deep link so CLI/MCP/web can act on it directly."""
     deep_link = None
     install_command = None
+    object_kind = None
+    object_description = None
     if n.object_type == "resource":
         r = db.get(Resource, n.object_id)
         if r and r.is_public:
@@ -269,16 +287,21 @@ def notification_out(db: Session, n: Notification) -> dict:
             deep_link = f"/dashboard/org/resources?open={n.object_id}"
         if r:
             install_command = f"skillshare pull {n.object_id}"
+            object_kind = r.type.lower()  # skill | mcp | note — lets clients theme the card
+            object_description = r.description
     return {
         "id": n.id,
         "actor_id": n.actor_id,
         "org_id": n.org_id,
         "scope_type": n.scope_type,
         "scope_id": n.scope_id,
+        "scope_name": scope_name(db, n.scope_type, n.scope_id),
         "verb": n.verb,
         "object_type": n.object_type,
         "object_id": n.object_id,
         "object_title": n.object_title,
+        "object_kind": object_kind,
+        "object_description": object_description,
         "meta": n.meta,
         "read_at": n.read_at,
         "created_at": n.created_at,
@@ -326,24 +349,146 @@ def log_activity(
     )
 
 
+# ---- Relevance search ----
+#
+# v1 search is Python-side over the in-memory row set (SQLite, small catalog).
+# Pure substring matching missed semantically close terms — a query for
+# "code reviewer" never surfaced "PR Reviewer" because no field contains that
+# exact string. The ranker below tokenizes, applies a light stemmer, expands a
+# small synonym map, and falls back to fuzzy token matching, then ranks by a
+# weighted score (title > tags > description). Mirrors the client mock
+# (client/src/lib/mock/handlers.ts filterResources / scoreResource).
+# Move to Postgres FTS / pgvector when the dataset outgrows in-memory scan.
+
+_STOPWORDS = {"a", "an", "the", "and", "or", "for", "with", "to", "of", "in", "on", "is", "my", "your"}
+
+# High-confidence equivalences only — abbreviations and close cousins. Bidirectional
+# pairs are listed once each way so lookup is a simple dict access.
+_SYNONYMS: dict[str, set[str]] = {
+    "pr": {"pull", "request"},
+    "pull": {"pr"},
+    "db": {"database", "postgres", "sql"},
+    "database": {"db", "postgres", "sql"},
+    "postgres": {"postgresql", "pg", "database"},
+    "postgresql": {"postgres", "pg", "database"},
+    "ci": {"pipeline", "build"},
+    "cd": {"deploy", "release"},
+    "doc": {"documentation"},
+    "docs": {"documentation"},
+    "auth": {"authentication", "login"},
+    "k8s": {"kubernetes"},
+    "ui": {"frontend", "interface"},
+    "frontend": {"ui"},
+    "rag": {"retrieval"},
+    "retrieval": {"rag"},
+}
+
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+_SUFFIXES = ("ing", "ers", "er", "ed", "es", "s")
+
+
+def _stem(token: str) -> str:
+    """Strip a few common English suffixes so reviewer/reviewing/reviews/review
+    all collapse to the same stem. Applied symmetrically to query and document
+    tokens, so over-stemming (process→proces) is harmless."""
+    for suf in _SUFFIXES:
+        if len(token) > len(suf) + 2 and token.endswith(suf):
+            return token[: -len(suf)]
+    return token
+
+
+def _tokenize(text: str) -> list[str]:
+    return [_stem(m) for m in _TOKEN_RE.findall(text.lower())]
+
+
+def _query_tokens(q: str) -> list[str]:
+    seen: list[str] = []
+    for m in _TOKEN_RE.findall(q.lower()):
+        if m in _STOPWORDS:
+            continue
+        t = _stem(m)
+        if t and t not in seen:
+            seen.append(t)
+    return seen
+
+
+def _expansions(token: str) -> set[str]:
+    syns = _SYNONYMS.get(token, set())
+    return {token} | {_stem(s) for s in syns}
+
+
+def _score_resource(query_tokens: list[str], r: Resource) -> float:
+    """Weighted relevance score for one resource. Each query token earns the
+    weight of the strongest field it matches (exact stem > synonym > fuzzy);
+    matching every query token gets a multiplier so full matches rank first."""
+    fields = (
+        (set(_tokenize(r.title)), 3.0),
+        (set(t for tag in (r.tags or []) for t in _tokenize(tag)), 2.0),
+        (set(_tokenize(r.description or "")), 1.0),
+    )
+    total = 0.0
+    matched = 0
+    for qt in query_tokens:
+        exp = _expansions(qt)
+        best = 0.0
+        for tokens, weight in fields:
+            if not tokens:
+                continue
+            if qt in tokens or exp & tokens:
+                best = max(best, weight)
+                continue
+            # fuzzy fallback for typos / near-misses (longer tokens only)
+            if len(qt) >= 4:
+                for dt in tokens:
+                    if len(dt) >= 4 and abs(len(dt) - len(qt)) <= 3:
+                        ratio = difflib.SequenceMatcher(None, qt, dt).ratio()
+                        if ratio >= 0.82:
+                            best = max(best, weight * ratio * 0.7)
+        if best > 0:
+            matched += 1
+            total += best
+    if matched == 0:
+        return 0.0
+    if matched == len(query_tokens):
+        total *= 1.5
+    return total
+
+
+def relevance_rank(rows: list[Resource], q: str) -> list[Resource]:
+    """Filter rows to those relevant to `q`, ordered by descending relevance.
+    Ties keep the catalog's incoming order (stable sort)."""
+    tokens = _query_tokens(q)
+    if not tokens:
+        return rows
+    scored = [(r, _score_resource(tokens, r)) for r in rows]
+    hits = [(r, s) for r, s in scored if s > 0]
+    hits.sort(key=lambda rs: rs[1], reverse=True)
+    return [r for r, _ in hits]
+
+
 def filter_resources(rows: list[Resource], q: str | None, type_: str | None, tag: str | None) -> list[Resource]:
-    """Shared ?q=&type=&tag= filtering — matches the client mock exactly
-    (title, description, or tags; case-insensitive). Python-side for v1;
-    move to Postgres FTS when datasets demand it (§1 search row)."""
+    """Shared ?q=&type=&tag= filtering — matches the client mock exactly. Type
+    and tag are exact filters; q is a relevance search (see relevance_rank) that
+    returns rows already ordered best-first, so callers should pass sort
+    "relevance" (the default when a query is present) to preserve that order."""
     if type_ and type_.upper() != "ALL":
         rows = [r for r in rows if r.type == type_.upper()]
     if tag:
         rows = [r for r in rows if tag in (r.tags or [])]
     if q and q.strip():
-        needle = q.lower().strip()
-        rows = [
-            r
-            for r in rows
-            if needle in r.title.lower()
-            or needle in (r.description or "").lower()
-            or any(needle in t.lower() for t in (r.tags or []))
-        ]
+        rows = relevance_rank(rows, q)
     return rows
+
+
+def search_rank(
+    rows: list[Resource], q: str | None, type_: str | None, tag: str | None, sort: str | None
+) -> list[Resource]:
+    """filter_resources + sort in one call. When a query is present and the
+    caller hasn't chosen an explicit sort, default to relevance order so the
+    best matches lead; otherwise fall back to the usual recency/stars sort."""
+    rows = filter_resources(rows, q, type_, tag)
+    effective = sort or ("relevance" if (q and q.strip()) else "updated")
+    return sort_resources(rows, effective)
 
 
 # ---- Marketing content serializers ----
@@ -393,8 +538,37 @@ def content_page_out(p: ContentPage, admin: bool = False) -> dict:
     return out
 
 
+def feedback_out(db: Session, f: Feedback, *, include_user: bool = False) -> dict:
+    """Serialize a feedback item. The owner sees their own; admins get the
+    submitter (`user`) and a `target` label when it's about a resource."""
+    target = None
+    if f.target_type == "resource" and f.target_id:
+        r = db.get(Resource, f.target_id)
+        target = {"id": f.target_id, "title": r.title if r else None, "type": r.type if r else None}
+    out = {
+        "id": f.id,
+        "user_id": f.user_id,
+        "target_type": f.target_type,
+        "target_id": f.target_id,
+        "target": target,
+        "rating": f.rating,
+        "category": f.category,
+        "message": f.message,
+        "source": f.source,
+        "context": f.context,
+        "status": f.status,
+        "created_at": f.created_at,
+        "updated_at": f.updated_at,
+    }
+    if include_user:
+        out["user"] = user_out(f.user) if f.user else None
+    return out
+
+
 def sort_resources(rows: list[Resource], sort: str | None) -> list[Resource]:
     sort = sort or "updated"
+    if sort == "relevance":
+        return rows  # already ordered best-first by relevance_rank
     if sort == "stars":
         return sorted(rows, key=lambda r: r.stars_count, reverse=True)
     if sort == "installs":

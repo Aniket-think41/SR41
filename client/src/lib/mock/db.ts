@@ -10,6 +10,7 @@
 import type {
   Activity,
   FeatureFlag,
+  Feedback,
   Invitation,
   Notification,
   Organization,
@@ -90,13 +91,15 @@ export interface Db {
   invitations: Invitation[];
   activities: Activity[];
   notifications: Notification[];
+  /** product feedback submitted from the dashboard / CLI / MCP */
+  feedback: Feedback[];
   /** per-org feature overrides (absent key → catalog default) */
   org_features: { id: string; org_id: string; key: string; enabled: boolean }[];
   /** id of the signed-in user, null when logged out */
   session_user_id: string | null;
 }
 
-const STORAGE_KEY = "skillshare.mockdb.v7"; // v7: org follows + follower stats
+const STORAGE_KEY = "skillshare.mockdb.v8"; // v8: product feedback
 
 const t = (iso: string) => new Date(iso).toISOString();
 
@@ -821,6 +824,7 @@ export function seed(): Db {
     invitations: structuredClone(seedInvitations),
     activities: structuredClone(seedActivities),
     notifications: structuredClone(seedNotifications),
+    feedback: [],
     org_features: [],
     // Mock mode only: start signed in as the demo user so the dashboard shows
     // data without a login round-trip. (When NEXT_PUBLIC_API_URL points at a

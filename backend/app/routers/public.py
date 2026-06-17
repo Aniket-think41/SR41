@@ -12,9 +12,8 @@ from ..serialize import (
     blog_post_out,
     changelog_out,
     content_page_out,
-    filter_resources,
     resource_out,
-    sort_resources,
+    search_rank,
     user_out,
 )
 
@@ -43,7 +42,7 @@ def public_resources(
     user: User | None = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
 ):
-    rows = sort_resources(filter_resources(_public_rows(db), params["q"], params["type_"], params["tag"]), params["sort"])
+    rows = search_rank(_public_rows(db), params["q"], params["type_"], params["tag"], params["sort"])
     # Total before paging — let the client drive "load more" / page counts.
     response.headers["X-Total-Count"] = str(len(rows))
     response.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
@@ -146,7 +145,7 @@ def public_search(
     user: User | None = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
 ):
-    rows = sort_resources(filter_resources(_public_rows(db), params["q"], params["type_"], params["tag"]), params["sort"])
+    rows = search_rank(_public_rows(db), params["q"], params["type_"], params["tag"], params["sort"])
     return [resource_out(db, r, user) for r in rows]
 
 

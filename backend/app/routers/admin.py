@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..errors import conflict, not_found
-from ..models import BlogPost, ChangelogEntry, ContentPage, User
+from ..models import BlogPost, ChangelogEntry, ContentPage, Feedback, User
 from ..permissions import require_admin
 from ..schemas import (
     BlogPostCreate,
@@ -19,10 +19,11 @@ from ..schemas import (
     ChangelogCreate,
     ChangelogPatch,
     ContentPagePatch,
+    FeedbackStatusIn,
     VerifyPublisherIn,
 )
 from ..security import get_current_user
-from ..serialize import blog_post_out, changelog_out, content_page_out, user_out
+from ..serialize import blog_post_out, changelog_out, content_page_out, feedback_out, user_out
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -170,6 +171,39 @@ def update_page(key: str, body: ContentPagePatch, _: User = Depends(admin_user),
     _apply(page, body.model_dump(exclude_unset=True))
     db.commit()
     return content_page_out(page, admin=True)
+
+
+# ---- feedback triage ----
+
+
+@router.get("/feedback")
+def list_feedback(
+    status: str | None = None,
+    _: User = Depends(admin_user),
+    db: Session = Depends(get_db),
+):
+    """The full feedback queue, newest first. Filter with ?status=open|reviewed."""
+    q = db.query(Feedback)
+    if status in ("open", "reviewed"):
+        q = q.filter(Feedback.status == status)
+    rows = q.order_by(Feedback.created_at.desc()).all()
+    return [feedback_out(db, f, include_user=True) for f in rows]
+
+
+@router.post("/feedback/{feedback_id}/status")
+def set_feedback_status(
+    feedback_id: str,
+    body: FeedbackStatusIn,
+    _: User = Depends(admin_user),
+    db: Session = Depends(get_db),
+):
+    """Mark a feedback item reviewed (or reopen it)."""
+    fb = db.get(Feedback, feedback_id)
+    if not fb:
+        raise not_found("Feedback")
+    fb.status = body.status
+    db.commit()
+    return feedback_out(db, fb, include_user=True)
 
 
 # ---- publisher verification ----

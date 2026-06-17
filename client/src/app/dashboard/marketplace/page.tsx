@@ -18,6 +18,7 @@ import { ResourceCard } from "@/components/ResourceCard";
 import { FeatureGate } from "@/components/FeatureGate";
 
 const SORTS = [
+  { key: "relevance", label: "Relevance" },
   { key: "stars", label: "Most starred" },
   { key: "installs", label: "Most installed" },
   { key: "newest", label: "Newest" },
@@ -38,7 +39,7 @@ function MarketplaceBrowser() {
   const [type, setType] = useState<ResourceType | "ALL">("ALL");
   const [tag, setTag] = useState<string | null>(null);
   const [publisher, setPublisher] = useState<string | null>(null);
-  const [sort, setSort] = useState<ResourceQuery["sort"]>("stars");
+  const [sort, setSort] = useState<ResourceQuery["sort"]>("relevance");
   const [q, setQ] = useState("");
 
   const { data: all } = useQuery({
@@ -46,7 +47,10 @@ function MarketplaceBrowser() {
     queryFn: () => api.publicResources({ sort: "stars" }),
   });
 
-  const params: ResourceQuery = { q: q || undefined, type: type === "ALL" ? undefined : type, tag: tag ?? undefined, sort };
+  // "Relevance" only ranks when there's a query; with no query, lead with the
+  // most-starred resources rather than an arbitrary order.
+  const effectiveSort = sort === "relevance" && !q ? "stars" : sort;
+  const params: ResourceQuery = { q: q || undefined, type: type === "ALL" ? undefined : type, tag: tag ?? undefined, sort: effectiveSort };
   const { data: list, isLoading } = useQuery({
     queryKey: ["public", "resources", params],
     queryFn: () => api.publicResources(params),

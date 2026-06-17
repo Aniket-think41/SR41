@@ -16,7 +16,19 @@ from .config import get_settings
 from .database import Base, engine
 from .errors import install_handlers
 from .ratelimit import RateLimitMiddleware
-from .routers import admin, auth, local_state, notifications, orgs, pods, projects, public, resources, users
+from .routers import (
+    admin,
+    auth,
+    feedback,
+    local_state,
+    notifications,
+    orgs,
+    pods,
+    projects,
+    public,
+    resources,
+    users,
+)
 
 settings = get_settings()
 
@@ -48,6 +60,7 @@ app.include_router(public.router)
 app.include_router(users.router)
 app.include_router(notifications.router)
 app.include_router(local_state.router)
+app.include_router(feedback.router)
 app.include_router(admin.router)
 
 # Serve locally-stored uploads when STORAGE_BACKEND=local (no-op for S3, which

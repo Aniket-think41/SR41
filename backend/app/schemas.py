@@ -161,6 +161,31 @@ class LocalStateIn(BaseModel):
     name: str = ""
 
 
+# ---- Feedback ----
+
+FeedbackCategory = Literal["bug", "idea", "praise", "question", "other", "general"]
+
+
+class FeedbackIn(BaseModel):
+    """Submit product feedback. `message` is required; everything else is
+    optional so a quick "👍 5 stars" or a detailed bug report both work.
+    `target_type="resource"` + `target_id` attaches it to a specific resource."""
+
+    message: str = Field(min_length=1, max_length=4000)
+    rating: int | None = Field(default=None, ge=1, le=5)
+    category: FeedbackCategory = "general"
+    target_type: Literal["platform", "resource"] = "platform"
+    target_id: str | None = None
+    source: Literal["dashboard", "cli", "mcp"] = "dashboard"
+    context: dict | None = None
+
+
+class FeedbackStatusIn(BaseModel):
+    """Admin triage: flip an item open ⇄ reviewed."""
+
+    status: Literal["open", "reviewed"] = "reviewed"
+
+
 # ---- Marketing content (admin-managed) ----
 
 BlogTag = Literal["Release", "Feature", "Guide", "Story"]

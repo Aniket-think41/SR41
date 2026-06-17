@@ -4,6 +4,7 @@ import re
 
 import httpx
 from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from pydantic import BaseModel, Field
@@ -12,7 +13,17 @@ from .. import storage
 from ..config import get_settings
 from ..database import get_db
 from ..errors import conflict, forbidden, not_found, unauthorized, validation
-from ..models import ApiToken, User
+from ..models import (
+    ApiToken,
+    Organization,
+    OrgMember,
+    Pod,
+    PodMember,
+    Project,
+    ProjectMember,
+    Resource,
+    User,
+)
 from ..schemas import GoogleIn, LoginIn, MePatch, SignupIn
 from ..security import (
     REFRESH_COOKIE,
@@ -25,7 +36,7 @@ from ..security import (
     rotate_refresh_token,
     verify_password,
 )
-from ..serialize import user_out
+from ..serialize import resource_out, user_out
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 settings = get_settings()
@@ -144,6 +155,59 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
 @router.get("/me")
 def me(user: User = Depends(get_current_user)):
     return _me_out(user)
+
+
+@router.get("/me/stats")
+def my_stats(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Compact context counts for the CLI/MCP status line: how many resources are
+    visible to me at each scope I belong to, plus my org's terminology so the
+    line can say "Teams" instead of "Pods" where that org renamed them."""
+    org_ids = [r[0] for r in db.query(OrgMember.org_id).filter(OrgMember.user_id == user.id).all()]
+    project_ids = [r[0] for r in db.query(ProjectMember.project_id).filter(ProjectMember.user_id == user.id).all()]
+    pod_ids = [r[0] for r in db.query(PodMember.pod_id).filter(PodMember.user_id == user.id).all()]
+
+    def _count(scope_type: str, ids: list[str]) -> int:
+        if not ids:
+            return 0
+        return db.query(func.count(Resource.id)).filter(
+            Resource.scope_type == scope_type, Resource.scope_id.in_(ids)).scalar() or 0
+
+    term = {"org": "org", "project": "project", "pod": "pod"}
+    if org_ids:
+        org = db.get(Organization, org_ids[0])
+        if org and org.terminology:
+            term["project"] = org.terminology.get("project") or term["project"]
+            term["pod"] = org.terminology.get("pod") or term["pod"]
+    return {
+        "resources": {
+            "org": _count("ORG", org_ids),
+            "project": _count("PROJECT", project_ids),
+            "pod": _count("POD", pod_ids),
+        },
+        "memberships": {"orgs": len(org_ids), "projects": len(project_ids), "pods": len(pod_ids)},
+        "terminology": term,
+    }
+
+
+@router.get("/me/resources")
+def my_resources(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Every resource visible to me across the scopes I belong to (org/project/
+    pod), newest first. The CLI subtracts what's already installed locally to get
+    the "available to install" set behind `skillshare available` and the panel."""
+    org_ids = [r[0] for r in db.query(OrgMember.org_id).filter(OrgMember.user_id == user.id).all()]
+    project_ids = [r[0] for r in db.query(ProjectMember.project_id).filter(ProjectMember.user_id == user.id).all()]
+    pod_ids = [r[0] for r in db.query(PodMember.pod_id).filter(PodMember.user_id == user.id).all()]
+    clauses = []
+    if org_ids:
+        clauses.append(and_(Resource.scope_type == "ORG", Resource.scope_id.in_(org_ids)))
+    if project_ids:
+        clauses.append(and_(Resource.scope_type == "PROJECT", Resource.scope_id.in_(project_ids)))
+    if pod_ids:
+        clauses.append(and_(Resource.scope_type == "POD", Resource.scope_id.in_(pod_ids)))
+    if not clauses:
+        return []
+    rows = db.query(Resource).filter(or_(*clauses)).order_by(Resource.updated_at.desc()).all()
+    return [resource_out(db, r, user) for r in rows]
 
 
 @router.patch("/me")

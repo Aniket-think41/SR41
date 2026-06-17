@@ -40,6 +40,29 @@ DEFAULT_API = "http://localhost:8400"
 
 BOLD, DIM, RESET = "\033[1m", "\033[2m", "\033[0m"
 GLYPH = {"SKILL": "◆", "MCP": "▣", "NOTE": "▤"}
+STATUS_CACHE = CONFIG_DIR / "status-cache.json"
+
+
+def _invalidate_status_cache() -> None:
+    """Drop the cached status-line counts so the next render recomputes. Called
+    after actions that genuinely change the gap (install/push) — never on dismiss,
+    so dismissing a notification can't move the count."""
+    try:
+        STATUS_CACHE.unlink()
+    except OSError:
+        pass
+
+
+def _fg(hex_color: str) -> str:
+    """24-bit truecolor foreground escape from a #rrggbb string."""
+    r, g, b = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
+    return f"\033[38;2;{r};{g};{b}m"
+
+
+# website theme accents, reused in the status line (skill=violet, mcp=blue, note=orange)
+VIOLET, BLUE, ORANGE = _fg("#735ae5"), _fg("#2f6df0"), _fg("#e2552b")
+KIND_FG = {"skill": VIOLET, "mcp": BLUE, "note": ORANGE}
+KIND_MARK = {"skill": "◆", "mcp": "▣", "note": "▤"}
 
 
 def _load_creds() -> dict:
@@ -302,6 +325,49 @@ def cmd_pull(args) -> None:
     else:
         (target / f"{slug}.md").write_text((r.get("content_md") or "") + section)
         print(f"wrote {target / (slug + '.md')}")
+
+
+CLAUDE_SKILLS_DIR = Path("~/.claude/skills").expanduser()
+INSTALL_DIR = Path("~/.config/skillshare/installed").expanduser()
+
+
+def cmd_install(args) -> None:
+    """Install a resource into local tools — the toast 'Add' action. Skills land
+    in Claude Code's skills dir so they're usable immediately; MCP configs and
+    notes are saved under ~/.config/skillshare/installed. Optionally marks the
+    source notification read."""
+    r = request("GET", f"/api/resources/{args.id}")
+    slug = re.sub(r"[^a-z0-9]+", "-", r["title"].lower()).strip("-") or "resource"
+    if r["type"] == "SKILL":
+        target = CLAUDE_SKILLS_DIR / slug
+        target.mkdir(parents=True, exist_ok=True)
+        section = pull_attachments(r, target, True)
+        dest = target / "SKILL.md"
+        dest.write_text((r.get("content_md") or "") + section)
+    elif r["type"] == "MCP":
+        target = INSTALL_DIR / "mcp" / slug
+        target.mkdir(parents=True, exist_ok=True)
+        dest = target / "mcp-config.json"
+        dest.write_text(r.get("config_json") or "{}")
+        if r.get("content_md"):
+            (target / "README.md").write_text(r["content_md"])
+    else:
+        target = INSTALL_DIR / "notes"
+        target.mkdir(parents=True, exist_ok=True)
+        dest = target / f"{slug}.md"
+        dest.write_text(r.get("content_md") or "")
+    print(f"installed {BOLD}{r['title']}{RESET} → {dest}")
+    _invalidate_status_cache()  # the install gap just shrank — reflect it now
+    if getattr(args, "notification", None):
+        try:
+            request("POST", "/api/notifications/read", body={"ids": [args.notification]})
+        except SystemExit:
+            pass
+
+
+def cmd_read(args) -> None:
+    request("POST", "/api/notifications/read", body={"ids": args.ids})
+    print(f"{DIM}marked {len(args.ids)} notification(s) read{RESET}")
 
 
 def cmd_list(args) -> None:
@@ -571,6 +637,243 @@ def cmd_push(args) -> None:
             "fingerprint": r["fingerprint"], "kind": c.kind, "status": "pushed",
             "source": c.source, "resource_id": created["id"], "name": c.name})
         print(f"  {BOLD}✓ pushed{RESET} [{created['id']}]")
+        _invalidate_status_cache()  # one fewer local artifact awaiting push
+
+
+def _primary_org_slug() -> str:
+    """The org a 'Push' CTA targets by default: first one you administer, else
+    your first membership. Empty string if you belong to none."""
+    try:
+        orgs = request("GET", "/api/orgs") or []
+    except SystemExit:
+        return ""
+    if not orgs:
+        return ""
+    admin = next((o for o in orgs if (o.get("role") or "").upper() == "ADMIN"), None)
+    return (admin or orgs[0]).get("slug", "")
+
+
+def cmd_watch(args) -> None:
+    """Poll the inbox + local artifacts and pop a themed desktop card for each
+    new item. Runs in the foreground; use --once for a cron/systemd timer."""
+    import time
+
+    from .notify import announce_inbox, announce_shareable
+
+    interval = max(10, args.interval)
+    target_org = "" if args.no_scan else _primary_org_slug()
+    scope = "inbox" if args.no_scan else "inbox + local artifacts"
+    mode = "single poll" if args.once else f"every {interval}s"
+    print(f"{BOLD}skillshare watch{RESET} — {scope}, {mode}"
+          + (f" {DIM}(push → {target_org}){RESET}" if target_org else "")
+          + f". {DIM}Ctrl-C to stop.{RESET}")
+    first = True
+    try:
+        while True:
+            try:
+                items = request("GET", "/api/notifications", params={"unread_only": "true", "limit": 30})
+            except SystemExit:
+                items = None  # transient API blip — don't kill the watcher
+            n_in = announce_inbox(items or [], seed_silently=first and not args.notify_existing)
+            n_share = 0
+            if not args.no_scan:
+                n_share = announce_shareable(_scan_rows(args), target_org)
+            if n_in or n_share:
+                print(f"{DIM}· popped {n_in} inbox + {n_share} shareable card(s){RESET}")
+            if args.once:
+                break
+            first = False
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        print(f"\n{DIM}stopped{RESET}")
+
+
+def _read_json(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _slugify(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", (s or "").lower()).strip("-")
+
+
+def _index_from_rows(rows) -> tuple[set, dict]:
+    """From local scan rows, the set of local fingerprints + per-kind set of local
+    names/slugs — used to decide whether a platform resource is already local."""
+    fps, names = set(), {"skill": set(), "mcp": set(), "note": set()}
+    for r in rows:
+        c = r["candidate"]
+        fps.add(r["fingerprint"])
+        if c.kind in names:
+            names[c.kind].add(_slugify(c.name or ""))
+            names[c.kind].add(_slugify(c.title or ""))
+    return fps, names
+
+
+def _is_local(r: dict, fps: set, names: dict) -> bool:
+    """Is this platform resource already set up on this machine? Matches by
+    push-provenance (source_fingerprint), local name/slug, or install path."""
+    kind, slug = r["type"].lower(), _slugify(r["title"])
+    if r.get("source_fingerprint") and r["source_fingerprint"] in fps:
+        return True
+    if kind in names and slug in names[kind]:
+        return True
+    if kind == "skill" and (CLAUDE_SKILLS_DIR / slug).exists():
+        return True
+    if kind == "note" and (INSTALL_DIR / "notes" / f"{slug}.md").exists():
+        return True
+    if kind == "mcp" and (INSTALL_DIR / "mcp" / slug).exists():
+        return True
+    return False
+
+
+def _available_resources(args) -> list:
+    """Resources visible to me on SkillShare that I don't have locally yet."""
+    try:
+        resources = request("GET", "/api/auth/me/resources")
+    except SystemExit:
+        return []
+    try:
+        rows = _scan_rows(args)
+    except SystemExit:
+        rows = []
+    fps, names = _index_from_rows(rows)
+    return [r for r in resources if not _is_local(r, fps, names)]
+
+
+def _panel_item(r: dict) -> dict:
+    return {
+        "id": r["id"], "kind": r["type"].lower(), "title": r["title"],
+        "description": r.get("description") or "", "version": r.get("version"),
+        "author": (r.get("author") or {}).get("username"),
+        "scope": (r.get("scope_type") or "").lower(),
+        "scope_name": r.get("scope_name"),
+        "created_at": r.get("created_at"), "updated_at": r.get("updated_at"),
+        "tags": r.get("tags") or [], "stars": r.get("stars_count", 0),
+    }
+
+
+def _compute_status_segment(args) -> str:
+    """The SkillShare part of the status line: how many skills/MCP/notes are
+    available to install (on SkillShare, in my scopes, not yet local) — plus
+    local artifacts not pushed yet. Network/scan happen here, so it's cached."""
+    try:
+        resources = request("GET", "/api/auth/me/resources")
+    except SystemExit:
+        return f"{DIM}◆ skillshare login{RESET}"
+    try:
+        rows = _scan_rows(args)
+    except SystemExit:
+        rows = []
+    fps, names = _index_from_rows(rows)
+    inst = {"skill": 0, "mcp": 0, "note": 0}
+    for r in resources:
+        k = r["type"].lower()
+        if k in inst and not _is_local(r, fps, names):
+            inst[k] += 1
+    pend = {"skill": 0, "mcp": 0, "note": 0}
+    for r in rows:
+        if r["status"] == "new" and r["candidate"].kind in pend:
+            pend[r["candidate"].kind] += 1
+    sep = f"{DIM} · {RESET}"
+    seg = f"{VIOLET}◆ SkillShare{RESET}"
+    inst_bits = [f"{KIND_FG[k]}{KIND_MARK[k]} {n} {k}{RESET}" for k, n in inst.items() if n]
+    seg += ("  ↓ " + sep.join(inst_bits) + f" {DIM}to install{RESET}") if inst_bits else f"  {DIM}all caught up{RESET}"
+    push_bits = [f"{KIND_FG[k]}{KIND_MARK[k]} {n} {k}{RESET}" for k, n in pend.items() if n]
+    if push_bits:
+        seg += f"  {DIM}│{RESET}  ⬆ " + sep.join(push_bits) + f" {DIM}to push{RESET}"
+    return seg
+
+
+def _status_segment(args) -> str:
+    import time
+    now = time.time()
+    cache = _read_json(STATUS_CACHE)
+    if not args.refresh and cache and now - cache.get("ts", 0) < args.max_age:
+        return cache.get("seg", "")
+    if not args.refresh and cache:
+        # Stale: serve the cached line instantly, refresh in the background.
+        try:
+            import subprocess
+            subprocess.Popen([sys.argv[0], "status", "--refresh"],
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            pass
+        return cache.get("seg", "")
+    seg = _compute_status_segment(args)
+    try:
+        STATUS_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        STATUS_CACHE.write_text(json.dumps({"ts": now, "seg": seg}))
+    except OSError:
+        pass
+    return seg
+
+
+def cmd_status(args) -> None:
+    """Render a one-line status for the AI tool's status bar. Claude Code passes
+    its session context (model, cwd) as JSON on stdin; we keep that prefix fresh
+    and append the (cached) SkillShare segment."""
+    ctx = {}
+    if not sys.stdin.isatty():
+        try:
+            ctx = json.load(sys.stdin)
+        except (ValueError, OSError):
+            ctx = {}
+    seg = _status_segment(args)
+    if args.refresh:
+        return  # background refresh just repopulated the cache; nothing to print
+    prefix_bits = []
+    cwd = (ctx.get("workspace") or {}).get("current_dir") or ctx.get("cwd")
+    if cwd:
+        prefix_bits.append(f"{DIM}{Path(cwd).name}{RESET}")
+    model = (ctx.get("model") or {}).get("display_name")
+    if model:
+        prefix_bits.append(f"{DIM}{model}{RESET}")
+    prefix = f" {DIM}·{RESET} ".join(prefix_bits)
+    if prefix and seg:
+        print(f"{prefix}  {DIM}│{RESET}  {seg}")
+    else:
+        print(seg or prefix)
+
+
+def cmd_available(args) -> None:
+    """List resources on SkillShare (in your scopes) that aren't set up locally
+    yet. `--json` feeds the panel; otherwise prints a grouped, installable list."""
+    items = _available_resources(args)
+    if args.json:
+        print(json.dumps([_panel_item(r) for r in items], indent=2))
+        return
+    if not items:
+        print(f"{DIM}you're all caught up — nothing new to install{RESET}")
+        return
+    by: dict = {"SKILL": [], "MCP": [], "NOTE": []}
+    for r in items:
+        by.setdefault(r["type"], []).append(r)
+    for t, label in (("SKILL", "Skills"), ("MCP", "MCP servers"), ("NOTE", "Notes")):
+        group = by.get(t) or []
+        if not group:
+            continue
+        print(f"\n{BOLD}{label}{RESET} {DIM}({len(group)}){RESET}")
+        for r in group:
+            author = (r.get("author") or {}).get("username", "?")
+            print(f"  {GLYPH.get(t, '·')} {BOLD}{r['title']}{RESET} {DIM}v{r['version']} · @{author} · "
+                  f"{r['scope_type'].lower()}{RESET}  [{r['id']}]")
+            if r.get("description"):
+                print(f"      {DIM}{r['description'][:90]}{RESET}")
+    print(f"\n{DIM}install one:{RESET} skillshare install <id>   {DIM}· open the panel:{RESET} skillshare panel")
+
+
+def cmd_panel(args) -> None:
+    """Open the clickable install panel (expandable rows, one-click install).
+    Falls back to the text list if no GUI is available."""
+    items = [_panel_item(r) for r in _available_resources(args)]
+    from .notify import open_panel
+    if not open_panel(items):
+        print(f"{DIM}(no desktop GUI available — showing the list instead){RESET}")
+        args.json = False
+        cmd_available(args)
 
 
 def cmd_dismiss(args) -> None:
@@ -578,6 +881,66 @@ def cmd_dismiss(args) -> None:
         "fingerprint": args.fingerprint, "kind": args.kind, "status": "dismissed",
         "source": args.source or "", "name": args.name or ""})
     print(f"{DIM}dismissed {args.fingerprint} — won't be recommended again{RESET}")
+
+
+_FEEDBACK_CATEGORIES = ["bug", "idea", "praise", "question", "other", "general"]
+
+
+def cmd_feedback(args) -> None:
+    """Send product feedback to the SkillShare team — a rating and a message,
+    optionally about a specific resource. Prompts for anything not passed as a
+    flag so `skillshare feedback` on its own is fully interactive."""
+    message = args.message
+    if not message:
+        if sys.stdin.isatty():
+            print(f"{DIM}Your feedback (what's working, what's not, ideas):{RESET}")
+            message = input("> ").strip()
+        else:
+            message = sys.stdin.read().strip()
+    if not message:
+        die("feedback message is required (pass -m \"...\" or pipe it in)")
+
+    rating = args.rating
+    if rating is None and not args.yes and sys.stdin.isatty():
+        ans = input("Rating 1-5 (Enter to skip): ").strip()
+        if ans:
+            try:
+                rating = int(ans)
+            except ValueError:
+                die("rating must be a number 1-5")
+    if rating is not None and not (1 <= rating <= 5):
+        die("rating must be between 1 and 5")
+
+    body = {
+        "message": message,
+        "category": args.category,
+        "source": "cli",
+        "context": {"cwd": os.getcwd()},
+    }
+    if rating is not None:
+        body["rating"] = rating
+    if args.resource:
+        body["target_type"] = "resource"
+        body["target_id"] = args.resource
+
+    fb = request("POST", "/api/feedback", body=body)
+    stars = ("★" * fb["rating"] + "☆" * (5 - fb["rating"])) if fb.get("rating") else ""
+    where = f" on {fb['target_id']}" if fb.get("target_type") == "resource" else ""
+    print(f"{BOLD}✓ thanks for the feedback{RESET}{where}  {DIM}{stars} · {fb['category']} · [{fb['id']}]{RESET}")
+
+
+def cmd_feedback_list(_args) -> None:
+    """Show the feedback you've submitted."""
+    rows = request("GET", "/api/feedback/mine")
+    if not rows:
+        print(f"{DIM}you haven't sent any feedback yet{RESET}")
+        return
+    for f in rows:
+        when = str(f.get("created_at") or "")[:16].replace("T", " ")
+        stars = ("★" * f["rating"]) if f.get("rating") else f"{DIM}—{RESET}"
+        tag = f"{DIM}reviewed{RESET}" if f["status"] == "reviewed" else f"{BOLD}open{RESET}"
+        print(f"{stars} {BOLD}{f['category']}{RESET} {tag} {DIM}· {when}{RESET}")
+        print(f"    {f['message'][:120]}")
 
 
 def main() -> None:
@@ -663,12 +1026,55 @@ def main() -> None:
     sp.add_argument("--yes", action="store_true", help="don't prompt for confirmation")
     sp.set_defaults(fn=cmd_push)
 
+    sp = sub.add_parser("status", help="one-line status for an AI tool's status bar (install gap + local to-push)")
+    _scan_flags(sp)
+    sp.add_argument("--max-age", type=int, default=60, help="seconds to cache the counts (default 60)")
+    sp.add_argument("--refresh", action="store_true", help="recompute the cache without printing (internal)")
+    sp.set_defaults(fn=cmd_status)
+
+    sp = sub.add_parser("available", help="list resources on SkillShare (your scopes) not set up locally yet")
+    _scan_flags(sp)
+    sp.add_argument("--json", action="store_true", help="machine-readable output (used by the panel)")
+    sp.set_defaults(fn=cmd_available)
+
+    sp = sub.add_parser("panel", help="open the clickable install panel (expandable rows, one-click install)")
+    _scan_flags(sp)
+    sp.set_defaults(fn=cmd_panel)
+
+    sp = sub.add_parser("install", help="install a resource into local tools (the toast 'Add' action)")
+    sp.add_argument("id")
+    sp.add_argument("--notification", help="mark this notification id read after installing")
+    sp.set_defaults(fn=cmd_install)
+
+    sp = sub.add_parser("read", help="mark notification id(s) read (the toast 'Reject' action)")
+    sp.add_argument("ids", nargs="+")
+    sp.set_defaults(fn=cmd_read)
+
+    sp = sub.add_parser("watch", help="pop desktop notifications for new inbox items + shareable local artifacts")
+    _scan_flags(sp)
+    sp.add_argument("--interval", type=int, default=60, help="seconds between polls (default 60)")
+    sp.add_argument("--once", action="store_true", help="run a single poll and exit (for cron/systemd timer)")
+    sp.add_argument("--no-scan", action="store_true", help="only watch the inbox; skip the local-artifact scan")
+    sp.add_argument("--notify-existing", action="store_true", help="also toast items already unread at startup")
+    sp.set_defaults(fn=cmd_watch)
+
     sp = sub.add_parser("dismiss", help="remember not to recommend a local artifact (by fingerprint)")
     sp.add_argument("fingerprint")
     sp.add_argument("--kind", default="skill", choices=["skill", "mcp", "note"])
     sp.add_argument("--source", default="")
     sp.add_argument("--name", default="")
     sp.set_defaults(fn=cmd_dismiss)
+
+    sp = sub.add_parser("feedback", help="send product feedback (rating + message), optionally about a resource")
+    sp.add_argument("-m", "--message", help="the feedback text (omit to be prompted / read stdin)")
+    sp.add_argument("-r", "--rating", type=int, help="rating 1-5 (optional)")
+    sp.add_argument("-c", "--category", default="general", choices=_FEEDBACK_CATEGORIES,
+                    help="what kind of feedback (default general)")
+    sp.add_argument("--resource", help="resource id this feedback is about (omit for general/platform)")
+    sp.add_argument("--yes", action="store_true", help="don't prompt for a rating")
+    sp.set_defaults(fn=cmd_feedback)
+
+    sub.add_parser("feedback-list", help="list the feedback you've submitted").set_defaults(fn=cmd_feedback_list)
 
     sp = sub.add_parser("star", help="star a resource")
     sp.add_argument("id")
