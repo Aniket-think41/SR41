@@ -13,10 +13,12 @@
 [build.environment]
   # Next 16 + React 19 need a current Node.
   NODE_VERSION = "20"
-  # Public, build-time vars (set real values in the Netlify UI, not here):
+  # Public, build-time vars (set in Netlify UI, not here — see env:set):
   #   NEXT_PUBLIC_API_URL          → backend origin, e.g. https://api.skillshare.think41.com
   #                                  (leave unset to run the dashboard in mock mode)
-  #   NEXT_PUBLIC_GOOGLE_CLIENT_ID → Google OAuth client id for sign-in
+  #   NEXT_PUBLIC_GOOGLE_CLIENT_ID → Google OAuth client id for sign-in (SET via CLI)
+  #   NEXT_PUBLIC_DEMO_EMAIL       → Demo account email (defaults to aniket.lnu@think41.com)
+  #   NEXT_PUBLIC_DEMO_PASSWORD    → Demo account password (defaults to skillshare-demo)
 
 # Official Next.js runtime — handles the App Router SSR/dynamic routes
 # (e.g. /dashboard/org/[slug]) alongside the prerendered static pages.
