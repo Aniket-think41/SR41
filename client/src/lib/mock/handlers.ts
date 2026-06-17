@@ -8,6 +8,7 @@
  */
 
 import { FEATURES, getDb, saveDb, uid, resetDb, type Db } from "./db";
+import { detectGithubFull, toPreview, detectedToCreateBody } from "./github";
 import type {
   Activity,
   ApiError,
@@ -41,6 +42,10 @@ const unauthorized = () => new HttpError(401, "UNAUTHORIZED", "Authentication re
 /* ---------------- helpers ---------------- */
 
 const now = () => new Date().toISOString();
+
+// short device user_code chunk, ambiguity-free alphabet (matches the backend)
+const rand4 = () =>
+  Array.from({ length: 4 }, () => "ABCDEFGHJKMNPQRSTUVWXYZ23456789"[Math.floor(Math.random() * 31)]).join("");
 
 function currentUser(db: Db): User {
   const u = db.users.find((x) => x.id === db.session_user_id);
@@ -149,8 +154,76 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     return { user, access_token: "mock-access-token", refresh_token: "mock-refresh-token" };
   }],
 
+  // Mock Google sign-in: no real id_token to verify, so sign in (or create) a
+  // demo account. Real backend verifies the token via POST /api/auth/google.
+  ["POST", "/api/auth/google", (_p, _b, _q, db) => {
+    const user = db.users.find((u) => u.id === "u-aniket") ?? db.users[0];
+    if (!user) throw new HttpError(401, "UNAUTHORIZED", "No demo account available");
+    db.session_user_id = user.id;
+    saveDb();
+    return { user, access_token: "mock-access-token", refresh_token: "mock-refresh-token" };
+  }],
+
   ["POST", "/api/auth/logout", (_p, _b, _q, db) => {
     db.session_user_id = null;
+    saveDb();
+    return { ok: true };
+  }],
+
+  // ---- device login (CLI/MCP browser approval) ----
+  ["POST", "/api/auth/device/start", (_p, body, _q, db) => {
+    db.device_auths ??= [];
+    const userCode = `${rand4()}-${rand4()}`;
+    const rec = {
+      id: uid("dev"), device_code: uid("dc") + uid("dc"), user_code: userCode,
+      client_name: String(body.client_name || "SkillShare CLI"),
+      status: "pending" as const, user_id: null,
+    };
+    db.device_auths.push(rec);
+    saveDb();
+    return {
+      device_code: rec.device_code, user_code: rec.user_code,
+      verification_uri: "/activate",
+      verification_uri_complete: `/activate?code=${rec.user_code}`,
+      expires_in: 900, interval: 2,
+    };
+  }],
+
+  ["POST", "/api/auth/device/token", (_p, body, _q, db) => {
+    db.device_auths ??= [];
+    const rec = db.device_auths.find((d) => d.device_code === body.device_code);
+    if (!rec) throw notFound("Device session");
+    if (rec.status === "denied") return { status: "denied" };
+    if (rec.status !== "approved") return { status: "pending", interval: 2 };
+    return { status: "approved", access_token: "mock-access-token", refresh_token: "mock-refresh-token", expires_in: 900, user: db.users.find((u) => u.id === rec.user_id) };
+  }],
+
+  ["GET", "/api/auth/device/:userCode", (p, _b, _q, db) => {
+    db.device_auths ??= [];
+    const rec = db.device_auths.find((d) => d.user_code === p.userCode.toUpperCase());
+    if (!rec) throw notFound("Device session");
+    currentUser(db); // must be signed in to view/approve
+    return { client_name: rec.client_name, status: rec.status, created_at: now() };
+  }],
+
+  ["POST", "/api/auth/device/approve", (_p, body, _q, db) => {
+    db.device_auths ??= [];
+    const me = currentUser(db);
+    const rec = db.device_auths.find((d) => d.user_code === String(body.user_code).toUpperCase());
+    if (!rec) throw notFound("Device session");
+    rec.status = "approved";
+    rec.user_id = me.id;
+    saveDb();
+    return { ok: true, client_name: rec.client_name };
+  }],
+
+  ["POST", "/api/auth/device/deny", (_p, body, _q, db) => {
+    db.device_auths ??= [];
+    const me = currentUser(db);
+    void me;
+    const rec = db.device_auths.find((d) => d.user_code === String(body.user_code).toUpperCase());
+    if (!rec) throw notFound("Device session");
+    rec.status = "denied";
     saveDb();
     return { ok: true };
   }],
@@ -819,6 +892,70 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     file_url: `https://cdn.skillshare.think41.com/packages/${String(body.filename ?? "package.skill").replace(/[^a-zA-Z0-9.-]/g, "-")}`,
   })],
 
+  // GitHub-URL ingestion — declared BEFORE /api/resources/:id/import so "github"
+  // isn't captured as a resource id by the dynamic route.
+  ["POST", "/api/resources/github/preview", async (_p, body) => {
+    const det = await detectGithubFull(String(body.url ?? ""));
+    return toPreview(det);
+  }],
+
+  ["POST", "/api/resources/github/import", async (_p, body, _q, db) => {
+    const me = currentUser(db);
+    if (!["ORG", "PROJECT", "POD", "PUBLIC"].includes(String(body.scope_type)))
+      throw new HttpError(422, "VALIDATION_ERROR", "scope_type must be ORG, PROJECT, POD, or PUBLIC");
+    const det = await detectGithubFull(String(body.url ?? ""));
+    const select = (body.select as string[]) ?? [];
+    let items = det.items;
+    if (select.length) {
+      const wanted = new Set(select);
+      items = items.filter((i) => wanted.has(i.fingerprint));
+    }
+    if (!items.length)
+      throw new HttpError(422, "VALIDATION_ERROR", "No skills, MCP servers, or notes were detected in that repository");
+
+    const scope_type = body.scope_type as ScopeType;
+    const scope_id = (body.scope_id as string) ?? null;
+    const created: Resource[] = [];
+    const skipped: { title: string; fingerprint: string; reason: string; resource_id?: string }[] = [];
+    for (const it of items) {
+      const existing = db.resources.find(
+        (r) => r.source_fingerprint === it.fingerprint && r.scope_type === scope_type && r.scope_id === scope_id
+      );
+      if (existing) {
+        skipped.push({ title: it.title, fingerprint: it.fingerprint, reason: "already imported", resource_id: existing.id });
+        continue;
+      }
+      const b = detectedToCreateBody(it);
+      const r: Resource = {
+        id: uid("res"),
+        type: b.type,
+        title: b.title.slice(0, 120),
+        description: b.description,
+        content_md: b.content_md,
+        server_url: b.server_url,
+        config_json: b.config_json,
+        file_url: null,
+        version: "0.1.0",
+        tags: b.tags,
+        attachments: b.attachments,
+        scope_type,
+        scope_id,
+        author_id: me.id,
+        is_public: false,
+        stars_count: 0,
+        source_fingerprint: b.source_fingerprint,
+        created_at: now(),
+        updated_at: now(),
+      };
+      db.resources.push(r);
+      const orgId = scopeOrgId(db, r);
+      if (orgId) logActivity(db, { user_id: me.id, org_id: orgId, verb: "created", object_type: "resource", object_id: r.id, object_title: r.title, meta: "imported from GitHub" });
+      created.push(r);
+    }
+    saveDb();
+    return { created: created.map((r) => enrich(r, db)), skipped, repo: { owner: det.repo.owner, repo: det.repo.repo } };
+  }],
+
   // "Add to my org" — copies a public resource into an org (client addition, documented in backend spec §8)
   ["POST", "/api/resources/:id/import", (p, body, _q, db) => {
     const me = currentUser(db);
@@ -1166,7 +1303,7 @@ export async function handle(method: string, url: string, body?: Json): Promise<
     if (!params) continue;
     await new Promise((r) => setTimeout(r, LATENCY));
     try {
-      return fn(params, body ?? {}, query, db);
+      return await fn(params, body ?? {}, query, db);
     } catch (e) {
       if (e instanceof HttpError) {
         const err: ApiError = { error: { code: e.code, message: e.message, status: e.status } };

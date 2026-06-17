@@ -11,7 +11,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, Loader2, Upload, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Github, Loader2, Upload, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/api/http";
 import { qk, useCurrentOrg, useInvalidateResources, useTerms } from "@/lib/hooks";
@@ -19,6 +19,7 @@ import type { Attachment, Resource, ResourceType, ScopeType } from "@/lib/types"
 import { TYPE_META, SCOPE_META } from "@/lib/utils";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { AttachmentsEditor } from "./AttachmentsEditor";
+import { GithubImport } from "./GithubImport";
 import { useToast } from "./Toast";
 
 const schema = z.object({
@@ -64,6 +65,7 @@ export function ResourceForm({
     s === "POD" ? terms.pod : s === "PROJECT" ? terms.project : SCOPE_META[s].label;
 
   const [step, setStep] = useState(editing ? 2 : 1);
+  const [githubMode, setGithubMode] = useState(false);
   const [type, setType] = useState<ResourceType>(resource?.type ?? "SKILL");
   const [tags, setTags] = useState<string[]>(resource?.tags ?? []);
   const [tagInput, setTagInput] = useState("");
@@ -174,6 +176,31 @@ export function ResourceForm({
     if (step === 3) mutation.mutate(d);
   });
 
+  if (githubMode) {
+    return (
+      <div className="flex h-full flex-col">
+        <div className="flex items-center justify-between border-b border-line p-6 pb-4">
+          <div>
+            <p className="kicker">Import from GitHub</p>
+            <h2 className="font-display mt-1 text-xl font-semibold">Add from a repository</h2>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-full p-1.5 text-muted transition hover:bg-surface hover:text-ink" aria-label="Close">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <GithubImport
+          scopeOptions={allScopeOptions}
+          defaultScope={scope}
+          onBack={() => setGithubMode(false)}
+          onDone={async () => {
+            await invalidate();
+            onClose();
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <form onSubmit={(e) => e.preventDefault()} className="flex h-full flex-col">
       {/* Header */}
@@ -219,6 +246,28 @@ export function ResourceForm({
                 </button>
               );
             })}
+
+            <div className="flex items-center gap-3 pt-1">
+              <span className="h-px flex-1 bg-line" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted">or</span>
+              <span className="h-px flex-1 bg-line" />
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setGithubMode(true)}
+              className="card flex w-full items-start gap-4 p-5 text-left transition hover:!border-primary/40"
+            >
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-ink text-lg text-white" aria-hidden>
+                <Github className="h-5 w-5" />
+              </span>
+              <span>
+                <span className="font-display block text-lg font-semibold">Import from GitHub</span>
+                <span className="mt-0.5 block text-sm text-body">
+                  Paste a repo URL — we detect the skills, MCP servers, and notes inside it.
+                </span>
+              </span>
+            </button>
           </div>
         )}
 

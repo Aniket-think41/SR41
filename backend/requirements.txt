@@ -7,7 +7,8 @@ passlib>=1.7.4
 PyJWT>=2.8
 httpx>=0.27
 psycopg2-binary>=2.9 ; platform_python_implementation == "CPython"
-boto3>=1.34
+google-cloud-storage>=2.16   # gcs storage backend (default cloud)
+boto3>=1.34                  # s3 storage backend (alternative)
 python-dotenv>=1.0
 email-validator>=2.1
 python-multipart>=0.0.9

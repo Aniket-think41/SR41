@@ -89,9 +89,10 @@ scripts/smoke.py     end-to-end contract test
 | `GOOGLE_CLIENT_ID` | optional | – | enables `POST /api/auth/google` |
 | `RATE_LIMIT_ENABLED` | – | `true` | plus `RATE_LIMIT_{AUTH,WRITE,SEARCH}_PER_MIN` |
 | `REDIS_URL` | optional | – | shared limiter store for multi-instance deploys |
-| `STORAGE_BACKEND` | – | `local` | `local` (disk + `/uploads`) or `s3` — switchable file storage (§6) |
+| `STORAGE_BACKEND` | – | `local` | `local` (disk + `/uploads`), `gcs` (default cloud), or `s3` — switchable file storage (§6) |
 | `UPLOAD_DIR` | local | `var/uploads` | where the local backend writes uploaded files |
 | `PUBLIC_BASE_URL` | local | `http://localhost:8400` | this API's public origin, used to build `/uploads/<key>` URLs |
+| `GCS_BUCKET`, `GCS_PROJECT`, `GCS_CREDENTIALS_FILE`, `GCS_PUBLIC_BASE_URL` | gcs | – | Google Cloud Storage when `STORAGE_BACKEND=gcs` (default cloud, §6) |
 | `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT_URL`, `S3_PUBLIC_BASE_URL`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | s3 | – | S3/R2/MinIO storage when `STORAGE_BACKEND=s3` (§6) |
 | `MAX_UPLOAD_MB` | – | `50` | spec §6 |
 | `LICENSE_KEY_PATTERN` | – | `^T41-PREM-[A-Z0-9]{4,}$` | accepted license keys |

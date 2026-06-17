@@ -43,6 +43,31 @@ export const TYPE_META: Record<
   NOTE: { label: "Note", glyph: "▤", chip: "bg-[#fdece5] text-note", color: "var(--color-note)" },
 };
 
+/**
+ * Recognize what a link/file attachment points to, so notes can carry sheets,
+ * slides, docs, PDFs, etc. and the UI shows the right label. `key` maps to an
+ * icon in the component layer (utils stays icon-free).
+ */
+export type LinkClassKey =
+  | "sheet" | "doc" | "slides" | "drive" | "pdf" | "office" | "figma" | "notion" | "github" | "link";
+
+export function classifyLink(url: string): { label: string; key: LinkClassKey } {
+  const u = (url || "").trim().toLowerCase();
+  const ext = u.split(/[?#]/)[0].split(".").pop() ?? "";
+  if (/docs\.google\.com\/spreadsheets/.test(u)) return { label: "Google Sheet", key: "sheet" };
+  if (/docs\.google\.com\/presentation/.test(u)) return { label: "Google Slides", key: "slides" };
+  if (/docs\.google\.com\/document/.test(u)) return { label: "Google Doc", key: "doc" };
+  if (/drive\.google\.com/.test(u)) return { label: "Google Drive", key: "drive" };
+  if (/figma\.com/.test(u)) return { label: "Figma", key: "figma" };
+  if (/notion\.(so|site)/.test(u)) return { label: "Notion", key: "notion" };
+  if (/github\.com|githubusercontent\.com/.test(u)) return { label: "GitHub", key: "github" };
+  if (ext === "pdf") return { label: "PDF", key: "pdf" };
+  if (["xlsx", "xls", "csv", "ods", "numbers"].includes(ext)) return { label: "Spreadsheet", key: "sheet" };
+  if (["pptx", "ppt", "odp", "key"].includes(ext)) return { label: "Slides", key: "slides" };
+  if (["docx", "doc", "odt", "pages"].includes(ext)) return { label: "Document", key: "doc" };
+  return { label: "Link", key: "link" };
+}
+
 /** Frontend spec §5.2 — Org blue · Project amber · Pod green · Public purple. */
 export const SCOPE_META: Record<
   ScopeType,

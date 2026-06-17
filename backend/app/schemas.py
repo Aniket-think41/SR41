@@ -143,6 +143,43 @@ class ImportIn(BaseModel):
     org_slug: str
 
 
+class GithubPreviewIn(BaseModel):
+    """Detect (without creating) the skill(s)/MCP(s)/note(s) inside a public repo."""
+
+    url: str = Field(min_length=1, max_length=400)
+
+
+class GithubImportIn(BaseModel):
+    """Import detected resources from a GitHub URL into a scope.
+    `select` is a list of fingerprints to import; empty = import everything found."""
+
+    url: str = Field(min_length=1, max_length=400)
+    scope_type: str  # ORG | PROJECT | POD | PUBLIC
+    scope_id: str | None = None
+    select: list[str] = []
+
+
+# ---- Device-authorization login (CLI / MCP browser login) ----
+
+
+class DeviceStartIn(BaseModel):
+    client_name: str = Field(default="", max_length=120)
+
+
+class DeviceCodeIn(BaseModel):
+    device_code: str = Field(min_length=8, max_length=128)
+
+
+class DeviceUserCodeIn(BaseModel):
+    user_code: str = Field(min_length=4, max_length=20)
+
+
+class RefreshIn(BaseModel):
+    """Refresh token presented by a non-browser client (CLI/MCP have no cookie)."""
+
+    refresh_token: str | None = None
+
+
 class NotificationReadIn(BaseModel):
     """Mark notifications read: pass explicit ids, or all=true to clear the inbox."""
 

@@ -1,10 +1,14 @@
 """
-File storage — switchable between local disk (dev) and S3/R2 (prod) via the
-STORAGE_BACKEND setting. Both implement the same `save_bytes(...) -> file_url`
-contract, so the rest of the app never cares which is active.
+File storage — switchable between local disk (dev) and a cloud bucket (prod) via
+the STORAGE_BACKEND setting. Every backend implements the same
+`save_bytes(...) -> file_url` contract, so the rest of the app never cares which
+is active.
 
 Local:  writes under settings.upload_dir and serves the bytes from the
         /uploads static mount (see main.py); file_url = PUBLIC_BASE/uploads/<key>.
+GCS:    Google Cloud Storage (the default cloud provider) — uploads with the
+        google-cloud-storage client; file_url = GCS_PUBLIC_BASE_URL/<key>
+        (defaults to https://storage.googleapis.com/<bucket>/<key>).
 S3:     uploads with boto3 put_object; file_url = S3_PUBLIC_BASE_URL/<key>
         (works with AWS S3, Cloudflare R2, MinIO — anything boto3-compatible).
 """
@@ -24,7 +28,10 @@ settings = get_settings()
 ALLOWED_EXT: dict[str, set[str]] = {
     "image": {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".avif"},
     "video": {".mp4", ".webm", ".ogg", ".mov", ".m4v"},
-    "file": {".pdf", ".md", ".txt", ".json", ".csv", ".zip", ".skill", ".docx", ".pptx", ".xlsx"},
+    "file": {
+        ".pdf", ".md", ".txt", ".json", ".csv", ".zip", ".skill",
+        ".docx", ".pptx", ".xlsx", ".odt", ".odp", ".ods", ".key", ".numbers", ".pages",
+    },
 }
 # Generic content types per kind, used when the client doesn't send one.
 DEFAULT_CONTENT_TYPE = {"image": "application/octet-stream", "video": "application/octet-stream", "file": "application/octet-stream"}
@@ -53,27 +60,59 @@ def _make_key(kind: str, username: str, filename: str) -> str:
 
 
 def save_bytes(data: bytes, *, kind: str, username: str, filename: str, content_type: str | None) -> str:
-    """Persist bytes and return a public URL. Routes to local or S3 by config."""
+    """Persist bytes and return a public URL. Routes to local / gcs / s3 by config."""
     key = _make_key(kind, username, filename)
     ct = content_type or DEFAULT_CONTENT_TYPE.get(kind, "application/octet-stream")
 
-    if settings.storage_backend == "s3":
-        if not settings.s3_bucket:
-            raise StorageError("STORAGE_BACKEND=s3 but S3_BUCKET is not configured")
-        import boto3  # imported lazily — only needed when S3 is active
+    backend = settings.storage_backend
+    if backend == "gcs":
+        return _save_gcs(data, key, ct)
+    if backend == "s3":
+        return _save_s3(data, key, ct)
+    if backend == "local":
+        return _save_local(data, key)
+    raise StorageError(f"Unknown STORAGE_BACKEND={backend!r} (expected local | gcs | s3)")
 
-        s3 = boto3.client(
-            "s3",
-            region_name=settings.s3_region,
-            endpoint_url=settings.s3_endpoint_url or None,
-            aws_access_key_id=settings.aws_access_key_id or None,
-            aws_secret_access_key=settings.aws_secret_access_key or None,
+
+def _save_gcs(data: bytes, key: str, ct: str) -> str:
+    """Google Cloud Storage — the default cloud provider."""
+    if not settings.gcs_bucket:
+        raise StorageError("STORAGE_BACKEND=gcs but GCS_BUCKET is not configured")
+    from google.cloud import storage as gcs  # imported lazily — only needed when GCS is active
+
+    if settings.gcs_credentials_file:
+        client = gcs.Client.from_service_account_json(
+            settings.gcs_credentials_file, project=settings.gcs_project or None
         )
-        s3.put_object(Bucket=settings.s3_bucket, Key=key, Body=data, ContentType=ct)
-        base = settings.s3_public_base_url.rstrip("/") or f"https://{settings.s3_bucket}.s3.amazonaws.com"
-        return f"{base}/{key}"
+    else:
+        # Application Default Credentials (GOOGLE_APPLICATION_CREDENTIALS / workload identity).
+        client = gcs.Client(project=settings.gcs_project or None)
+    blob = client.bucket(settings.gcs_bucket).blob(key)
+    blob.upload_from_string(data, content_type=ct)
+    base = settings.gcs_public_base_url.rstrip("/") or f"https://storage.googleapis.com/{settings.gcs_bucket}"
+    return f"{base}/{key}"
 
-    # local backend (default)
+
+def _save_s3(data: bytes, key: str, ct: str) -> str:
+    """AWS S3 / Cloudflare R2 / MinIO — anything boto3-compatible."""
+    if not settings.s3_bucket:
+        raise StorageError("STORAGE_BACKEND=s3 but S3_BUCKET is not configured")
+    import boto3  # imported lazily — only needed when S3 is active
+
+    s3 = boto3.client(
+        "s3",
+        region_name=settings.s3_region,
+        endpoint_url=settings.s3_endpoint_url or None,
+        aws_access_key_id=settings.aws_access_key_id or None,
+        aws_secret_access_key=settings.aws_secret_access_key or None,
+    )
+    s3.put_object(Bucket=settings.s3_bucket, Key=key, Body=data, ContentType=ct)
+    base = settings.s3_public_base_url.rstrip("/") or f"https://{settings.s3_bucket}.s3.amazonaws.com"
+    return f"{base}/{key}"
+
+
+def _save_local(data: bytes, key: str) -> str:
+    """Local disk (dev default) — served from the /uploads static mount."""
     dest = Path(settings.upload_dir) / key
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(data)

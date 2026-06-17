@@ -10,7 +10,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -19,6 +19,36 @@ import { Loader2, Sparkles } from "lucide-react";
 import { api } from "@/lib/api";
 import { errorMessage, setToken } from "@/lib/api/http";
 import { Logo } from "./Logo";
+
+const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "";
+
+type GoogleId = {
+  accounts: {
+    id: {
+      initialize: (cfg: { client_id: string; callback: (resp: { credential: string }) => void }) => void;
+      prompt: () => void;
+    };
+  };
+};
+const googleApi = (): GoogleId | undefined => (window as unknown as { google?: GoogleId }).google;
+
+// Lazily load Google Identity Services once; resolves when window.google is ready.
+let gisPromise: Promise<void> | null = null;
+function loadGoogleScript(): Promise<void> {
+  if (typeof window === "undefined") return Promise.reject(new Error("no window"));
+  if ((window as unknown as { google?: unknown }).google) return Promise.resolve();
+  if (gisPromise) return gisPromise;
+  gisPromise = new Promise<void>((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://accounts.google.com/gsi/client";
+    s.async = true;
+    s.defer = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("Could not load Google sign-in"));
+    document.head.appendChild(s);
+  });
+  return gisPromise;
+}
 
 const loginSchema = z.object({
   email: z.string().email("Enter a valid email"),
@@ -92,6 +122,38 @@ function AuthForm({ mode }: { mode: "login" | "signup" }) {
     }
   };
 
+  // Initialize Google Identity Services when a client id is configured. The
+  // callback hands the id_token to the backend (POST /api/auth/google).
+  useEffect(() => {
+    if (!GOOGLE_CLIENT_ID) return;
+    loadGoogleScript()
+      .then(() => {
+        googleApi()?.accounts.id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          callback: async (resp: { credential: string }) => {
+            setBusy(true);
+            setServerError("");
+            try {
+              finish(await api.google(resp.credential));
+            } catch (e) {
+              setServerError(errorMessage(e));
+              setBusy(false);
+            }
+          },
+        });
+      })
+      .catch((e) => setServerError(errorMessage(e)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const googleSignIn = () => {
+    if (!GOOGLE_CLIENT_ID) {
+      setServerError("Google sign-in isn't configured — set NEXT_PUBLIC_GOOGLE_CLIENT_ID. Use email for now.");
+      return;
+    }
+    googleApi()?.accounts.id.prompt();
+  };
+
   return (
     <form onSubmit={submit} className="space-y-4">
       {mode === "signup" && (
@@ -132,8 +194,7 @@ function AuthForm({ mode }: { mode: "login" | "signup" }) {
         type="button"
         className="btn btn-secondary w-full"
         disabled={busy}
-        title="Google OAuth lands with the backend (BACKEND SPEC §3.1)"
-        onClick={() => setServerError("Google sign-in arrives with the real backend — use email for now.")}
+        onClick={googleSignIn}
       >
         <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden>
           <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1z" />

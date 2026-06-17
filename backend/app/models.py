@@ -353,6 +353,27 @@ class RefreshToken(Base):
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class DeviceAuth(Base):
+    """OAuth device-authorization session — backs the browser login flow for the
+    CLI and MCP server (`skillshare login` / the MCP login tool). The client polls
+    /api/auth/device/token with the secret device_code; the user approves the short
+    user_code on the dashboard's /activate page. On approval the client is handed a
+    fresh access + refresh token pair (exactly once)."""
+
+    __tablename__ = "device_auths"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("dev"))
+    device_code: Mapped[str] = mapped_column(String, unique=True, index=True)  # secret, client-held
+    user_code: Mapped[str] = mapped_column(String, unique=True, index=True)    # short, human-entered
+    client_name: Mapped[str] = mapped_column(String, default="")               # e.g. "SkillShare CLI on host"
+    status: Mapped[str] = mapped_column(String, default="pending", index=True)  # pending | approved | denied
+    user_id: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"), nullable=True)
+    interval: Mapped[int] = mapped_column(Integer, default=5)                   # client poll interval (s)
+    consumed: Mapped[bool] = mapped_column(Boolean, default=False)             # token issued already?
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 # ---------------------------------------------------------------------------
 # Marketing content — blog, changelog, legal pages. Authored/managed by a
 # platform admin (User.is_admin) and read by the public marketing site

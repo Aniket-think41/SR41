@@ -2,29 +2,44 @@
 SkillShare MCP server (stdio).
 
 Exposes the registry to MCP clients — Claude Code, Claude Desktop, or any
-agent runtime. Wraps the REST API in BACKEND_SPEC.md; auth is a Personal
-Access Token (spec §10) via env:
+agent runtime. Wraps the REST API in BACKEND_SPEC.md.
+
+Auth: call the `login` tool to sign in via the browser (device flow) — it stores
+rotating credentials that auto-refresh. Alternatively set env:
 
     SKILLSHARE_API_URL   e.g. http://localhost:8400
-    SKILLSHARE_TOKEN     skst_…  (mint with `skillshare login` or POST /api/auth/tokens)
+    SKILLSHARE_TOKEN     skst_… PAT or access token (overrides stored creds; for CI)
 
-Public marketplace tools work without a token; org/pod tools require one.
+Public marketplace tools work without signing in; org/pod tools require it.
 """
 
+import json as _json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
 import httpx
 from mcp.server.fastmcp import FastMCP
 
-# Shared local-scan core (detectors, fingerprint, redaction) lives in the CLI
-# package so CLI and MCP stay in lockstep (declared as a dependency in pyproject).
+# Shared local-scan core + auth flow live in the CLI package so CLI and MCP stay
+# in lockstep (declared as a dependency in pyproject).
+from skillshare_cli.authflow import CONFIG_DIR, api_url, save_creds, valid_access_token
 from skillshare_cli.local.detect import DETECTORS
 from skillshare_cli.local.scan import reconcile, redacted_payload, scan
 
-API_URL = os.environ.get("SKILLSHARE_API_URL", "http://localhost:8400").rstrip("/")
-TOKEN = os.environ.get("SKILLSHARE_TOKEN", "")
+# Where `login` parks the pending device session for `complete_login` to finish.
+PENDING_LOGIN_FILE = CONFIG_DIR / "device-login.json"
+
+
+def _base_url() -> str:
+    """Backend base URL: env override → stored creds → default (via authflow)."""
+    return api_url()
+
+
+def _token() -> str | None:
+    """Bearer token: SKILLSHARE_TOKEN env → stored creds (auto-refreshed)."""
+    return valid_access_token()
 
 mcp = FastMCP(
     "skillshare",
@@ -49,7 +64,19 @@ mcp = FastMCP(
         "artifacts not yet on the platform and offer to push the NEW ones. Always "
         "show the redacted preview (secrets are stripped automatically) and get "
         "explicit approval before push_artifact; if they decline, call "
-        "dismiss_artifact so it isn't suggested again."
+        "dismiss_artifact so it isn't suggested again.\n\n"
+        "SIGN IN — public marketplace/search tools work anonymously, but org/pod "
+        "tools and writes need auth. If a tool fails with a 'not signed in' error, "
+        "call the `login` tool, give the user the verification URL + code to open in "
+        "their browser, then call `complete_login` to finish. Right after a "
+        "successful login, OFFER (don't force) to enable the status bar counts via "
+        "`setup_statusline` — it edits the user's Claude Code settings.json, so only "
+        "do it once they say yes.\n\n"
+        "FROM GITHUB — when the user shares a GitHub repo URL (or asks to add a "
+        "skill/MCP that lives on GitHub), call import_from_github(url, "
+        "dry_run=True) to detect what's inside (SKILL.md skills, server.json / "
+        ".mcp.json MCP servers, or a README note), show them the detected items, "
+        "then call it again with a scope (org_slug or pod_id) to import."
     ),
 )
 
@@ -59,9 +86,12 @@ class SkillShareError(Exception):
 
 
 def _request(method: str, path: str, *, json: dict | None = None, params: dict | None = None) -> Any:
-    headers = {"Authorization": f"Bearer {TOKEN}"} if TOKEN else {}
-    with httpx.Client(base_url=API_URL, timeout=30) as client:
+    t = _token()
+    headers = {"Authorization": f"Bearer {t}"} if t else {}
+    with httpx.Client(base_url=_base_url(), timeout=30) as client:
         res = client.request(method, path, json=json, params=params, headers=headers)
+    if res.status_code == 401:
+        raise SkillShareError("Not signed in (or the session expired). Run the `login` tool to authenticate.")
     if res.status_code >= 400:
         try:
             err = res.json()["error"]
@@ -76,8 +106,9 @@ def _upload(path: str, kind: str) -> dict:
     p = Path(path).expanduser()
     if not p.is_file():
         raise SkillShareError(f"file not found: {path}")
-    headers = {"Authorization": f"Bearer {TOKEN}"} if TOKEN else {}
-    with p.open("rb") as fh, httpx.Client(base_url=API_URL, timeout=120) as client:
+    t = _token()
+    headers = {"Authorization": f"Bearer {t}"} if t else {}
+    with p.open("rb") as fh, httpx.Client(base_url=_base_url(), timeout=120) as client:
         res = client.post("/api/uploads", data={"kind": kind}, files={"file": (p.name, fh)}, headers=headers)
     if res.status_code >= 400:
         try:
@@ -103,6 +134,97 @@ def _summary(r: dict) -> dict:
         "is_public": r["is_public"],
         "updated_at": str(r["updated_at"]),
     }
+
+
+# ---------- auth: browser device login ----------
+
+@mcp.tool()
+def login(client_name: str = "SkillShare MCP") -> dict:
+    """Start a browser sign-in for SkillShare (so org/pod tools work). Returns a
+    verification URL + short code the user opens in their browser to log in or
+    sign up and approve this client. After they approve, call `complete_login`.
+
+    (Public marketplace/search tools work without signing in; only org/pod tools
+    and writes need it.)"""
+    base = _base_url()
+    try:
+        res = httpx.post(f"{base}/api/auth/device/start", json={"client_name": client_name}, timeout=30)
+    except httpx.HTTPError as e:
+        raise SkillShareError(f"cannot reach {base} ({e.__class__.__name__})")
+    if res.status_code >= 400:
+        raise SkillShareError(f"could not start login (HTTP {res.status_code})")
+    d = res.json()
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    PENDING_LOGIN_FILE.write_text(_json.dumps({
+        "api_url": base, "device_code": d["device_code"], "interval": d.get("interval", 5),
+    }))
+    return {
+        "verification_url": d["verification_uri_complete"],
+        "user_code": d["user_code"],
+        "expires_in": d["expires_in"],
+        "instructions": (
+            "Tell the user to open verification_url in their browser, sign in or create an account, "
+            "and approve this device. Then call complete_login to finish."
+        ),
+    }
+
+
+@mcp.tool()
+def complete_login(wait_seconds: int = 60) -> dict:
+    """Finish the sign-in started by `login`: polls until the user approves it in
+    the browser. If it returns status "pending", ask the user to approve and call
+    this again. On "approved" the MCP server is authenticated (credentials are
+    stored and auto-refreshed)."""
+    if not PENDING_LOGIN_FILE.exists():
+        raise SkillShareError("No pending login — call `login` first.")
+    pend = _json.loads(PENDING_LOGIN_FILE.read_text())
+    base, device_code = pend["api_url"], pend["device_code"]
+    interval = max(1, int(pend.get("interval", 5)))
+    deadline = time.time() + max(5, min(int(wait_seconds), 110))
+    while time.time() < deadline:
+        res = httpx.post(f"{base}/api/auth/device/token", json={"device_code": device_code}, timeout=30)
+        st = res.json() if res.status_code < 400 else {}
+        status = st.get("status")
+        if status == "approved":
+            save_creds({
+                "api_url": base,
+                "access_token": st["access_token"],
+                "refresh_token": st["refresh_token"],
+                "expires_at": time.time() + int(st.get("expires_in", 900)),
+                "username": (st.get("user") or {}).get("username"),
+            })
+            PENDING_LOGIN_FILE.unlink(missing_ok=True)
+            return {
+                "status": "approved",
+                "user": st.get("user"),
+                "tip": "You can show this user's install/push counts in Claude Code's status bar — "
+                       "offer to run setup_statusline.",
+            }
+        if status in ("denied", "expired"):
+            PENDING_LOGIN_FILE.unlink(missing_ok=True)
+            return {"status": status, "hint": "Start again with the `login` tool."}
+        time.sleep(interval)
+    return {"status": "pending", "hint": "Not approved yet — approve in the browser, then call complete_login again."}
+
+
+@mcp.tool()
+def setup_statusline(scope: str = "user", remove: bool = False, force: bool = False) -> dict:
+    """Add (or remove) the SkillShare status line in Claude Code's settings.json, so
+    the user's install/push counts show in the status bar. Ask the user before
+    enabling it (this edits their settings.json). Only Claude Code renders a status
+    line, and the change takes effect the next time Claude Code starts.
+
+    Args:
+        scope: "user" (~/.claude/settings.json) or "project" (./.claude/settings.json).
+        remove: remove the SkillShare status line instead of adding it.
+        force: replace an existing different statusLine (or remove a non-SkillShare one).
+    """
+    from skillshare_cli import statusline as sl
+
+    try:
+        return sl.disable(scope=scope, force=force) if remove else sl.enable(scope=scope, force=force)
+    except sl.StatusLineError as e:
+        raise SkillShareError(str(e))
 
 
 # ---------- read: marketplace (no auth needed) ----------
@@ -132,7 +254,7 @@ def get_resource(resource_id: str) -> dict:
     """Get a resource's full content by id: SKILL.md for skills, server URL +
     config JSON for MCP servers, markdown body for notes. Works for public
     resources and (with a token) anything your orgs can see."""
-    r = _request("GET", f"/api/resources/{resource_id}") if TOKEN else _request(
+    r = _request("GET", f"/api/resources/{resource_id}") if _token() else _request(
         "GET", f"/api/public/resources/{resource_id}"
     )
     out = _summary(r)
@@ -553,6 +675,54 @@ def push_artifact(
         "fingerprint": match["fingerprint"], "kind": c.kind, "status": "pushed",
         "source": c.source, "resource_id": created["id"], "name": c.name})
     return {"pushed": _summary(created), "redacted_secrets": findings}
+
+
+@mcp.tool()
+def import_from_github(
+    url: str,
+    org_slug: str = "",
+    pod_id: str = "",
+    select: list[str] | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Import skill(s)/MCP server(s)/note(s) from a PUBLIC GitHub repo URL.
+
+    Detection runs server-side over the GitHub API (no clone): it finds SKILL.md
+    files (root, skills/*, .claude/skills/*), server.json / .mcp.json MCP configs,
+    or falls back to the README as a note. Secrets in any MCP config are redacted
+    before import.
+
+    Workflow: call with dry_run=True first to see what was detected — each item
+    has a `fingerprint`, `type`, `title`, `source_path`, and `redaction` findings.
+    Then call again with a scope (org_slug or pod_id) and optionally `select` (a
+    list of fingerprints) to import a subset. Re-importing is idempotent: items
+    already present in the scope are skipped, not duplicated.
+
+    Args:
+        url: github.com/owner/repo (optionally /tree/<ref>/<subpath>).
+        org_slug: target org for an org-level import.
+        pod_id: target pod (overrides org_slug).
+        select: fingerprints to import; omit/empty to import everything detected.
+        dry_run: only detect and return the candidates; import nothing.
+    """
+    if dry_run:
+        return _request("POST", "/api/resources/github/preview", json={"url": url})
+    if pod_id:
+        scope = {"scope_type": "POD", "scope_id": pod_id}
+    elif org_slug:
+        org = _request("GET", f"/api/orgs/{org_slug}")
+        scope = {"scope_type": "ORG", "scope_id": org["id"]}
+    else:
+        raise SkillShareError("Provide org_slug or pod_id (or dry_run=True to preview)")
+    result = _request(
+        "POST", "/api/resources/github/import",
+        json={"url": url, "select": select or [], **scope},
+    )
+    return {
+        "created": [_summary(r) for r in result.get("created", [])],
+        "skipped": result.get("skipped", []),
+        "repo": result.get("repo", {}),
+    }
 
 
 @mcp.tool()

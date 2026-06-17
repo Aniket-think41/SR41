@@ -6,6 +6,7 @@
 import { request, uploadAvatar, uploadFile, uploadOrgLogo } from "./http";
 import type {
   Activity,
+  Attachment,
   AuthSession,
   Contributions,
   Feedback,
@@ -50,6 +51,36 @@ export type UserProfile = User & {
   };
 };
 
+export interface GithubDetected {
+  kind: "skill" | "mcp" | "note";
+  type: ResourceType;
+  title: string;
+  description: string;
+  tags: string[];
+  source_path: string;
+  fingerprint: string;
+  redaction: string[];
+  server_url?: string | null;
+  has_config: boolean;
+  content_preview: string;
+  attachments: Attachment[];
+}
+export interface GithubPreview {
+  repo: { owner: string; repo: string; ref: string | null; description: string; html_url: string };
+  detected: GithubDetected[];
+}
+export interface GithubImportResult {
+  created: Resource[];
+  skipped: { title: string; fingerprint: string; reason: string; resource_id?: string }[];
+  repo: { owner: string; repo: string };
+}
+
+export interface DeviceInfo {
+  client_name: string;
+  status: "pending" | "approved" | "denied" | "expired";
+  created_at: string;
+}
+
 export interface ResourceQuery {
   q?: string;
   type?: ResourceType | "ALL";
@@ -71,8 +102,17 @@ export const api = {
     request<AuthSession>("POST", "/api/auth/signup", body),
   login: (body: { email: string; password: string }) =>
     request<AuthSession>("POST", "/api/auth/login", body),
+  google: (idToken: string) => request<AuthSession>("POST", "/api/auth/google", { id_token: idToken }),
   logout: () => request<{ ok: true }>("POST", "/api/auth/logout"),
   me: () => request<User>("GET", "/api/auth/me"),
+
+  /* ---- device login (CLI / MCP browser approval) ---- */
+  deviceInfo: (userCode: string) =>
+    request<DeviceInfo>("GET", `/api/auth/device/${encodeURIComponent(userCode)}`),
+  deviceApprove: (userCode: string) =>
+    request<{ ok: true; client_name: string }>("POST", "/api/auth/device/approve", { user_code: userCode }),
+  deviceDeny: (userCode: string) =>
+    request<{ ok: true }>("POST", "/api/auth/device/deny", { user_code: userCode }),
   updateMe: (body: Partial<User>) => request<User>("PATCH", "/api/auth/me", body),
   uploadAvatar: (file: File) => uploadAvatar(file),
 
@@ -178,6 +218,12 @@ export const api = {
   uploadFile: (file: File, kind: "image" | "video" | "file") => uploadFile(file, kind),
   importResource: (id: string, orgSlug: string) =>
     request<Resource>("POST", `/api/resources/${id}/import`, { org_slug: orgSlug }),
+
+  /* ---- GitHub-URL ingestion ---- */
+  githubPreview: (url: string) =>
+    request<GithubPreview>("POST", "/api/resources/github/preview", { url }),
+  githubImport: (body: { url: string; scope_type: ScopeType; scope_id: string | null; select?: string[] }) =>
+    request<GithubImportResult>("POST", "/api/resources/github/import", body),
 
   /* ---- notifications (F1) ---- */
   notifications: (opts: { unreadOnly?: boolean; limit?: number } = {}) =>

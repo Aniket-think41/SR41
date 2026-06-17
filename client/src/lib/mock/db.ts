@@ -95,6 +95,15 @@ export interface Db {
   feedback: Feedback[];
   /** per-org feature overrides (absent key → catalog default) */
   org_features: { id: string; org_id: string; key: string; enabled: boolean }[];
+  /** CLI/MCP device-login sessions awaiting approval on /activate */
+  device_auths: {
+    id: string;
+    device_code: string;
+    user_code: string;
+    client_name: string;
+    status: "pending" | "approved" | "denied";
+    user_id: string | null;
+  }[];
   /** id of the signed-in user, null when logged out */
   session_user_id: string | null;
 }
@@ -826,6 +835,7 @@ export function seed(): Db {
     notifications: structuredClone(seedNotifications),
     feedback: [],
     org_features: [],
+    device_auths: [],
     // Mock mode only: start signed in as the demo user so the dashboard shows
     // data without a login round-trip. (When NEXT_PUBLIC_API_URL points at a
     // real backend, the mock db isn't used and real auth applies.)

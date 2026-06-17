@@ -11,6 +11,7 @@ import { Link2, Image as ImageIcon, Video, Paperclip, X, GripVertical, Upload, L
 import type { Attachment, AttachmentKind } from "@/lib/types";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/api/http";
+import { classifyLink } from "@/lib/utils";
 import { useToast } from "./Toast";
 
 // File-picker accept filter per kind (the backend also validates by extension).
@@ -18,7 +19,7 @@ const ACCEPT: Record<AttachmentKind, string> = {
   link: "",
   image: "image/*",
   video: "video/*",
-  file: ".pdf,.md,.txt,.json,.csv,.zip,.skill,.docx,.pptx,.xlsx",
+  file: ".pdf,.md,.txt,.json,.csv,.zip,.skill,.docx,.pptx,.xlsx,.odt,.odp,.ods,.key,.numbers,.pages",
 };
 
 const KINDS: { kind: AttachmentKind; label: string; icon: typeof Link2; urlPlaceholder: string }[] = [
@@ -97,6 +98,11 @@ export function AttachmentsEditor({
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-xs font-bold capitalize text-ink">
                     <Icon className="h-3.5 w-3.5" /> {a.kind}
                   </span>
+                  {(a.kind === "link" || a.kind === "file") && a.url.trim() && (
+                    <span className="hidden shrink-0 rounded-full bg-primary-50 px-2 py-0.5 text-[0.7rem] font-semibold text-primary sm:inline">
+                      {classifyLink(a.url).label}
+                    </span>
+                  )}
                   <input
                     value={a.url}
                     onChange={(e) => update(i, { url: e.target.value })}

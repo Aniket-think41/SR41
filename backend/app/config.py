@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # --- Google OAuth (POST /api/auth/google) ---
     google_client_id: str = ""  # empty → endpoint returns a clear 403
 
+    # --- dashboard origin: where the CLI/MCP device-login verification page lives ---
+    frontend_url: str = "http://localhost:3001"
+
     # --- CORS: the dashboard origin(s), comma-separated ---
     cors_origins: str = "http://localhost:3001"
 
@@ -39,9 +42,19 @@ class Settings(BaseSettings):
     redis_url: str = ""  # optional; in-memory limiter is used when empty (single-process only)
 
     # --- uploads (BACKEND_SPEC §6) ---
-    storage_backend: str = "local"   # local | s3  (switchable; see app/storage.py)
+    # Switchable storage (see app/storage.py). local for dev; gcs is the default
+    # cloud provider, s3 the alternative.
+    storage_backend: str = "local"   # local | gcs | s3
     upload_dir: str = "var/uploads"  # local backend: where files are written
     public_base_url: str = "http://localhost:8400"  # local backend: base for /uploads URLs
+
+    # -- gcs backend (Google Cloud Storage — default cloud) --
+    gcs_bucket: str = ""
+    gcs_project: str = ""            # optional; inferred from credentials when empty
+    gcs_credentials_file: str = ""   # path to a service-account JSON; empty → Application Default Credentials
+    gcs_public_base_url: str = ""    # public CDN base; empty → https://storage.googleapis.com/<bucket>
+
+    # -- s3 backend (AWS S3 / Cloudflare R2 / MinIO — alternative) --
     s3_bucket: str = ""
     s3_region: str = "auto"
     s3_endpoint_url: str = ""        # e.g. Cloudflare R2 endpoint

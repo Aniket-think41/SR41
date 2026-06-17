@@ -150,6 +150,8 @@ export interface Resource {
   is_public: boolean;
   stars_count: number;
   installs_count?: number;
+  /** stable hash of the source artifact (local push or GitHub import) */
+  source_fingerprint?: string;
   created_at: string;
   updated_at: string;
   /** added by the API on scoped list endpoints (BACKEND SPEC §5) */

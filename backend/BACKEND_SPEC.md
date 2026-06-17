@@ -25,8 +25,8 @@ Recommended stack. Teams may substitute equivalent technologies.
 | Auth         | JWT (access + refresh tokens)       | Google OAuth via Passport / Authlib |
 | Cache        | Redis                               | Sessions, rate limits, search cache |
 | Search       | PostgreSQL Full-Text / Meilisearch  | FTS sufficient for v1 |
-| File Storage | S3-compatible (AWS S3 / Cloudflare R2) | Skill package uploads |
-| Hosting      | Railway / Render / AWS ECS          | Stateless containers |
+| File Storage | Google Cloud Storage (default) / S3-compatible (AWS S3 / Cloudflare R2) | Skill package uploads |
+| Hosting      | Google Cloud Run / GKE (or Railway / Render) | Stateless containers |
 
 ---
 
@@ -111,7 +111,7 @@ resources {
 
 - `scope_type` + `scope_id` together define where a resource lives.
 - `is_public`: true when published to public marketplace.
-- `file_url`: S3 URL for uploaded skill packages.
+- `file_url`: storage URL (GCS by default; S3-compatible alternative) for uploaded skill packages.
 - `attachments`: typed media (hybrid content model). JSON array of
   `{ kind: link|image|video|file, url, title?, caption? }`. `content_md` stays
   the canonical prose; attachments add structured media. Consumers that are
@@ -248,7 +248,7 @@ licenses      { id, org_id, license_key, plan: PREMIUM, activated_by, activated_
 | DELETE | `/api/resources/:id/publish`          | **§8** Unpublish (the dashboard's publish toggle) |
 | POST   | `/api/resources/:id/star`             | Star a resource |
 | DELETE | `/api/resources/:id/star`             | Unstar a resource |
-| POST   | `/api/resources/upload`               | Upload skill package file to S3 (presigned flow, §6) |
+| POST   | `/api/resources/upload`               | Upload skill package file to cloud storage (presigned flow, §6) |
 | POST   | `/api/resources/:id/import`           | **§8** "Add to my org": copy a public resource into `body.org_slug`; bumps source `installs_count` |
 
 All resource list endpoints accept `?q=&type=&tag=&sort=updated|newest|stars|installs`
@@ -347,8 +347,8 @@ client-side in v1).
 
 ## 6. File Uploads
 
-Two flows, sharing a **switchable storage backend** (`STORAGE_BACKEND=local|s3`,
-see `app/storage.py`):
+Two flows, sharing a **switchable storage backend** (`STORAGE_BACKEND=local|gcs|s3`,
+see `app/storage.py`). Cloud default is **GCS**; `s3` is the alternative:
 
 **Direct multipart upload — `POST /api/uploads`** (images, video, diagrams,
 files; powers resource attachments and skill packages):
@@ -357,8 +357,12 @@ files; powers resource attachments and skill packages):
 - Returns `{ file_url, filename, content_type, size_bytes }`.
 - **local** backend: bytes written under `UPLOAD_DIR`, served from the
   `/uploads/<key>` static mount; `file_url = PUBLIC_BASE_URL/uploads/<key>`.
-- **s3** backend: `boto3 put_object` to `S3_BUCKET` (AWS S3 / Cloudflare R2 /
-  MinIO); `file_url = S3_PUBLIC_BASE_URL/<key>`.
+- **gcs** backend (default cloud): `google-cloud-storage` upload to `GCS_BUCKET`;
+  `file_url = GCS_PUBLIC_BASE_URL/<key>` (defaults to
+  `https://storage.googleapis.com/<bucket>/<key>`). Credentials come from
+  `GCS_CREDENTIALS_FILE` or Application Default Credentials.
+- **s3** backend (alternative): `boto3 put_object` to `S3_BUCKET` (AWS S3 /
+  Cloudflare R2 / MinIO); `file_url = S3_PUBLIC_BASE_URL/<key>`.
 - Client: `api.uploadFile(file, kind)`. In mock mode it returns a local
   object URL so previews work with no backend.
 
@@ -368,8 +372,9 @@ file directly and stores the returned `file_url`. Returns a placeholder URL
 when storage is unconfigured.
 
 `file_url` is stored on the resource (skill package) or on each attachment item
-(`attachments[].url`). Production: set `STORAGE_BACKEND=s3` + bucket creds; for
-very large media, prefer the presigned flow to avoid proxying bytes through the API.
+(`attachments[].url`). Production: set `STORAGE_BACKEND=gcs` + bucket creds (or
+`s3` for the AWS/R2 path); for very large media, prefer the presigned flow to
+avoid proxying bytes through the API.
 
 ---
 

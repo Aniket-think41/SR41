@@ -1,6 +1,8 @@
 """3.1 Auth — signup, login, google, refresh, logout, me."""
 
 import re
+import secrets
+from datetime import timedelta
 
 import httpx
 from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
@@ -15,6 +17,7 @@ from ..database import get_db
 from ..errors import conflict, forbidden, not_found, unauthorized, validation
 from ..models import (
     ApiToken,
+    DeviceAuth,
     Organization,
     OrgMember,
     Pod,
@@ -23,8 +26,18 @@ from ..models import (
     ProjectMember,
     Resource,
     User,
+    now,
 )
-from ..schemas import GoogleIn, LoginIn, MePatch, SignupIn
+from ..schemas import (
+    DeviceCodeIn,
+    DeviceStartIn,
+    DeviceUserCodeIn,
+    GoogleIn,
+    LoginIn,
+    MePatch,
+    RefreshIn,
+    SignupIn,
+)
 from ..security import (
     REFRESH_COOKIE,
     create_access_token,
@@ -136,19 +149,140 @@ async def google(body: GoogleIn, response: Response, db: Session = Depends(get_d
 
 
 @router.post("/refresh")
-def refresh(request: Request, response: Response, db: Session = Depends(get_db)):
-    raw = request.cookies.get(REFRESH_COOKIE) or ""
+def refresh(request: Request, response: Response, body: RefreshIn | None = None, db: Session = Depends(get_db)):
+    # Browser clients send the rotating token as an HttpOnly cookie; the CLI/MCP
+    # have no cookie, so they present it in the request body instead.
+    raw = (body.refresh_token if body else None) or request.cookies.get(REFRESH_COOKIE) or ""
     if not raw:
         raise unauthorized("Missing refresh token")
     user, new_refresh = rotate_refresh_token(db, raw)
     _set_refresh_cookie(response, new_refresh)
-    return {"user": user_out(user), "access_token": create_access_token(user), "refresh_token": new_refresh}
+    return {
+        "user": user_out(user),
+        "access_token": create_access_token(user),
+        "refresh_token": new_refresh,
+        "expires_in": settings.access_token_expire_minutes * 60,
+    }
 
 
 @router.post("/logout")
 def logout(request: Request, response: Response, db: Session = Depends(get_db)):
     revoke_refresh_token(db, request.cookies.get(REFRESH_COOKIE))
     response.delete_cookie(REFRESH_COOKIE, path="/api/auth")
+    return {"ok": True}
+
+
+# ---- Device-authorization login (CLI / MCP browser flow) ----
+
+DEVICE_TTL_MINUTES = 15
+DEVICE_INTERVAL = 5
+# user_code alphabet: no 0/O/1/I/L to avoid hand-typing ambiguity
+_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+
+
+def _gen_user_code() -> str:
+    chunk = lambda: "".join(secrets.choice(_CODE_ALPHABET) for _ in range(4))  # noqa: E731
+    return f"{chunk()}-{chunk()}"
+
+
+@router.post("/device/start")
+def device_start(body: DeviceStartIn, db: Session = Depends(get_db)):
+    """Begin a device login. The client polls /device/token with device_code while
+    the user approves user_code at verification_uri_complete."""
+    # collision-safe user_code (the space is tiny per-code but the table is small)
+    for _ in range(5):
+        user_code = _gen_user_code()
+        if not db.query(DeviceAuth.id).filter(DeviceAuth.user_code == user_code).first():
+            break
+    rec = DeviceAuth(
+        device_code=secrets.token_urlsafe(32),
+        user_code=user_code,
+        client_name=body.client_name or "SkillShare CLI",
+        interval=DEVICE_INTERVAL,
+        expires_at=now() + timedelta(minutes=DEVICE_TTL_MINUTES),
+    )
+    db.add(rec)
+    db.commit()
+    base = settings.frontend_url.rstrip("/")
+    return {
+        "device_code": rec.device_code,
+        "user_code": rec.user_code,
+        "verification_uri": f"{base}/activate",
+        "verification_uri_complete": f"{base}/activate?code={rec.user_code}",
+        "expires_in": DEVICE_TTL_MINUTES * 60,
+        "interval": rec.interval,
+    }
+
+
+def _device_expired(rec: DeviceAuth) -> bool:
+    return rec.expires_at.replace(tzinfo=now().tzinfo) < now()
+
+
+@router.post("/device/token")
+def device_token(body: DeviceCodeIn, response: Response, db: Session = Depends(get_db)):
+    """Poll for the result of a device login. Returns {status} until approved; on
+    approval returns the access + refresh token pair exactly once."""
+    rec = db.query(DeviceAuth).filter(DeviceAuth.device_code == body.device_code).first()
+    if not rec:
+        raise not_found("Device session")
+    if rec.status == "denied":
+        return {"status": "denied"}
+    if rec.consumed or _device_expired(rec):
+        return {"status": "expired"}
+    if rec.status != "approved" or not rec.user_id:
+        return {"status": "pending", "interval": rec.interval}
+    user = db.get(User, rec.user_id)
+    if not user:
+        return {"status": "expired"}
+    rec.consumed = True
+    refresh = issue_refresh_token(db, user)  # commits
+    _set_refresh_cookie(response, refresh)
+    return {
+        "status": "approved",
+        "access_token": create_access_token(user),
+        "refresh_token": refresh,
+        "expires_in": settings.access_token_expire_minutes * 60,
+        "user": _me_out(user),
+    }
+
+
+def _device_by_user_code(db: Session, user_code: str) -> DeviceAuth:
+    rec = db.query(DeviceAuth).filter(DeviceAuth.user_code == user_code.strip().upper()).first()
+    if not rec:
+        raise not_found("Device session")
+    return rec
+
+
+@router.get("/device/{user_code}")
+def device_info(user_code: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """What the /activate page shows before the user approves: which client is
+    asking, and whether the code is still valid."""
+    rec = _device_by_user_code(db, user_code)
+    return {
+        "client_name": rec.client_name,
+        "status": "expired" if (_device_expired(rec) and rec.status == "pending") else rec.status,
+        "created_at": rec.created_at,
+    }
+
+
+@router.post("/device/approve")
+def device_approve(body: DeviceUserCodeIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    rec = _device_by_user_code(db, body.user_code)
+    if _device_expired(rec):
+        raise validation("This code has expired — start a new login from your terminal")
+    if rec.status == "denied" or rec.consumed:
+        raise validation("This code is no longer valid")
+    rec.status = "approved"
+    rec.user_id = user.id
+    db.commit()
+    return {"ok": True, "client_name": rec.client_name}
+
+
+@router.post("/device/deny")
+def device_deny(body: DeviceUserCodeIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    rec = _device_by_user_code(db, body.user_code)
+    rec.status = "denied"
+    db.commit()
     return {"ok": True}
 
 

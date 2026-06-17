@@ -23,7 +23,7 @@ from ..models import (
     ResourceStar,
     User,
 )
-from .. import storage
+from .. import github, storage
 from ..permissions import (
     org_by_slug,
     pod_or_404,
@@ -36,7 +36,14 @@ from ..permissions import (
     resource_or_404,
     scope_org,
 )
-from ..schemas import ImportIn, ResourceCreate, ResourcePatch, UploadIn
+from ..schemas import (
+    GithubImportIn,
+    GithubPreviewIn,
+    ImportIn,
+    ResourceCreate,
+    ResourcePatch,
+    UploadIn,
+)
 from ..security import get_current_user
 from ..serialize import log_activity, resource_out, search_rank
 
@@ -106,6 +113,93 @@ def create_resource(body: ResourceCreate, user: User = Depends(get_current_user)
     _log_resource(db, user, r, "created")
     db.commit()
     return resource_out(db, r, user)
+
+
+# ---- GitHub-URL ingestion ----
+# NOTE: these literal-path routes are declared BEFORE the dynamic
+# /resources/{resource_id}/... routes so "github" isn't captured as a resource id.
+
+@router.post("/resources/github/preview")
+def github_preview(body: GithubPreviewIn, user: User = Depends(get_current_user)):
+    """Detect (without creating anything) the skill(s)/MCP(s)/note(s) inside a
+    public GitHub repo. Powers the dashboard 'what did we find?' step and the
+    CLI/MCP dry-run."""
+    ref, found, meta = github.detect_from_url(body.url)
+    return {
+        "repo": {
+            "owner": ref.owner,
+            "repo": ref.repo,
+            "ref": ref.ref,
+            "description": meta.get("description", ""),
+            "html_url": meta.get("html_url", ""),
+        },
+        "detected": [d.preview() for d in found],
+    }
+
+
+@router.post("/resources/github/import")
+def github_import(
+    body: GithubImportIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
+    """Import detected resources from a GitHub URL into a scope. `select` (a list
+    of fingerprints) narrows what's imported; empty imports everything found.
+    Re-importing is idempotent: items already present in the scope (matched by
+    source_fingerprint) are skipped, not duplicated."""
+    if body.scope_type not in VALID_SCOPES:
+        raise validation("scope_type must be ORG, PROJECT, POD, or PUBLIC")
+    _require_scope_write(db, body.scope_type, body.scope_id, user)
+
+    ref, found, _meta = github.detect_from_url(body.url)
+    if body.select:
+        wanted = set(body.select)
+        found = [d for d in found if d.fingerprint in wanted]
+    if not found:
+        raise validation("No skills, MCP servers, or notes were detected in that repository")
+
+    created: list[Resource] = []
+    skipped: list[dict] = []
+    for d in found:
+        existing = (
+            db.query(Resource)
+            .filter(
+                Resource.source_fingerprint == d.fingerprint,
+                Resource.scope_type == body.scope_type,
+                Resource.scope_id == body.scope_id,
+            )
+            .first()
+        )
+        if existing:
+            skipped.append(
+                {"title": d.title, "fingerprint": d.fingerprint,
+                 "reason": "already imported", "resource_id": existing.id}
+            )
+            continue
+        p = d.to_create_payload(body.scope_type, body.scope_id)
+        r = Resource(
+            type=p["type"],
+            title=(p["title"].strip() or ref.repo)[:120],
+            description=p["description"],
+            content_md=p["content_md"],
+            server_url=p["server_url"],
+            config_json=p["config_json"],
+            version="0.1.0",
+            tags=p["tags"],
+            attachments=p["attachments"],
+            scope_type=p["scope_type"],
+            scope_id=p["scope_id"],
+            author_id=user.id,
+            source_fingerprint=p["source_fingerprint"],
+        )
+        db.add(r)
+        db.flush()
+        _log_resource(db, user, r, "created", meta="imported from GitHub")
+        created.append(r)
+    db.commit()
+    return {
+        "created": [resource_out(db, r, user) for r in created],
+        "skipped": skipped,
+        "repo": {"owner": ref.owner, "repo": ref.repo},
+    }
 
 
 @router.get("/resources/{resource_id}")
@@ -340,8 +434,9 @@ def unpin(resource_id: str, user: User = Depends(get_current_user), db: Session 
 @router.post("/resources/upload")
 def upload(body: UploadIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Presigned-PUT flow: returns upload_url (PUT the file there) + file_url
-    (store on the resource). Without S3 config we return a deterministic
-    placeholder so local dev works end-to-end."""
+    (store on the resource). Prefers GCS (default cloud), then S3; without
+    cloud config we return a deterministic placeholder so local dev works
+    end-to-end."""
     safe = re.sub(r"[^a-zA-Z0-9._-]", "-", body.filename) or "package.skill"
     if not safe.endswith((".skill", ".zip")):
         raise validation("Only .skill / .zip packages are accepted")
@@ -349,6 +444,23 @@ def upload(body: UploadIn, user: User = Depends(get_current_user), db: Session =
         raise validation(f"File exceeds the {settings.max_upload_mb} MB limit")
 
     key = f"packages/{user.username}/{safe}"
+    if settings.gcs_bucket:
+        from google.cloud import storage as gcs  # optional, only when GCS configured
+
+        if settings.gcs_credentials_file:
+            client = gcs.Client.from_service_account_json(
+                settings.gcs_credentials_file, project=settings.gcs_project or None
+            )
+        else:
+            client = gcs.Client(project=settings.gcs_project or None)
+        blob = client.bucket(settings.gcs_bucket).blob(key)
+        # v4 signed URLs require a service-account private key (set GCS_CREDENTIALS_FILE).
+        upload_url = blob.generate_signed_url(
+            version="v4", method="PUT", expiration=600, content_type=body.content_type
+        )
+        base = settings.gcs_public_base_url.rstrip("/") or f"https://storage.googleapis.com/{settings.gcs_bucket}"
+        return {"upload_url": upload_url, "file_url": f"{base}/{key}"}
+
     if settings.s3_bucket:
         import boto3  # optional dependency, only needed when S3 is configured
 
@@ -378,7 +490,7 @@ async def upload_binary(
     user: User = Depends(get_current_user),
 ):
     """Direct multipart upload — stores the bytes via the configured storage
-    backend (local disk by default, S3/R2 in prod) and returns the public
+    backend (local disk by default, GCS/S3 in prod) and returns the public
     file_url to attach to a resource. Same contract regardless of backend."""
     if kind not in storage.ALLOWED_EXT:
         raise validation("kind must be image, video, or file")

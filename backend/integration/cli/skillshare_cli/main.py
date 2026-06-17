@@ -31,12 +31,20 @@ from pathlib import Path
 
 import httpx
 
+from .authflow import (
+    CONFIG_DIR,
+    CREDS_FILE,
+    DEFAULT_API,
+    AuthError,
+    api_url,
+    clear_creds,
+    device_login,
+)
+from .authflow import load_creds as _load_creds
+from .authflow import save_creds as _save_creds
+from .authflow import valid_access_token
 from .local.detect import DETECTORS
 from .local.scan import reconcile, redacted_payload, scan
-
-CONFIG_DIR = Path(os.environ.get("SKILLSHARE_CONFIG_DIR", "~/.config/skillshare")).expanduser()
-CREDS_FILE = CONFIG_DIR / "credentials.json"
-DEFAULT_API = "http://localhost:8400"
 
 BOLD, DIM, RESET = "\033[1m", "\033[2m", "\033[0m"
 GLYPH = {"SKILL": "◆", "MCP": "▣", "NOTE": "▤"}
@@ -65,25 +73,9 @@ KIND_FG = {"skill": VIOLET, "mcp": BLUE, "note": ORANGE}
 KIND_MARK = {"skill": "◆", "mcp": "▣", "note": "▤"}
 
 
-def _load_creds() -> dict:
-    try:
-        return json.loads(CREDS_FILE.read_text())
-    except (OSError, ValueError):
-        return {}
-
-
-def _save_creds(data: dict) -> None:
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    CREDS_FILE.write_text(json.dumps(data, indent=2))
-    CREDS_FILE.chmod(0o600)
-
-
-def api_url() -> str:
-    return (os.environ.get("SKILLSHARE_API_URL") or _load_creds().get("api_url") or DEFAULT_API).rstrip("/")
-
-
 def token() -> str | None:
-    return os.environ.get("SKILLSHARE_TOKEN") or _load_creds().get("token")
+    """Current bearer token, auto-refreshed when near expiry (see authflow)."""
+    return valid_access_token()
 
 
 def die(msg: str, code: int = 1) -> None:
@@ -102,6 +94,8 @@ def request(method: str, path: str, *, body: dict | None = None, params: dict | 
         res = httpx.request(method, f"{api_url()}{path}", json=body, params=params, headers=headers, timeout=30)
     except httpx.HTTPError as e:
         die(f"cannot reach {api_url()} — is the API running? ({e.__class__.__name__})")
+    if res.status_code == 401 and auth:
+        die("your session is no longer valid — run `skillshare login` to sign in again")
     if res.status_code >= 400:
         try:
             err = res.json()["error"]
@@ -169,37 +163,52 @@ def print_resources(rows: list[dict]) -> None:
 
 # ---------------- commands ----------------
 
+def _client_name() -> str:
+    host = os.uname().nodename if hasattr(os, "uname") else "this device"
+    return f"SkillShare CLI on {host}"
+
+
 def cmd_login(args) -> None:
-    url = (args.api or input(f"API URL [{api_url()}]: ").strip() or api_url()).rstrip("/")
-    email = args.email or input("Email: ").strip()
-    password = getpass.getpass("Password: ")
-    res = httpx.post(f"{url}/api/auth/login", json={"email": email, "password": password}, timeout=30)
-    if res.status_code >= 400:
-        die(res.json().get("error", {}).get("message", f"login failed (HTTP {res.status_code})"))
-    jwt = res.json()["access_token"]
-    # mint a long-lived PAT with the short-lived JWT
-    name = f"cli@{os.uname().nodename}" if hasattr(os, "uname") else "cli"
-    pat = httpx.post(
-        f"{url}/api/auth/tokens",
-        json={"name": name},
-        headers={"Authorization": f"Bearer {jwt}"},
-        timeout=30,
-    ).json()
-    _save_creds({"api_url": url, "token": pat["token"], "token_id": pat["id"], "email": email})
-    user = res.json()["user"]
-    print(f"Logged in as {BOLD}@{user['username']}{RESET} — token \"{name}\" stored in {CREDS_FILE}")
+    url = (args.api or api_url()).rstrip("/")
+
+    # Legacy: direct email/password login (kept for scripts/CI). The default is the
+    # browser device flow, like `gh auth login`.
+    if args.password or args.email:
+        email = args.email or input("Email: ").strip()
+        password = args.password or getpass.getpass("Password: ")
+        res = httpx.post(f"{url}/api/auth/login", json={"email": email, "password": password}, timeout=30)
+        if res.status_code >= 400:
+            die(res.json().get("error", {}).get("message", f"login failed (HTTP {res.status_code})"))
+        body = res.json()
+        _save_creds({
+            "api_url": url,
+            "access_token": body["access_token"],
+            "refresh_token": body.get("refresh_token"),
+            "expires_at": __import__("time").time() + body.get("expires_in", 900),
+            "username": body["user"]["username"],
+        })
+        print(f"Logged in as {BOLD}@{body['user']['username']}{RESET} — stored in {CREDS_FILE}")
+        return
+
+    # Default: browser device-authorization flow.
+    try:
+        user = device_login(api=url, client_name=_client_name(), open_browser=not args.no_browser, emit=print)
+    except AuthError as e:
+        die(str(e))
+    print(f"{BOLD}✓ Logged in as @{user.get('username', '?')}{RESET} — credentials stored in {CREDS_FILE}")
+    _invalidate_status_cache()
 
 
 def cmd_logout(_args) -> None:
     creds = _load_creds()
+    # Legacy PATs were revocable server-side; rotating tokens just get dropped locally.
     if creds.get("token_id") and creds.get("token"):
         try:
             request("DELETE", f"/api/auth/tokens/{creds['token_id']}")
             print("Token revoked on the server.")
         except SystemExit:
             print("Could not revoke remotely — removing local credentials anyway.", file=sys.stderr)
-    if CREDS_FILE.exists():
-        CREDS_FILE.unlink()
+    clear_creds()
     print("Logged out.")
 
 
@@ -640,6 +649,53 @@ def cmd_push(args) -> None:
         _invalidate_status_cache()  # one fewer local artifact awaiting push
 
 
+def cmd_github(args) -> None:
+    """Import skill(s)/MCP(s)/note(s) from a public GitHub repo. Detection runs
+    server-side; secrets in any MCP config are redacted before import."""
+    preview = request("POST", "/api/resources/github/preview", body={"url": args.url})
+    repo = preview.get("repo", {})
+    detected = preview.get("detected", [])
+    header = f"{BOLD}{repo.get('owner', '?')}/{repo.get('repo', '?')}{RESET}"
+    if repo.get("description"):
+        header += f"  {DIM}{repo['description'][:80]}{RESET}"
+    print(header)
+    if not detected:
+        print(f"{DIM}no skills, MCP servers, or notes detected in that repository{RESET}")
+        return
+    for d in detected:
+        sec = f" {DIM}· {len(d['redaction'])} secret(s) redacted{RESET}" if d.get("redaction") else ""
+        print(f"{KIND_GLYPH.get(d['kind'], '·')} {BOLD}{d['title']}{RESET}"
+              f"  {DIM}{d['kind']} · {d['source_path']}{RESET}{sec}")
+        if d.get("description"):
+            print(f"    {d['description'][:100]}")
+    if args.dry_run:
+        print(f"\n{len(detected)} detected — import with "
+              f"{BOLD}skillshare github <url> --org <slug>{RESET} (or --pod <id>)")
+        return
+
+    scope = _resolve_push_scope(args)
+    if args.yes:
+        select: list[str] = []  # empty = import everything detected
+    else:
+        select = []
+        for d in detected:
+            ans = input(f"  import {BOLD}{d['title']}{RESET} ({d['kind']})? [Y/n] ").strip().lower()
+            if ans in ("", "y", "yes"):
+                select.append(d["fingerprint"])
+        if not select:
+            print(f"{DIM}nothing selected{RESET}")
+            return
+
+    result = request("POST", "/api/resources/github/import",
+                     body={"url": args.url, "select": select, **scope})
+    for r in result.get("created", []):
+        print(f"  {BOLD}✓ imported{RESET} {GLYPH.get(r['type'], '·')} {r['title']}  [{r['id']}]")
+    for s in result.get("skipped", []):
+        print(f"  {DIM}↷ skipped {s['title']} — {s['reason']} [{s.get('resource_id', '')}]{RESET}")
+    if result.get("created"):
+        _invalidate_status_cache()
+
+
 def _primary_org_slug() -> str:
     """The org a 'Push' CTA targets by default: first one you administer, else
     your first membership. Empty string if you belong to none."""
@@ -838,6 +894,41 @@ def cmd_status(args) -> None:
         print(seg or prefix)
 
 
+def cmd_setup_statusline(args) -> None:
+    """Wire the SkillShare status line into Claude Code's settings.json so the
+    install/push counts show in the status bar (one-time; the data then refreshes
+    automatically). Only Claude Code renders a status line."""
+    from . import statusline as sl
+
+    if args.print_only:
+        print(sl.status_command())
+        return
+    scope = "project" if args.project else "user"
+    try:
+        res = sl.disable(scope=scope, force=args.force) if args.remove else sl.enable(scope=scope, force=args.force)
+    except sl.StatusLineError as e:
+        die(str(e))
+
+    status = res["status"]
+    path = res["path"]
+    if status == "enabled":
+        print(f"{BOLD}✓ Status line enabled{RESET} in {path}")
+        print(f"  {DIM}command: {res['command']}{RESET}")
+        print(f"  {DIM}Restart Claude Code (or reload) to see it.{RESET}")
+    elif status == "already-enabled":
+        print(f"{DIM}Status line already enabled in {path} — nothing to do.{RESET}")
+    elif status == "exists-different":
+        print(f"{BOLD}A different statusLine is already set{RESET} in {path}:")
+        print(f"  {DIM}{res['existing']}{RESET}")
+        print(f"  Re-run with {BOLD}--force{RESET} to replace it.")
+    elif status == "removed":
+        print(f"{BOLD}✓ Status line removed{RESET} from {path}. Restart Claude Code to apply.")
+    elif status == "not-ours":
+        print(f"The statusLine in {path} isn't SkillShare's — left it alone. Use {BOLD}--force{RESET} to remove anyway.")
+    else:  # not-set / no-settings
+        print(f"{DIM}No SkillShare status line to remove ({status}).{RESET}")
+
+
 def cmd_available(args) -> None:
     """List resources on SkillShare (in your scopes) that aren't set up locally
     yet. `--json` feeds the panel; otherwise prints a grouped, installable list."""
@@ -947,9 +1038,11 @@ def main() -> None:
     p = argparse.ArgumentParser(prog="skillshare", description="SkillShare registry CLI")
     sub = p.add_subparsers(dest="command", required=True)
 
-    sp = sub.add_parser("login", help="log in and store a personal access token")
+    sp = sub.add_parser("login", help="sign in via the browser (device flow) and store credentials")
     sp.add_argument("--api", help=f"API base URL (default {DEFAULT_API})")
-    sp.add_argument("--email")
+    sp.add_argument("--no-browser", action="store_true", help="don't auto-open the browser; just print the URL")
+    sp.add_argument("--email", help="legacy: log in directly with email/password instead of the browser")
+    sp.add_argument("--password", help="legacy: password for --email login (omit to be prompted)")
     sp.set_defaults(fn=cmd_login)
 
     sub.add_parser("logout", help="revoke the stored token and remove credentials").set_defaults(fn=cmd_logout)
@@ -1026,11 +1119,26 @@ def main() -> None:
     sp.add_argument("--yes", action="store_true", help="don't prompt for confirmation")
     sp.set_defaults(fn=cmd_push)
 
+    sp = sub.add_parser("github", help="import skills/MCP/notes from a public GitHub repo URL")
+    sp.add_argument("url", help="github.com/owner/repo (optionally /tree/<ref>/<subpath>)")
+    sp.add_argument("--org", help="target org slug")
+    sp.add_argument("--pod", help="target pod id")
+    sp.add_argument("--dry-run", action="store_true", help="just show what was detected; import nothing")
+    sp.add_argument("--yes", action="store_true", help="import everything detected without prompting")
+    sp.set_defaults(fn=cmd_github)
+
     sp = sub.add_parser("status", help="one-line status for an AI tool's status bar (install gap + local to-push)")
     _scan_flags(sp)
     sp.add_argument("--max-age", type=int, default=60, help="seconds to cache the counts (default 60)")
     sp.add_argument("--refresh", action="store_true", help="recompute the cache without printing (internal)")
     sp.set_defaults(fn=cmd_status)
+
+    sp = sub.add_parser("setup-statusline", help="show the install/push counts in Claude Code's status bar")
+    sp.add_argument("--project", action="store_true", help="write to ./.claude/settings.json (default: ~/.claude/settings.json)")
+    sp.add_argument("--remove", action="store_true", help="remove the SkillShare status line")
+    sp.add_argument("--force", action="store_true", help="replace an existing different statusLine (or remove a non-SkillShare one)")
+    sp.add_argument("--print", dest="print_only", action="store_true", help="just print the command string; change nothing")
+    sp.set_defaults(fn=cmd_setup_statusline)
 
     sp = sub.add_parser("available", help="list resources on SkillShare (your scopes) not set up locally yet")
     _scan_flags(sp)
