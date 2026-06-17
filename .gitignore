@@ -45,3 +45,7 @@ credentials.json
 # Local file uploads (STORAGE_BACKEND=local)
 var/
 **/var/uploads/
+
+# Netlify CLI local link state
+.netlify/
+**/.netlify/
