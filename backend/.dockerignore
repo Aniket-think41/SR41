@@ -1,0 +1,23 @@
+# Keep the image small and the app self-contained.
+integration/
+tests/
+scripts/
+var/
+.venv/
+**/__pycache__/
+**/*.pyc
+*.db
+*.sqlite
+*.sqlite3
+.env
+.env.*
+!.env.example
+.pytest_cache/
+*.egg-info/
+.git/
+README.md
+BACKEND_SPEC.md
+FEATURE_ANALYSIS.md
+Dockerfile
+.dockerignore
+cloudbuild.yaml

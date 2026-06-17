@@ -1,0 +1,46 @@
+# Cloud Build pipeline for the SkillShare backend → Cloud Run.
+# Used by the GitHub trigger (on push to main, filtered to backend/**) and
+# runnable manually:  gcloud builds submit --config backend/cloudbuild.yaml .
+#
+# Paths are relative to the repo root (the Cloud Build workspace). The Cloud Run
+# deploy is image-only on purpose: env vars, secrets, and the service account are
+# set once on the service (see the initial `gcloud run deploy`) and carried
+# forward to every new revision automatically.
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_IMAGE}:$SHORT_SHA
+      - -t
+      - ${_IMAGE}:latest
+      - -f
+      - backend/Dockerfile
+      - backend
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args: [push, --all-tags, ${_IMAGE}]
+
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=${_IMAGE}:$SHORT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+
+images:
+  - ${_IMAGE}
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+substitutions:
+  _REGION: us-central1
+  _SERVICE: skillshare-backend
+  _IMAGE: us-central1-docker.pkg.dev/think41-web/skillshare/backend
