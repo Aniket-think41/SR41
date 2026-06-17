@@ -1,0 +1,24 @@
+# Netlify configuration for the SkillShare dashboard (client/).
+#
+# This is the SECOND site in the monorepo (the root netlify.toml builds the
+# marketing website/). When you create this site in Netlify, set its
+# **Base directory** to `client` — Netlify then reads this file (config in the
+# base directory wins over the repo-root netlify.toml) and runs the build here.
+
+[build]
+  command = "npm run build"
+  # Next.js build output, resolved relative to the base directory (→ client/.next).
+  publish = ".next"
+
+[build.environment]
+  # Next 16 + React 19 need a current Node.
+  NODE_VERSION = "20"
+  # Public, build-time vars (set real values in the Netlify UI, not here):
+  #   NEXT_PUBLIC_API_URL          → backend origin, e.g. https://api.skillshare.think41.com
+  #                                  (leave unset to run the dashboard in mock mode)
+  #   NEXT_PUBLIC_GOOGLE_CLIENT_ID → Google OAuth client id for sign-in
+
+# Official Next.js runtime — handles the App Router SSR/dynamic routes
+# (e.g. /dashboard/org/[slug]) alongside the prerendered static pages.
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
