@@ -131,6 +131,8 @@ export const api = {
     request<{ plan: PlanTier; features: OrgFeature[] }>("POST", `/api/orgs/${slug}/license`, {
       license_key: licenseKey,
     }),
+  join: (slug: string, token: string) =>
+    request<{ ok: true }>("POST", `/api/orgs/${slug}/join/${token}`),
   orgMembers: (slug: string) => request<OrgMember[]>("GET", `/api/orgs/${slug}/members`),
   invite: (slug: string, body: { email: string; role: OrgRole }) =>
     request<Invitation>("POST", `/api/orgs/${slug}/invite`, body),

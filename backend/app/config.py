@@ -41,6 +41,15 @@ class Settings(BaseSettings):
     rate_limit_search_per_min: int = 30
     redis_url: str = ""  # optional; in-memory limiter is used when empty (single-process only)
 
+    # --- AWS SES (org invitation emails) ---
+    # SES is best-effort: if disabled or misconfigured, invitations are still
+    # created in the DB and the admin gets a server log warning.
+    ses_enabled: bool = False       # set True in prod
+    ses_region: str = "us-east-1"
+    ses_sender: str = ""            # verified SES identity, e.g. noreply@skillshare.think41.com
+    # Credentials are shared with the S3 storage backend above
+    # (aws_access_key_id / aws_secret_access_key).
+
     # --- uploads (BACKEND_SPEC §6) ---
     # Switchable storage (see app/storage.py). local for dev; gcs is the default
     # cloud provider, s3 the alternative.

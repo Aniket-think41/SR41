@@ -15,7 +15,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useQueryClient } from "@tanstack/react-query";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { errorMessage, setToken } from "@/lib/api/http";
 import { Logo } from "./Logo";
@@ -63,12 +63,6 @@ const signupSchema = loginSchema.extend({
 
 type FormValues = z.infer<typeof loginSchema>;
 
-// Demo account — works against the in-browser mock AND a real seeded backend.
-// The seeded password is SEED_PASSWORD (default "skillshare-demo", see
-// backend/.env.example); override here if your deployment seeds differently.
-const DEMO_EMAIL = process.env.NEXT_PUBLIC_DEMO_EMAIL ?? "aniket.lnu@think41.com";
-const DEMO_PASSWORD = process.env.NEXT_PUBLIC_DEMO_PASSWORD ?? "skillshare-demo";
-
 function AuthForm({ mode }: { mode: "login" | "signup" }) {
   const router = useRouter();
   const search = useSearchParams();
@@ -110,17 +104,6 @@ function AuthForm({ mode }: { mode: "login" | "signup" }) {
       setBusy(false);
     }
   });
-
-  const demo = async () => {
-    setBusy(true);
-    try {
-      const session = await api.login({ email: DEMO_EMAIL, password: DEMO_PASSWORD });
-      finish(session);
-    } catch (e) {
-      setServerError(errorMessage(e));
-      setBusy(false);
-    }
-  };
 
   // Initialize Google Identity Services when a client id is configured. The
   // callback hands the id_token to the backend (POST /api/auth/google).
@@ -205,11 +188,6 @@ function AuthForm({ mode }: { mode: "login" | "signup" }) {
         Continue with Google
       </button>
 
-      {mode === "login" && (
-        <button type="button" onClick={demo} className="btn btn-lime w-full" disabled={busy}>
-          <Sparkles className="h-4 w-4" /> Explore as demo user
-        </button>
-      )}
     </form>
   );
 }

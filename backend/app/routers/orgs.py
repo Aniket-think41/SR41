@@ -12,6 +12,7 @@ from ..config import get_settings
 from ..database import get_db
 from ..errors import conflict, forbidden, not_found, validation
 from ..features import CATALOG, feature_enabled, resolve_features
+from ..email import send_invite_email
 from ..models import (
     Invitation,
     License,
@@ -179,6 +180,15 @@ def invite(slug: str, body: InviteIn, user: User = Depends(get_current_user), db
     )
     db.add(inv)
     db.flush()  # assign inv.id before logging
+    # Best-effort email via SES. Never block the response on email delivery.
+    send_invite_email(
+        to_email=inv.email,
+        org_name=org.name,
+        org_slug=org.slug,
+        inviter_name=user.display_name,
+        role=inv.role,
+        invite_token=inv.token,
+    )
     log_activity(
         db, user_id=user.id, org_id=org.id, verb="invited",
         object_type="member", object_id=inv.id, object_title=inv.email,
