@@ -49,6 +49,48 @@ app = FastAPI(
 # v1: create tables on boot. Move to Alembic migrations before real prod data.
 Base.metadata.create_all(bind=engine)
 
+
+def _bootstrap_admin() -> None:
+    """On production startup, create or promote an admin user from env vars.
+    This is the bootstrap path for deployments that don't run the seed script."""
+    log = logging.getLogger("app.bootstrap")
+    if not settings.admin_email or not settings.admin_password:
+        log.info("Admin bootstrap skipped: ADMIN_EMAIL or ADMIN_PASSWORD not set")
+        return
+    from .database import SessionLocal
+    from .models import User
+    from .security import hash_password
+
+    db = SessionLocal()
+    try:
+        email = settings.admin_email.lower().strip()
+        user = db.query(User).filter(User.email == email).first()
+        if user:
+            if not user.is_admin:
+                user.is_admin = True
+                db.commit()
+                log.info("Admin bootstrap: promoted %s to admin", email)
+        else:
+            import re
+
+            slug = re.sub(r"[^a-z0-9]+", "-", email.split("@")[0]).strip("-") or "admin"
+            user = User(
+                email=email,
+                password_hash=hash_password(settings.admin_password),
+                username=slug,
+                display_name="Admin",
+                is_admin=True,
+            )
+            db.add(user)
+            db.commit()
+            log.info("Admin bootstrap: created admin user %s", email)
+    except Exception:
+        log.exception("Admin bootstrap failed")
+    finally:
+        db.close()
+
+
+_bootstrap_admin()
 install_handlers(app)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
@@ -80,4 +122,10 @@ if settings.storage_backend == "local":
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "service": "skillshare-api", "env": settings.env}
+    return {
+        "ok": True,
+        "service": "skillshare-api",
+        "env": settings.env,
+        "admin_email_set": bool(settings.admin_email),
+        "admin_password_set": bool(settings.admin_password),
+    }

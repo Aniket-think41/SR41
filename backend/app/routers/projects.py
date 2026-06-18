@@ -7,10 +7,13 @@ from ..database import get_db
 from ..errors import validation
 from ..models import Pod, PodMember, Project, ProjectMember, Resource, User
 from ..permissions import (
+    ensure_org_member,
+    ensure_project_member,
     org_by_slug,
     project_or_404,
     require_org_member,
     require_project_access,
+    resolve_user,
 )
 from ..schemas import AddMemberIn, ProjectCreate, ProjectPatch
 from ..security import get_current_user
@@ -114,13 +117,13 @@ def add_project_member(
     slug: str, project_id: str, body: AddMemberIn,
     user: User = Depends(get_current_user), db: Session = Depends(get_db),
 ):
-    org_by_slug(db, slug)
+    org = org_by_slug(db, slug)
     project = project_or_404(db, project_id)
     require_project_access(db, project, user)
-    m = ProjectMember(
-        project_id=project_id, user_id=body.user_id,
-        role=body.role if body.role in ("LEAD", "MEMBER") else "MEMBER",
-    )
-    db.add(m)
+    target = resolve_user(db, user_id=body.user_id, email=body.email)
+    role = body.role if body.role in ("LEAD", "MEMBER") else "MEMBER"
+    # Cascade: project membership implies org membership (created if missing).
+    ensure_org_member(db, org.id, target.id)
+    m = ensure_project_member(db, project.id, target.id, role=role)
     db.commit()
     return member_out(m, "project_id")

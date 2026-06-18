@@ -99,8 +99,42 @@ class PodPatch(BaseModel):
 
 
 class AddMemberIn(BaseModel):
-    user_id: str
+    """Add a member by user_id OR email. When the user already exists anywhere
+    on the platform we resolve them and (cascading) ensure membership at every
+    level up to this one; at least one of user_id/email is required."""
+
+    user_id: str | None = None
+    email: EmailStr | None = None
     role: str = "MEMBER"
+
+
+PodServiceKind = Literal["MCP_SERVER", "DEPLOYED_API", "WEBHOOK", "DATABASE", "OTHER"]
+PodServiceStatus = Literal["active", "paused", "error"]
+
+
+class PodServiceCreate(BaseModel):
+    """Register a service in a pod's service registry. `secret_ref` is the NAME
+    of a secret (env var / secret-manager key), never the secret value."""
+
+    name: str = Field(min_length=1, max_length=120)
+    kind: PodServiceKind = "OTHER"
+    description: str = ""
+    endpoint_url: str | None = Field(default=None, max_length=2000)
+    health_url: str | None = Field(default=None, max_length=2000)
+    config: dict = {}
+    secret_ref: str = Field(default="", max_length=200)
+    status: PodServiceStatus = "active"
+
+
+class PodServicePatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    kind: PodServiceKind | None = None
+    description: str | None = None
+    endpoint_url: str | None = Field(default=None, max_length=2000)
+    health_url: str | None = Field(default=None, max_length=2000)
+    config: dict | None = None
+    secret_ref: str | None = Field(default=None, max_length=200)
+    status: PodServiceStatus | None = None
 
 
 class ResourceCreate(BaseModel):
@@ -300,3 +334,10 @@ class ContentPagePatch(BaseModel):
 
 class VerifyPublisherIn(BaseModel):
     verified: bool = True
+
+
+class AdminRowPatch(BaseModel):
+    """Admin table-browser inline edit: a map of column → new value. Values are
+    coerced to each column's type server-side; the primary key is never changed."""
+
+    updates: dict

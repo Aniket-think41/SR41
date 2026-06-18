@@ -163,6 +163,24 @@ def pod_out(db: Session, p: Pod) -> dict:
     }
 
 
+def pod_service_out(s) -> dict:
+    return {
+        "id": s.id,
+        "pod_id": s.pod_id,
+        "name": s.name,
+        "kind": s.kind,
+        "description": s.description,
+        "endpoint_url": s.endpoint_url,
+        "health_url": s.health_url,
+        "config": s.config or {},
+        "secret_ref": s.secret_ref,
+        "status": s.status,
+        "created_by": s.created_by,
+        "created_at": s.created_at,
+        "updated_at": s.updated_at,
+    }
+
+
 def org_member_out(m: OrgMember) -> dict:
     return {
         "id": m.id,

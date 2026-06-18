@@ -6,19 +6,21 @@ posts can be hidden and new ones staged), the changelog, and legal pages
 content live under /api/public; everything here requires an admin token.
 """
 
-import os
+import json
 from pathlib import Path
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
-from sqlalchemy import inspect as sa_inspect
+from sqlalchemy import Boolean, Integer
+from sqlalchemy import JSON as SAJSON
 from sqlalchemy.orm import Session
 
 from ..database import Base, get_db
-from ..errors import conflict, not_found
+from ..errors import conflict, not_found, validation
 from ..models import BlogPost, ChangelogEntry, ContentPage, Feedback, User
 from ..permissions import require_admin
 from ..schemas import (
+    AdminRowPatch,
     BlogPostCreate,
     BlogPostPatch,
     ChangelogCreate,
@@ -222,6 +224,43 @@ def _get_model_map() -> dict:
     return mapper
 
 
+def _model_or_404(table_name: str):
+    model = _get_model_map().get(table_name)
+    if not model:
+        raise not_found(f'Table "{table_name}"')
+    return model
+
+
+def _row_to_dict(model, row) -> dict:
+    d = {}
+    for c in model.__table__.columns:
+        val = getattr(row, c.name)
+        if hasattr(val, "isoformat"):  # datetime/date → ISO string for display
+            val = val.isoformat()
+        d[c.name] = val
+    return d
+
+
+def _coerce(col, value):
+    """Coerce a JSON value from the browser into the column's Python type so an
+    inline edit ("true", "42", a JSON object) lands as the right type."""
+    if value is None:
+        return None
+    col_type = col.type
+    try:
+        if isinstance(col_type, Boolean):
+            if isinstance(value, bool):
+                return value
+            return str(value).strip().lower() in ("true", "1", "yes", "on")
+        if isinstance(col_type, Integer):
+            return int(value)
+        if isinstance(col_type, SAJSON):
+            return json.loads(value) if isinstance(value, str) else value
+    except (ValueError, TypeError, json.JSONDecodeError) as e:
+        raise validation(f'Could not parse value for "{col.name}": {e}')
+    return value
+
+
 @router.get("/tables")
 def list_tables(_: User = Depends(admin_user), db: Session = Depends(get_db)):
     """List all database tables with approximate row counts."""
@@ -239,23 +278,46 @@ def list_tables(_: User = Depends(admin_user), db: Session = Depends(get_db)):
 @router.get("/tables/{table_name}")
 def browse_table(table_name: str, _: User = Depends(admin_user), db: Session = Depends(get_db)):
     """Return all rows from a table as a JSON array. Includes column names."""
-    models = _get_model_map()
-    model = models.get(table_name)
-    if not model:
-        raise not_found(f'Table "{table_name}"')
+    model = _model_or_404(table_name)
     rows = db.query(model).order_by(model.id).all() if hasattr(model, "id") else db.query(model).all()
     cols = [c.name for c in model.__table__.columns]
-    data = []
-    for row in rows:
-        d = {}
-        for c in cols:
-            val = getattr(row, c)
-            # Convert datetime/date to ISO string for display
-            if hasattr(val, "isoformat"):
-                val = val.isoformat()
-            d[c] = val
-        data.append(d)
+    data = [_row_to_dict(model, row) for row in rows]
     return {"table": table_name, "columns": cols, "rows": len(data), "data": data}
+
+
+@router.patch("/tables/{table_name}/{row_id}")
+def update_row(
+    table_name: str, row_id: str, body: AdminRowPatch,
+    _: User = Depends(admin_user), db: Session = Depends(get_db),
+):
+    """Edit a row in place (platform-admin only). Updates are coerced to each
+    column's type; the primary key column is never modified. Direct DB write —
+    bypasses app-level validation, so use with care."""
+    model = _model_or_404(table_name)
+    obj = db.get(model, row_id)
+    if not obj:
+        raise not_found(f'Row "{row_id}"')
+    cols = {c.name: c for c in model.__table__.columns}
+    pk = {c.name for c in model.__table__.primary_key.columns}
+    for field, value in body.updates.items():
+        if field not in cols or field in pk:
+            continue  # ignore unknown columns and never reassign the primary key
+        setattr(obj, field, _coerce(cols[field], value))
+    db.commit()
+    return _row_to_dict(model, obj)
+
+
+@router.delete("/tables/{table_name}/{row_id}")
+def delete_row(table_name: str, row_id: str, _: User = Depends(admin_user), db: Session = Depends(get_db)):
+    """Delete a row by primary key (platform-admin only). No cascade — related
+    rows in other tables are left as-is."""
+    model = _model_or_404(table_name)
+    obj = db.get(model, row_id)
+    if not obj:
+        raise not_found(f'Row "{row_id}"')
+    db.delete(obj)
+    db.commit()
+    return {"ok": True}
 
 
 @router.get("/dashboard", response_class=HTMLResponse)

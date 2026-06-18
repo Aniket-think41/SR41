@@ -49,6 +49,19 @@ tr:hover td{background:#1a1a24}
 .tab{padding:8px 16px;cursor:pointer;font-size:13px;color:#666;border-bottom:2px solid transparent;transition:all .15s}
 .tab:hover{color:#e0e0e0}
 .tab.active{color:#735ae5;border-bottom-color:#735ae5}
+.row-editor{display:flex;flex-direction:column;gap:10px}
+.row-editor textarea{width:100%;min-height:220px;background:#0f0f13;color:#cbd5e1;border:1px solid #2a2a3a;border-radius:6px;padding:12px;font-family:'SF Mono',Consolas,monospace;font-size:12px;line-height:1.5;outline:none;resize:vertical}
+.row-editor textarea:focus{border-color:#735ae5}
+.row-editor .actions{display:flex;gap:8px;align-items:center}
+.btn{padding:6px 14px;border-radius:6px;border:1px solid #2a2a3a;background:#1a1a24;color:#e0e0e0;cursor:pointer;font-size:13px}
+.btn:hover{border-color:#735ae5}
+.btn.save{background:#735ae5;border-color:#735ae5;color:#fff}
+.btn.save:hover{background:#5f49c9}
+.btn.danger{color:#f87171;border-color:#3a2a2a}
+.btn.danger:hover{background:#2a1a1a;border-color:#f87171}
+.editor-hint{color:#666;font-size:12px}
+.del-btn{cursor:pointer;color:#f87171;font-size:12px;opacity:.55;padding:0 4px}
+.del-btn:hover{opacity:1}
 </style>
 </head>
 <body>
@@ -74,6 +87,11 @@ function escapeHtml(str) {
   const s = String(str);
   if (s.length > 200) return escapeHtml(s.slice(0,200)) + '…';
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function escapeText(str) {
+  // Full, non-truncating escape — for the row editor textarea.
+  return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 function formatCell(val) {
@@ -161,14 +179,24 @@ function renderTable() {
 
   html += `<table><thead><tr>`;
   cols.forEach(c => { html += `<th onclick="sortBy('${c}')">${c}</th>`; });
-  html += `<th style="width:30px"></th></tr></thead><tbody>`;
+  html += `<th style="width:60px"></th></tr></thead><tbody>`;
 
   pageRows.forEach((row, i) => {
     const idx = start + i;
     html += `<tr onclick="toggleDetail(${idx})" style="cursor:pointer">`;
     cols.forEach(c => { html += `<td>${formatCell(row[c])}</td>`; });
-    html += `<td><span class="expand-btn">▶</span></td></tr>`;
-    html += `<tr class="row-detail" id="detail-${idx}"><td colspan="${cols.length + 1}">${escapeHtml(JSON.stringify(row, null, 2))}</td></tr>`;
+    html += `<td style="white-space:nowrap">`
+      + `<span class="del-btn" title="Delete row" onclick="event.stopPropagation();deleteRow(${idx})">🗑</span>`
+      + `<span class="expand-btn">▶</span></td></tr>`;
+    const editorId = `editor-${idx}`;
+    html += `<tr class="row-detail" id="detail-${idx}"><td colspan="${cols.length + 1}">`
+      + `<div class="row-editor">`
+      + `<div class="editor-hint">Edit the JSON below and Save. The <code>id</code> is read-only; only changed fields are written.</div>`
+      + `<textarea id="${editorId}" onclick="event.stopPropagation()">${escapeText(JSON.stringify(row, null, 2))}</textarea>`
+      + `<div class="actions" onclick="event.stopPropagation()">`
+      + `<button class="btn save" onclick="saveRow(${idx})">Save changes</button>`
+      + `<button class="btn danger" onclick="deleteRow(${idx})">Delete row</button>`
+      + `</div></div></td></tr>`;
   });
 
   html += `</tbody></table>`;
@@ -207,6 +235,44 @@ function sortBy(col) {
 function toggleDetail(idx) {
   const el = document.getElementById(`detail-${idx}`);
   if (el) el.classList.toggle('show');
+}
+
+async function saveRow(idx) {
+  const original = getFilteredData()[idx];
+  if (!original || original.id == null) { alert('This table has no editable primary key.'); return; }
+  let edited;
+  try {
+    edited = JSON.parse(document.getElementById(`editor-${idx}`).value);
+  } catch(e) { alert('Invalid JSON: ' + e.message); return; }
+  // Only send fields that actually changed; never the id.
+  const updates = {};
+  Object.keys(edited).forEach(k => {
+    if (k === 'id') return;
+    if (JSON.stringify(edited[k]) !== JSON.stringify(original[k])) updates[k] = edited[k];
+  });
+  if (Object.keys(updates).length === 0) { alert('No changes to save.'); return; }
+  try {
+    const res = await fetch(`${BASE}/${currentTable}/${encodeURIComponent(original.id)}`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({updates}),
+    });
+    if (!res.ok) { const err = await res.json().catch(()=>({})); throw new Error(err.detail || err.message || res.status); }
+    await loadTableData();
+    await loadTables();  // refresh counts (unchanged here, but keeps sidebar fresh)
+  } catch(e) { alert('Save failed: ' + e.message); }
+}
+
+async function deleteRow(idx) {
+  const original = getFilteredData()[idx];
+  if (!original || original.id == null) { alert('This table has no deletable primary key.'); return; }
+  if (!confirm(`Delete ${currentTable} row ${original.id}? This cannot be undone.`)) return;
+  try {
+    const res = await fetch(`${BASE}/${currentTable}/${encodeURIComponent(original.id)}`, {method: 'DELETE'});
+    if (!res.ok) { const err = await res.json().catch(()=>({})); throw new Error(err.detail || err.message || res.status); }
+    await loadTableData();
+    await loadTables();
+  } catch(e) { alert('Delete failed: ' + e.message); }
 }
 
 loadTables();

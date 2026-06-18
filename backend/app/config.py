@@ -76,6 +76,14 @@ class Settings(BaseSettings):
     # --- licensing (BACKEND_SPEC §3.7) ---
     license_key_pattern: str = r"^T41-PREM-[A-Z0-9]{4,}$"
 
+    # --- admin bootstrap (production) ---
+    # Set ADMIN_EMAIL + ADMIN_PASSWORD to auto-create an admin user on startup.
+    # This is the only way to get an admin in production without running the
+    # seed script. The user is created if they don't exist, or promoted to
+    # admin if they already have an account.
+    admin_email: str = ""
+    admin_password: str = ""
+
     # --- seed script ---
     seed_password: str = "skillshare-demo"
 

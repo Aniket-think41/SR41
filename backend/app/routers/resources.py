@@ -30,7 +30,9 @@ from ..permissions import (
     project_or_404,
     require_org_member,
     require_pod_access,
+    require_pod_read,
     require_project_access,
+    require_project_read,
     require_resource_read,
     require_resource_write,
     resource_or_404,
@@ -267,7 +269,7 @@ def project_resources(
     user: User = Depends(get_current_user), db: Session = Depends(get_db),
 ):
     project = project_or_404(db, project_id)
-    require_project_access(db, project, user)
+    require_project_read(db, project, user)
     rows = db.query(Resource).filter(Resource.scope_type == "PROJECT", Resource.scope_id == project.id).all()
     rows = search_rank(rows, params["q"], params["type_"], params["tag"], params["sort"])
     return [resource_out(db, r, user) for r in rows]
@@ -283,7 +285,7 @@ def pod_resources(
 ):
     """Inheritance union (BACKEND_SPEC §5): pod + project + org, filtered by ?scope=."""
     pod = pod_or_404(db, pod_id)
-    require_pod_access(db, pod, user)
+    require_pod_read(db, pod, user)
     project = project_or_404(db, pod.project_id)
     scope = scope.lower()
 

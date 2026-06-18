@@ -120,6 +120,37 @@ class PodMember(Base):
     user: Mapped[User] = relationship(lazy="joined")
 
 
+class PodService(Base):
+    """A service a pod operates or depends on — an MCP server, a deployed API,
+    a webhook, a database, etc. This is the pod's service-management registry:
+    a place to record what's running, where it lives, and how it's wired, so a
+    pod's operational surface is discoverable alongside its skills/MCPs/notes.
+
+    Secrets are NEVER stored inline — `secret_ref` holds the *name* of an env
+    var / secret-manager key the deploy resolves at runtime, not the value.
+    Managing a pod's services requires pod write access; any org member can view
+    them (read transparency, §4.2)."""
+
+    __tablename__ = "pod_services"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("svc"))
+    pod_id: Mapped[str] = mapped_column(String, ForeignKey("pods.id"), index=True)
+    name: Mapped[str] = mapped_column(String)
+    # MCP_SERVER | DEPLOYED_API | WEBHOOK | DATABASE | OTHER
+    kind: Mapped[str] = mapped_column(String, default="OTHER", index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    endpoint_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    health_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Free-form wiring (region, transport, headers map, etc.) — no secret values.
+    config: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Reference (NOT value) to a secret: env var name / secret-manager key.
+    secret_ref: Mapped[str] = mapped_column(String, default="")
+    status: Mapped[str] = mapped_column(String, default="active")  # active | paused | error
+    created_by: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
 class Resource(Base):
     __tablename__ = "resources"
 
