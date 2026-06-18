@@ -6,9 +6,17 @@ NEXT_PUBLIC_API_URL to this server's origin; the wire format matches
 client/src/lib/types.ts exactly.
 """
 
+import logging
 import os
 
 from fastapi import FastAPI
+
+# Route app-level log messages to stdout so Cloud Logging picks them up.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s:%(name)s:%(message)s",
+    force=True,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 

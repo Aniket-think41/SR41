@@ -1,5 +1,5 @@
 """
-Transactional email via AWS SES for org invitations.
+Transactional email via AWS SES SMTP for org invitations.
 
 Best-effort by design: if SES is disabled or misconfigured, invitations are
 still created in the DB and the admin gets a server log warning. The DB record
@@ -7,6 +7,9 @@ is the source of truth — email delivery is a notification layer.
 """
 
 import logging
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 logger = logging.getLogger(__name__)
 
@@ -120,8 +123,8 @@ def send_invite_email(
     role: str,
     invite_token: str,
 ) -> bool:
-    """Send an org invitation email via AWS SES. Best-effort: logs errors and
-    returns False on failure so the caller never blocks a response on email."""
+    """Send an org invitation email via AWS SES SMTP. Best-effort: logs errors
+    and returns False on failure so the caller never blocks a response on email."""
     from .config import get_settings
 
     settings = get_settings()
@@ -131,30 +134,24 @@ def send_invite_email(
 
     frontend = settings.frontend_url.rstrip("/")
     accept_url = f"{frontend}/join/{org_slug}/{invite_token}"
+    subject = f"You've been invited to join {org_name} on SkillShare"
 
     html = _invite_html(org_name=org_name, inviter_name=inviter_name, role=role, accept_url=accept_url)
     text = _invite_text(org_name=org_name, inviter_name=inviter_name, role=role, accept_url=accept_url)
 
     try:
-        import boto3
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = settings.ses_sender
+        msg["To"] = to_email
+        msg.attach(MIMEText(text, "plain"))
+        msg.attach(MIMEText(html, "html"))
 
-        client = boto3.client(
-            "ses",
-            region_name=settings.ses_region,
-            aws_access_key_id=settings.aws_access_key_id or None,
-            aws_secret_access_key=settings.aws_secret_access_key or None,
-        )
-        client.send_email(
-            Source=settings.ses_sender,
-            Destination={"ToAddresses": [to_email]},
-            Message={
-                "Subject": {"Data": f"You've been invited to join {org_name} on SkillShare", "Charset": "utf-8"},
-                "Body": {
-                    "Html": {"Data": html, "Charset": "utf-8"},
-                    "Text": {"Data": text, "Charset": "utf-8"},
-                },
-            },
-        )
+        with smtplib.SMTP(settings.ses_smtp_host, settings.ses_smtp_port, timeout=15) as server:
+            server.starttls()
+            server.login(settings.ses_smtp_username, settings.ses_smtp_password)
+            server.sendmail(settings.ses_sender, [to_email], msg.as_string())
+
         logger.info("Invite email sent to %s for org %s", to_email, org_slug)
         return True
     except Exception:
