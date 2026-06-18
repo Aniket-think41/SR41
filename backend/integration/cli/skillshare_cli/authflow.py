@@ -23,7 +23,7 @@ import httpx
 
 CONFIG_DIR = Path(os.environ.get("SKILLSHARE_CONFIG_DIR", "~/.config/skillshare")).expanduser()
 CREDS_FILE = CONFIG_DIR / "credentials.json"
-DEFAULT_API = "http://localhost:8400"
+DEFAULT_API = "https://skillshare-backend-1081098542602.us-central1.run.app"
 
 # refresh this many seconds before the access token actually expires
 _REFRESH_SKEW = 60

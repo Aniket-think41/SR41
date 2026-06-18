@@ -7,7 +7,7 @@ agent runtime. Wraps the REST API in BACKEND_SPEC.md.
 Auth: call the `login` tool to sign in via the browser (device flow) — it stores
 rotating credentials that auto-refresh. Alternatively set env:
 
-    SKILLSHARE_API_URL   e.g. http://localhost:8400
+    SKILLSHARE_API_URL   e.g. https://skillshare-backend-1081098542602.us-central1.run.app
     SKILLSHARE_TOKEN     skst_… PAT or access token (overrides stored creds; for CI)
 
 Public marketplace tools work without signing in; org/pod tools require it.

@@ -142,7 +142,7 @@ def send_invite_email(
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
-        msg["From"] = settings.ses_sender
+        msg["From"] = f"Think41 <{settings.ses_sender}>"
         msg["To"] = to_email
         msg.attach(MIMEText(text, "plain"))
         msg.attach(MIMEText(html, "html"))
