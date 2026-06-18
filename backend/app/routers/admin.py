@@ -6,10 +6,15 @@ posts can be hidden and new ones staged), the changelog, and legal pages
 content live under /api/public; everything here requires an admin token.
 """
 
+import os
+from pathlib import Path
+
 from fastapi import APIRouter, Depends
+from fastapi.responses import HTMLResponse
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
-from ..database import get_db
+from ..database import Base, get_db
 from ..errors import conflict, not_found
 from ..models import BlogPost, ChangelogEntry, ContentPage, Feedback, User
 from ..permissions import require_admin
@@ -204,6 +209,62 @@ def set_feedback_status(
     fb.status = body.status
     db.commit()
     return feedback_out(db, fb, include_user=True)
+
+
+# ---- table browser (dev admin dashboard) ----
+
+
+def _get_model_map() -> dict:
+    """Map table names to their SQLAlchemy model classes."""
+    mapper = {}
+    for model in Base.registry.mappers:
+        mapper[model.class_.__tablename__] = model.class_
+    return mapper
+
+
+@router.get("/tables")
+def list_tables(_: User = Depends(admin_user), db: Session = Depends(get_db)):
+    """List all database tables with approximate row counts."""
+    models = _get_model_map()
+    tables = []
+    for name, model in sorted(models.items()):
+        try:
+            count = db.query(model).count()
+        except Exception:
+            count = -1
+        tables.append({"name": name, "count": count})
+    return {"tables": tables}
+
+
+@router.get("/tables/{table_name}")
+def browse_table(table_name: str, _: User = Depends(admin_user), db: Session = Depends(get_db)):
+    """Return all rows from a table as a JSON array. Includes column names."""
+    models = _get_model_map()
+    model = models.get(table_name)
+    if not model:
+        raise not_found(f'Table "{table_name}"')
+    rows = db.query(model).order_by(model.id).all() if hasattr(model, "id") else db.query(model).all()
+    cols = [c.name for c in model.__table__.columns]
+    data = []
+    for row in rows:
+        d = {}
+        for c in cols:
+            val = getattr(row, c)
+            # Convert datetime/date to ISO string for display
+            if hasattr(val, "isoformat"):
+                val = val.isoformat()
+            d[c] = val
+        data.append(d)
+    return {"table": table_name, "columns": cols, "rows": len(data), "data": data}
+
+
+@router.get("/dashboard", response_class=HTMLResponse)
+def admin_dashboard(_: User = Depends(admin_user)):
+    """Admin HTML dashboard for browsing all database tables."""
+    html_path = Path(__file__).resolve().parent.parent / "templates" / "admin.html"
+    if html_path.exists():
+        return HTMLResponse(html_path.read_text())
+    return HTMLResponse("<h1>Admin dashboard template not found</h1>", status_code=500)
 
 
 # ---- publisher verification ----
