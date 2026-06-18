@@ -148,9 +148,11 @@ def send_invite_email(
         msg.attach(MIMEText(html, "html"))
 
         with smtplib.SMTP(settings.ses_smtp_host, settings.ses_smtp_port, timeout=15) as server:
+            server.ehlo()
             server.starttls()
+            server.ehlo()
             server.login(settings.ses_smtp_username, settings.ses_smtp_password)
-            server.sendmail(settings.ses_sender, [to_email], msg.as_string())
+            server.send_message(msg)
 
         logger.info("Invite email sent to %s for org %s", to_email, org_slug)
         return True

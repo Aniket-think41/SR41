@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     ses_sender: str = ""            # verified SES identity, e.g. noreply@skillshare.think41.com
     ses_smtp_username: str = ""     # SES SMTP credentials (not IAM access key)
     ses_smtp_password: str = ""
-    ses_smtp_host: str = "email-smtp.us-east-1.amazonaws.com"
+    ses_smtp_host: str = "email-smtp.us-west-2.amazonaws.com"
     ses_smtp_port: int = 587
 
     # --- uploads (BACKEND_SPEC §6) ---
