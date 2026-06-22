@@ -156,6 +156,8 @@ export interface Resource {
   updated_at: string;
   /** added by the API on scoped list endpoints (BACKEND SPEC §5) */
   scope_label?: ScopeType;
+  /** human-readable name of the owning scope (org/project/pod), from the API */
+  scope_name?: string | null;
   author?: User;
   starred_by_me?: boolean;
   /** true when the signed-in user has pinned this to their profile */

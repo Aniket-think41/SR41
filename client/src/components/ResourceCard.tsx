@@ -19,6 +19,7 @@ export function ResourceCard({
   showScopeBadge = false,
   readOnly = false,
   compact = false,
+  attribution,
 }: {
   resource: Resource;
   onOpen: (r: Resource) => void;
@@ -26,7 +27,15 @@ export function ResourceCard({
   showScopeBadge?: boolean;
   readOnly?: boolean;
   compact?: boolean;
+  /** Override who the card is attributed to (e.g. the owning org instead of
+   *  the individual author). Falls back to the resource author when omitted. */
+  attribution?: { name: string; verified?: boolean; avatarSrc?: string | null };
 }) {
+  const who = attribution ?? {
+    name: r.author?.display_name ?? "?",
+    verified: r.author?.verified,
+    avatarSrc: r.author?.avatar_url,
+  };
   if (compact) {
     return (
       <button
@@ -91,10 +100,10 @@ export function ResourceCard({
 
         <div className="mt-4 flex items-center justify-between border-t border-line pt-3.5">
           <span className="flex min-w-0 items-center gap-2">
-            <Avatar name={r.author?.display_name ?? "?"} src={r.author?.avatar_url} size="xs" />
+            <Avatar name={who.name} src={who.avatarSrc} size="xs" />
             <span className="truncate text-xs font-medium text-ink">
-              {r.author?.display_name}
-              {r.author?.verified && (
+              {who.name}
+              {who.verified && (
                 <span className="ml-1 text-primary" title="Think41-verified">✦</span>
               )}
             </span>
