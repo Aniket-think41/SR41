@@ -110,14 +110,22 @@ export function Markdown({ source }: { source: string }) {
       continue;
     }
 
-    // paragraph: gather until blank line / block start
+    // paragraph: gather until blank line / block start. The stopper must match
+    // the SAME conditions the block branches above actually consume — note the
+    // blockquote branch only eats "> " (with a space), so the stopper uses "^> "
+    // too. A bare "^>" here would stop the paragraph on a line like ">x" that no
+    // branch consumes, leaving `i` stuck → infinite loop (hung tab).
     const buf: string[] = [];
     while (
       i < lines.length &&
       lines[i].trim() !== "" &&
-      !/^(#{1,3})\s|^[-*]\s|^\d+\.\s|^>|^```/.test(lines[i])
+      !/^(#{1,3})\s|^[-*]\s|^\d+\.\s|^> |^```/.test(lines[i])
     )
       buf.push(lines[i++]);
+    // Hard guard: if nothing was gathered, the current line tripped a stopper but
+    // wasn't consumed by any block branch. Emit it as a paragraph so `i` always
+    // advances — guarantees forward progress no matter what the regexes do.
+    if (buf.length === 0) buf.push(lines[i++]);
     blocks.push(<p key={key++}>{inline(buf.join(" "), `p${key}`)}</p>);
   }
 
