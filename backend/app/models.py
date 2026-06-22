@@ -41,6 +41,10 @@ class User(Base):
     # changelog, legal pages — and verify publishers. Set in seed; never exposed
     # on the public user payload.
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Set when an account is auto-provisioned by an org invitation with a
+    # temporary password emailed to the user. The frontend forces a password
+    # change on first sign-in; cleared by POST /api/auth/change-password.
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 

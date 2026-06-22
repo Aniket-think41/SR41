@@ -170,6 +170,37 @@ def require_pod_access(db: Session, pod: Pod, user: User) -> None:
         raise forbidden("You are not a member of this pod")
 
 
+def require_pod_admin(db: Session, pod: Pod, user: User) -> None:
+    """Destructive pod ops (delete): pod OWNER, project LEAD, or org ADMIN only.
+    Unlike require_pod_access, a plain pod MEMBER is NOT allowed — members can
+    contribute to a pod but must not be able to delete it."""
+    project = project_or_404(db, pod.project_id)
+    org = db.get(Organization, project.org_id)
+    m = org_membership(db, org, user) if org else None
+    if not m:
+        raise forbidden("You are not a member of this organization")
+    if m.role == "ADMIN":
+        return
+    pod_owner = (
+        db.query(PodMember.id)
+        .filter(PodMember.pod_id == pod.id, PodMember.user_id == user.id, PodMember.role == "OWNER")
+        .first()
+    )
+    if pod_owner:
+        return
+    lead = (
+        db.query(ProjectMember.id)
+        .filter(
+            ProjectMember.project_id == project.id,
+            ProjectMember.user_id == user.id,
+            ProjectMember.role == "LEAD",
+        )
+        .first()
+    )
+    if not lead:
+        raise forbidden("Only a pod owner, project lead, or org admin can delete this pod")
+
+
 def require_project_read(db: Session, project: Project, user: User) -> None:
     """VIEW a project: any member of the owning org (read transparency, §4.2).
     Writing into the project still needs require_project_access."""

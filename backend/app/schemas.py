@@ -26,6 +26,13 @@ class LoginIn(BaseModel):
     password: str
 
 
+class ChangePasswordIn(BaseModel):
+    # current_password is optional: not required when the account is flagged
+    # must_change_password (first sign-in for an invited user), required otherwise.
+    current_password: str | None = None
+    new_password: str = Field(min_length=8)
+
+
 class GoogleIn(BaseModel):
     id_token: str
 

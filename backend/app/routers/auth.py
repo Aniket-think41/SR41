@@ -29,6 +29,7 @@ from ..models import (
     now,
 )
 from ..schemas import (
+    ChangePasswordIn,
     DeviceCodeIn,
     DeviceStartIn,
     DeviceUserCodeIn,
@@ -84,7 +85,11 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
 def _me_out(user: User) -> dict:
     """Self payload — like user_out but includes is_admin, which is intentionally
     withheld from the public user serializer."""
-    return {**user_out(user), "is_admin": user.is_admin}
+    return {
+        **user_out(user),
+        "is_admin": user.is_admin,
+        "must_change_password": user.must_change_password,
+    }
 
 
 def _session_payload(db: Session, response: Response, user: User) -> dict:
@@ -350,6 +355,23 @@ def update_me(body: MePatch, user: User = Depends(get_current_user), db: Session
         value = getattr(body, field)
         if value is not None:
             setattr(user, field, value)
+    db.commit()
+    return _me_out(user)
+
+
+@router.post("/change-password")
+def change_password(body: ChangePasswordIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Set a new password. Required on first sign-in for invitees whose account
+    was auto-provisioned with a temporary password (must_change_password).
+
+    The current password is verified UNLESS the account is still flagged as
+    needing a change — in that flow the user only knows the emailed temp password,
+    which they already proved by logging in to obtain this access token."""
+    if not user.must_change_password:
+        if not user.password_hash or not verify_password(body.current_password or "", user.password_hash):
+            raise unauthorized("Current password is incorrect")
+    user.password_hash = hash_password(body.new_password)
+    user.must_change_password = False
     db.commit()
     return _me_out(user)
 

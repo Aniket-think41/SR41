@@ -50,6 +50,37 @@ app = FastAPI(
 Base.metadata.create_all(bind=engine)
 
 
+def _ensure_additive_columns() -> None:
+    """Tiny stand-in for migrations: create_all() never ALTERs existing tables,
+    so additive columns on tables that already exist in prod (Neon) must be added
+    by hand. Idempotent — only adds a column when the live table lacks it. Works
+    for both SQLite (dev) and Postgres (prod)."""
+    from sqlalchemy import inspect, text
+
+    log = logging.getLogger("app.migrate")
+    # (table, column, DDL type with default) — keep in sync with models.py.
+    additive = [
+        ("users", "must_change_password", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ]
+    try:
+        inspector = inspect(engine)
+        existing_tables = set(inspector.get_table_names())
+        with engine.begin() as conn:
+            for table, column, ddl in additive:
+                if table not in existing_tables:
+                    continue  # create_all() just made it with the column already
+                cols = {c["name"] for c in inspector.get_columns(table)}
+                if column in cols:
+                    continue
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+                log.info("Added column %s.%s", table, column)
+    except Exception:
+        log.exception("Additive column migration failed")
+
+
+_ensure_additive_columns()
+
+
 def _bootstrap_admin() -> None:
     """On production startup, create or promote an admin user from env vars.
     This is the bootstrap path for deployments that don't run the seed script."""

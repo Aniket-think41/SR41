@@ -14,12 +14,31 @@ from email.mime.text import MIMEText
 logger = logging.getLogger(__name__)
 
 
+def _credentials_block_html(*, login_url: str, username: str, temp_password: str) -> str:
+    """Credentials card shown only for invitees whose account we just created."""
+    return f"""
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin:0 0 24px;">
+                <tr>
+                  <td style="padding:16px 18px;background:#f6f4ff;border:1px solid #e4ddff;border-radius:8px;">
+                    <p style="margin:0 0 10px;color:#1a1a1a;font-size:14px;font-weight:600;">Your sign-in details</p>
+                    <p style="margin:0 0 4px;color:#555;font-size:14px;">Email / username: <strong style="color:#1a1a1a;">{username}</strong></p>
+                    <p style="margin:0 0 12px;color:#555;font-size:14px;">Temporary password: <strong style="color:#735ae5;font-family:monospace;">{temp_password}</strong></p>
+                    <p style="margin:0;color:#999;font-size:12px;line-height:1.4;">
+                      Sign in at <a href="{login_url}" style="color:#735ae5;text-decoration:none;">{login_url}</a> with these details.
+                      You&#39;ll be asked to set a new password right away.
+                    </p>
+                  </td>
+                </tr>
+              </table>"""
+
+
 def _invite_html(
     *,
     org_name: str,
     inviter_name: str,
     role: str,
     accept_url: str,
+    credentials_block: str = "",
 ) -> str:
     """Full branded HTML email for an org invitation."""
     return f"""<!DOCTYPE html>
@@ -61,7 +80,7 @@ def _invite_html(
                 <strong style="color:#735ae5;">{org_name}</strong> as
                 <strong style="color:#1a1a1a;">{role}</strong>.
               </p>
-
+{credentials_block}
               <table cellpadding="0" cellspacing="0" role="presentation">
                 <tr>
                   <td style="border-radius:8px;background:#735ae5;" bgcolor="#735ae5">
@@ -74,8 +93,7 @@ def _invite_html(
               </table>
 
               <p style="margin:24px 0 0;color:#999;font-size:13px;line-height:1.4;">
-                This invitation expires in 7 days. If you don&#39;t have a SkillShare account yet,
-                you&#39;ll be able to create one when you accept.
+                This invitation expires in 7 days.
               </p>
             </td>
           </tr>
@@ -98,17 +116,19 @@ def _invite_html(
 </html>"""
 
 
-def _invite_text(*, org_name: str, inviter_name: str, role: str, accept_url: str) -> str:
+def _invite_text(
+    *, org_name: str, inviter_name: str, role: str, accept_url: str, credentials_text: str = ""
+) -> str:
     """Plain-text fallback for the invite email."""
     return (
         f"You've been invited to join {org_name}\n"
         f"\n"
         f"{inviter_name} invited you to join {org_name} as {role}.\n"
+        f"{credentials_text}"
         f"\n"
         f"Accept the invitation: {accept_url}\n"
         f"\n"
-        f"This invitation expires in 7 days. If you don't have a SkillShare\n"
-        f"account yet, you'll be able to create one when you accept.\n"
+        f"This invitation expires in 7 days.\n"
         f"\n"
         f"— SkillShare by Think41"
     )
@@ -122,9 +142,14 @@ def send_invite_email(
     inviter_name: str,
     role: str,
     invite_token: str,
+    username: str | None = None,
+    temp_password: str | None = None,
 ) -> bool:
     """Send an org invitation email via AWS SES SMTP. Best-effort: logs errors
-    and returns False on failure so the caller never blocks a response on email."""
+    and returns False on failure so the caller never blocks a response on email.
+
+    When ``username`` and ``temp_password`` are given (the invitee had no account
+    yet, so we provisioned one), the email also carries their sign-in details."""
     from .config import get_settings
 
     settings = get_settings()
@@ -134,10 +159,31 @@ def send_invite_email(
 
     frontend = settings.frontend_url.rstrip("/")
     accept_url = f"{frontend}/join/{org_slug}/{invite_token}"
+    login_url = f"{frontend}/login"
     subject = f"You've been invited to join {org_name} on SkillShare"
 
-    html = _invite_html(org_name=org_name, inviter_name=inviter_name, role=role, accept_url=accept_url)
-    text = _invite_text(org_name=org_name, inviter_name=inviter_name, role=role, accept_url=accept_url)
+    credentials_block = ""
+    credentials_text = ""
+    if username and temp_password:
+        credentials_block = _credentials_block_html(
+            login_url=login_url, username=to_email, temp_password=temp_password
+        )
+        credentials_text = (
+            f"\n"
+            f"Your sign-in details:\n"
+            f"  Email / username: {to_email}\n"
+            f"  Temporary password: {temp_password}\n"
+            f"Sign in at {login_url} — you'll be asked to set a new password right away.\n"
+        )
+
+    html = _invite_html(
+        org_name=org_name, inviter_name=inviter_name, role=role,
+        accept_url=accept_url, credentials_block=credentials_block,
+    )
+    text = _invite_text(
+        org_name=org_name, inviter_name=inviter_name, role=role,
+        accept_url=accept_url, credentials_text=credentials_text,
+    )
 
     try:
         msg = MIMEMultipart("alternative")

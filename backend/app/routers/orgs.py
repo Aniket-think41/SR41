@@ -27,7 +27,7 @@ from ..models import (
 )
 from ..permissions import org_by_slug, require_org_admin, require_org_member
 from ..schemas import FeaturePatch, InviteIn, LicenseIn, MemberRolePatch, OrgCreate, OrgPatch
-from ..security import get_current_user
+from ..security import generate_temp_password, get_current_user, hash_password
 from ..serialize import (
     activity_out,
     invitation_out,
@@ -167,19 +167,47 @@ def members(slug: str, user: User = Depends(get_current_user), db: Session = Dep
     return [org_member_out(m) for m in db.query(OrgMember).filter(OrgMember.org_id == org.id).all()]
 
 
+def _unique_username(db: Session, base: str) -> str:
+    candidate = re.sub(r"^-+|-+$", "", re.sub(r"[^a-z0-9]+", "-", base.lower())) or "user"
+    username = candidate
+    n = 1
+    while db.query(User.id).filter(User.username == username).first():
+        n += 1
+        username = f"{candidate}-{n}"
+    return username
+
+
 @router.post("/{slug}/invite")
 def invite(slug: str, body: InviteIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     org = org_by_slug(db, slug)
     require_org_admin(db, org, user)
+    email = body.email.lower()
     inv = Invitation(
         org_id=org.id,
-        email=body.email.lower(),
+        email=email,
         role=body.role if body.role in ("ADMIN", "MEMBER") else "MEMBER",
         token=secrets.token_urlsafe(24),
         expires_at=datetime.now(timezone.utc) + timedelta(days=7),
     )
     db.add(inv)
     db.flush()  # assign inv.id before logging
+
+    # If the invitee has no account yet, provision one with a temporary password
+    # so the email can carry sign-in details. They're forced to change it on
+    # first login (must_change_password). Existing users just get the accept link.
+    temp_password: str | None = None
+    if not db.query(User.id).filter(User.email == email).first():
+        temp_password = generate_temp_password()
+        new_user = User(
+            email=email,
+            password_hash=hash_password(temp_password),
+            username=_unique_username(db, email.split("@")[0]),
+            display_name=email.split("@")[0],
+            must_change_password=True,
+        )
+        db.add(new_user)
+        db.flush()
+
     # Best-effort email via SES. Never block the response on email delivery.
     send_invite_email(
         to_email=inv.email,
@@ -188,6 +216,8 @@ def invite(slug: str, body: InviteIn, user: User = Depends(get_current_user), db
         inviter_name=user.display_name,
         role=inv.role,
         invite_token=inv.token,
+        username=email if temp_password else None,
+        temp_password=temp_password,
     )
     log_activity(
         db, user_id=user.id, org_id=org.id, verb="invited",
@@ -232,7 +262,7 @@ def join(slug: str, token: str, user: User = Depends(get_current_user), db: Sess
             object_type="org", object_id=org.id, object_title=org.name,
         )
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "must_change_password": user.must_change_password}
 
 
 @router.delete("/{slug}/members/{user_id}")

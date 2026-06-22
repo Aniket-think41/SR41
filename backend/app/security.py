@@ -31,6 +31,16 @@ def hash_password(plain: str) -> str:
     return pwd.hash(plain)
 
 
+# Temp-password alphabet: unambiguous when typed by hand (no 0/O/1/I/l).
+_TEMP_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
+
+
+def generate_temp_password(length: int = 12) -> str:
+    """A readable one-time password emailed to invitees whose accounts are
+    auto-provisioned. They are forced to change it on first sign-in."""
+    return "".join(secrets.choice(_TEMP_ALPHABET) for _ in range(length))
+
+
 def verify_password(plain: str, hashed: str) -> bool:
     try:
         return pwd.verify(plain, hashed)

@@ -210,6 +210,79 @@ def test_admin_table_edit_and_delete():
     assert c.get("/api/admin/tables", headers=nob_h).status_code == 403
 
 
+def test_pod_member_cannot_delete_pod_but_admin_can():
+    """A plain pod MEMBER must not be able to delete the pod (regression: they
+    previously could). Pod owner / org admin still can."""
+    owner_h, _, _ = _user()
+    slug = _org(owner_h)
+    project_id = _project(owner_h, slug)
+    pod_id = _pod(owner_h, project_id)
+
+    # Add a second user as a plain pod MEMBER (cascades them into the org).
+    member_h, member_id, member_email = _user()
+    r = c.post(
+        f"/api/projects/{project_id}/pods/{pod_id}/members",
+        json={"email": member_email, "role": "MEMBER"},
+        headers=owner_h,
+    )
+    assert r.status_code < 400, r.text
+
+    # The member can still read/write the pod, but DELETE is forbidden.
+    assert c.delete(f"/api/projects/{project_id}/pods/{pod_id}", headers=member_h).status_code == 403
+
+    # The org admin / pod owner can delete it.
+    assert c.delete(f"/api/projects/{project_id}/pods/{pod_id}", headers=owner_h).status_code < 400
+
+
+def test_invite_unregistered_user_provisions_account_with_password_change_flag():
+    """Inviting an email with no account creates a user flagged must_change_password."""
+    from app.database import SessionLocal
+    from app.models import User
+
+    admin_h, _, _ = _user()
+    slug = _org(admin_h)
+    _n[0] += 1
+    invitee_email = f"invitee{_n[0]}_{os.getpid()}@example.com"
+
+    r = c.post(f"/api/orgs/{slug}/invite", json={"email": invitee_email, "role": "MEMBER"}, headers=admin_h)
+    assert r.status_code < 400, r.text
+
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.email == invitee_email).first()
+        assert u is not None, "invite should auto-provision an account"
+        assert u.must_change_password is True
+        assert u.password_hash, "a temp password should be set"
+    finally:
+        db.close()
+
+
+def test_change_password_flow():
+    """A normal user must supply the correct current password; doing so clears any
+    must_change_password flag and lets them log in with the new password."""
+    _n[0] += 1
+    email = f"pw{_n[0]}_{os.getpid()}@example.com"
+    r = c.post("/api/auth/signup", json={"email": email, "password": "oldpassword1", "display_name": "PW"})
+    h = {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+    # wrong current password is rejected
+    bad = c.post("/api/auth/change-password", json={"current_password": "nope", "new_password": "newpassword1"}, headers=h)
+    assert bad.status_code == 401, bad.text
+
+    # correct current password succeeds
+    ok = c.post(
+        "/api/auth/change-password",
+        json={"current_password": "oldpassword1", "new_password": "newpassword1"},
+        headers=h,
+    )
+    assert ok.status_code < 400, ok.text
+    assert ok.json()["must_change_password"] is False
+
+    # new password works, old one doesn't
+    assert c.post("/api/auth/login", json={"email": email, "password": "newpassword1"}).status_code < 400
+    assert c.post("/api/auth/login", json={"email": email, "password": "oldpassword1"}).status_code == 401
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:

@@ -22,8 +22,8 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_private_key: str = ""  # PEM, required when jwt_algorithm=RS256
     jwt_public_key: str = ""   # PEM, required when jwt_algorithm=RS256
-    access_token_expire_minutes: int = 15
-    refresh_token_expire_days: int = 7
+    access_token_expire_minutes: int = 7 * 24 * 60  # 7 days
+    refresh_token_expire_days: int = 15
 
     # --- Google OAuth (POST /api/auth/google) ---
     google_client_id: str = ""  # empty → endpoint returns a clear 403

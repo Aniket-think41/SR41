@@ -13,6 +13,7 @@ from ..permissions import (
     pod_or_404,
     project_or_404,
     require_pod_access,
+    require_pod_admin,
     require_pod_read,
     require_project_access,
     require_project_read,
@@ -80,7 +81,7 @@ def update_pod(
 @router.delete("/{pod_id}")
 def delete_pod(project_id: str, pod_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     pod = pod_or_404(db, pod_id)
-    require_pod_access(db, pod, user)
+    require_pod_admin(db, pod, user)
     doomed_ids = [
         r.id for r in db.query(Resource).filter(Resource.scope_type == "POD", Resource.scope_id == pod_id).all()
     ]

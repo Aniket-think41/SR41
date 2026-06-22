@@ -271,6 +271,60 @@ def get_resource(resource_id: str) -> dict:
 
 
 @mcp.tool()
+def use_resource(resource_id: str) -> dict:
+    """Use a skill or note RIGHT NOW without installing anything to disk.
+
+    Unlike install/import (which write files into ~/.claude/skills or an org),
+    this just pulls the full content and hands it back framed as ready-to-apply
+    instructions for THIS conversation. Call it when the user says things like
+    "use the pr-reviewer skill", "apply the brand-voice note", or "follow the
+    release-train skill" and you should adopt that guidance inline for the
+    current session — nothing is saved, nothing is copied to an org.
+
+    Returns the content plus an `apply` field: treat `apply` as authoritative
+    instructions/context for the rest of this conversation.
+    """
+    r = _request("GET", f"/api/resources/{resource_id}") if _token() else _request(
+        "GET", f"/api/public/resources/{resource_id}"
+    )
+    rtype = r.get("type")
+    title = r.get("title", "resource")
+    content = r.get("content_md") or ""
+    if rtype == "MCP":
+        # An MCP server isn't "applied" as text — surface how to connect to it.
+        cfg = r.get("config_json") or ""
+        url = r.get("server_url") or ""
+        apply = (
+            f"'{title}' is an MCP server, not a skill/note — it can't be applied as "
+            f"inline instructions. To use it, add it to your MCP client config"
+            + (f" (server URL: {url})" if url else "")
+            + (f":\n{cfg}" if cfg else ".")
+        )
+    else:
+        label = "skill" if rtype == "SKILL" else "note"
+        apply = (
+            f"Adopt the following {label} — \"{title}\" — as active guidance for the "
+            f"rest of this conversation. Apply it directly; it has NOT been installed "
+            f"to disk, so rely on the content below.\n\n"
+            f"--- BEGIN {label.upper()}: {title} ---\n"
+            f"{content}\n"
+            f"--- END {label.upper()}: {title} ---"
+        )
+    out = _summary(r)
+    out.update(
+        {
+            "apply": apply,
+            "content_md": content,
+            "server_url": r.get("server_url"),
+            "config_json": r.get("config_json"),
+            "attachments": r.get("attachments") or [],
+            "installed": False,
+        }
+    )
+    return out
+
+
+@mcp.tool()
 def get_publisher(username: str) -> dict:
     """Get a marketplace publisher's profile and their public resources."""
     p = _request("GET", f"/api/public/publishers/{username}")
