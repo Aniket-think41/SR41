@@ -15,6 +15,7 @@ Public marketplace tools work without signing in; org/pod tools require it.
 
 import json as _json
 import os
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -788,6 +789,26 @@ def dismiss_artifact(fingerprint: str, kind: str = "skill", source: str = "", na
 
 
 def main() -> None:
+    # Cheap, dependency-free arg handling so a frozen binary can be smoke-tested
+    # (the stdio server itself blocks on stdin and has no argparse surface).
+    if len(sys.argv) > 1:
+        flag = sys.argv[1]
+        if flag in ("--version", "-V"):
+            try:
+                from importlib.metadata import version
+
+                print(f"skillshare-mcp {version('skillshare-mcp')}")
+            except Exception:
+                print("skillshare-mcp (dev)")
+            return
+        if flag in ("--help", "-h"):
+            print(
+                "skillshare-mcp — MCP server for the SkillShare registry.\n"
+                "Run with no arguments to start the stdio server (used by your MCP client).\n"
+                "  --version   print the version and exit\n"
+                "  --help      show this message"
+            )
+            return
     mcp.run()  # stdio transport
 
 
