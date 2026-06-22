@@ -3,7 +3,7 @@
  * Screens never call fetch directly; they call these via React Query.
  */
 
-import { request, uploadAvatar, uploadFile, uploadOrgLogo } from "./http";
+import { request, requestList, uploadAvatar, uploadFile, uploadOrgLogo } from "./http";
 import type {
   Activity,
   Attachment,
@@ -87,11 +87,28 @@ export interface ResourceQuery {
   tag?: string;
   sort?: "relevance" | "updated" | "newest" | "stars" | "installs";
   scope?: "all" | "pod" | "project" | "org";
+  /** marketplace: filter by publisher (org name or author display name) */
+  publisher?: string;
+  /** marketplace pagination */
+  limit?: number;
+  offset?: number;
 }
 
-const qs = (params: Record<string, string | undefined>) => {
+/** A page of resources plus the server's total count (from X-Total-Count),
+ *  so the marketplace can fetch one page at a time instead of everything. */
+export interface ResourcePage {
+  items: Resource[];
+  total: number;
+}
+
+export interface MarketplaceFacets {
+  tags: [string, number][];
+  publishers: string[];
+}
+
+const qs = (params: Record<string, string | number | undefined>) => {
   const s = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) if (v) s.set(k, v);
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== "") s.set(k, String(v));
   const str = s.toString();
   return str ? `?${str}` : "";
 };
@@ -249,6 +266,15 @@ export const api = {
   /* ---- public marketplace ---- */
   publicResources: (query: ResourceQuery = {}) =>
     request<Resource[]>("GET", `/api/public/resources${qs(query as Record<string, string>)}`),
+  /** One page of marketplace resources + the server-reported total count. */
+  publicResourcesPage: async (query: ResourceQuery = {}): Promise<ResourcePage> => {
+    const { items, total } = await requestList<Resource>(
+      `/api/public/resources${qs(query as Record<string, string | number | undefined>)}`
+    );
+    return { items, total };
+  },
+  /** Lightweight filter facets (top tags + publishers) for the sidebar. */
+  publicFacets: () => request<MarketplaceFacets>("GET", "/api/public/facets"),
   publicResource: (id: string) => request<Resource>("GET", `/api/public/resources/${id}`),
   publisher: (username: string) =>
     request<PublisherProfile>("GET", `/api/public/publishers/${username}`),

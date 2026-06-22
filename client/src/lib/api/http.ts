@@ -161,3 +161,40 @@ export async function request<T>(
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
+
+/**
+ * GET a list endpoint and surface the server's X-Total-Count header alongside
+ * the rows, so callers can paginate (fetch one page) without downloading the
+ * whole collection to learn its size. In mock mode there's no header, so the
+ * total falls back to the returned array length.
+ */
+export async function requestList<T>(path: string): Promise<{ items: T[]; total: number }> {
+  if (USING_MOCK) {
+    const { handle } = await import("../mock/handlers");
+    const items = (await handle("GET", path, undefined)) as T[];
+    return { items, total: Array.isArray(items) ? items.length : 0 };
+  }
+
+  const res = await fetch(`${API_URL}${path}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
+    },
+    credentials: "include",
+  });
+
+  if (!res.ok) {
+    let err: ApiError;
+    try {
+      err = (await res.json()) as ApiError;
+    } catch {
+      err = { error: { code: "INTERNAL_ERROR", message: res.statusText, status: res.status } };
+    }
+    throw err;
+  }
+  const items = (await res.json()) as T[];
+  const header = res.headers.get("X-Total-Count");
+  const total = header !== null ? Number(header) : items.length;
+  return { items, total };
+}

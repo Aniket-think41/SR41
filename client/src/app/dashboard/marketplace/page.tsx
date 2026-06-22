@@ -6,7 +6,7 @@
  * with the public site.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, Search, Store } from "lucide-react";
@@ -51,50 +51,42 @@ function MarketplaceBrowser() {
   const [sort, setSort] = useState<ResourceQuery["sort"]>("relevance");
   const [q, setQ] = useState("");
 
-  const { data: all } = useQuery({
-    queryKey: ["public", "resources", "all"],
-    queryFn: () => api.publicResources({ sort: "stars" }),
-  });
+  const [page, setPage] = useState(1);
+  // Changing any filter or the search term returns to the first page.
+  const resetPage = () => setPage(1);
 
   // "Relevance" only ranks when there's a query; with no query, lead with the
   // most-starred resources rather than an arbitrary order.
   const effectiveSort = sort === "relevance" && !q ? "stars" : sort;
-  const params: ResourceQuery = { q: q || undefined, type: type === "ALL" ? undefined : type, tag: tag ?? undefined, sort: effectiveSort };
-  const { data: list, isLoading } = useQuery({
-    queryKey: ["public", "resources", params],
-    queryFn: () => api.publicResources(params),
+  const params: ResourceQuery = {
+    q: q || undefined,
+    type: type === "ALL" ? undefined : type,
+    tag: tag ?? undefined,
+    sort: effectiveSort,
+    publisher: publisher ?? undefined,
+    limit: PAGE_SIZE,
+    offset: (page - 1) * PAGE_SIZE,
+  };
+  // One page at a time: the server filters, ranks, paginates, and reports the
+  // total via X-Total-Count — so we never download the whole catalog.
+  const { data: pageData, isLoading } = useQuery({
+    queryKey: ["public", "resources", "page", params],
+    queryFn: () => api.publicResourcesPage(params),
     placeholderData: keepPreviousData,
   });
-
-  const filtered = useMemo(
-    () => (list ?? []).filter((r) => !publisher || attributionOf(r).name === publisher),
-    [list, publisher]
-  );
-
-  // Client-side pagination — the API returns the full ranked list, so we page
-  // over it here. Reset to page 1 whenever the result set changes.
-  const [page, setPage] = useState(1);
-  useEffect(() => setPage(1), [q, type, tag, publisher, sort]);
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const items = pageData?.items ?? [];
+  const total = pageData?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
-  const paged = useMemo(
-    () => filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
-    [filtered, currentPage]
-  );
 
-  const allTags = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const r of all ?? []) for (const t of r.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
-  }, [all]);
-
-  // Publishers are organizations (for org-scoped resources) or individual
-  // authors, deduped by display name.
-  const publishers = useMemo(() => {
-    const seen = new Set<string>();
-    for (const r of all ?? []) seen.add(attributionOf(r).name);
-    return [...seen].sort((a, b) => a.localeCompare(b));
-  }, [all]);
+  // Filter facets (top tags + publishers) come from a dedicated lightweight
+  // endpoint, so the sidebar doesn't pull every resource just to build itself.
+  const { data: facets } = useQuery({
+    queryKey: ["public", "facets"],
+    queryFn: () => api.publicFacets(),
+  });
+  const allTags = facets?.tags ?? [];
+  const publishers = facets?.publishers ?? [];
 
   const starMut = useMutation({
     mutationFn: (r: Resource) => (r.starred_by_me ? api.unstar(r.id) : api.star(r.id)),
@@ -119,7 +111,10 @@ function MarketplaceBrowser() {
           <Search className="h-3.5 w-3.5 text-muted" />
           <input
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(e) => {
+              setQ(e.target.value);
+              resetPage();
+            }}
             placeholder="Search the marketplace…"
             className="w-56 bg-transparent text-sm outline-none placeholder:text-muted"
           />
@@ -133,7 +128,7 @@ function MarketplaceBrowser() {
             <p className="mb-2 text-[0.65rem] font-bold uppercase tracking-wider text-muted">Type</p>
             <div className="flex flex-wrap gap-1.5 lg:flex-col lg:items-start">
               {(["ALL", "SKILL", "MCP", "NOTE"] as const).map((t) => (
-                <button key={t} onClick={() => setType(t)} className={`pill !py-1.5 text-xs ${type === t ? "pill-active" : ""}`}>
+                <button key={t} onClick={() => { setType(t); resetPage(); }} className={`pill !py-1.5 text-xs ${type === t ? "pill-active" : ""}`}>
                   {t === "ALL" ? "All types" : `${TYPE_META[t].glyph} ${TYPE_META[t].label}s`}
                 </button>
               ))}
@@ -146,7 +141,7 @@ function MarketplaceBrowser() {
               {allTags.map(([t, n]) => (
                 <button
                   key={t}
-                  onClick={() => setTag(tag === t ? null : t)}
+                  onClick={() => { setTag(tag === t ? null : t); resetPage(); }}
                   className={`tag transition ${tag === t ? "!bg-primary !text-white" : "hover:bg-primary-50 hover:text-primary"}`}
                 >
                   #{t} <span className="opacity-60">{n}</span>
@@ -157,7 +152,7 @@ function MarketplaceBrowser() {
 
           <div>
             <p className="mb-2 text-[0.65rem] font-bold uppercase tracking-wider text-muted">Publisher</p>
-            <select value={publisher ?? ""} onChange={(e) => setPublisher(e.target.value || null)} className="field !py-2 text-sm">
+            <select value={publisher ?? ""} onChange={(e) => { setPublisher(e.target.value || null); resetPage(); }} className="field !py-2 text-sm">
               <option value="">All publishers</option>
               {publishers.map((name) => (
                 <option key={name} value={name}>{name}</option>
@@ -167,7 +162,7 @@ function MarketplaceBrowser() {
 
           <div>
             <p className="mb-2 text-[0.65rem] font-bold uppercase tracking-wider text-muted">Sort</p>
-            <select value={sort} onChange={(e) => setSort(e.target.value as ResourceQuery["sort"])} className="field !py-2 text-sm">
+            <select value={sort} onChange={(e) => { setSort(e.target.value as ResourceQuery["sort"]); resetPage(); }} className="field !py-2 text-sm">
               {SORTS.map((s) => (
                 <option key={s.key} value={s.key}>{s.label}</option>
               ))}
@@ -180,12 +175,12 @@ function MarketplaceBrowser() {
           <p className="mb-3 text-sm font-medium text-muted">
             {isLoading
               ? "Loading…"
-              : filtered.length === 0
+              : total === 0
                 ? "0 public resources"
-                : `Showing ${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, filtered.length)} of ${filtered.length} public ${filtered.length === 1 ? "resource" : "resources"}`}
+                : `Showing ${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, total)} of ${total} public ${total === 1 ? "resource" : "resources"}`}
           </p>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {paged.map((r) => (
+            {items.map((r) => (
               <ResourceCard
                 key={r.id}
                 resource={{ ...r, scope_label: undefined }}
@@ -195,7 +190,7 @@ function MarketplaceBrowser() {
               />
             ))}
           </div>
-          {!isLoading && filtered.length === 0 && (
+          {!isLoading && total === 0 && (
             <div className="rounded-2xl border border-dashed border-line bg-white/60 p-16 text-center">
               <p className="font-display text-xl font-semibold">Nothing matches.</p>
               <p className="mt-1 text-sm text-body">Try a different filter or search term.</p>
