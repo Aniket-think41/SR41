@@ -15,8 +15,21 @@ import { ArrowLeft, ArrowRight, Github, Loader2, Upload, X } from "lucide-react"
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/api/http";
 import { qk, useCurrentOrg, useInvalidateResources, useSession, useTerms } from "@/lib/hooks";
-import type { Attachment, Resource, ResourceType, ScopeType } from "@/lib/types";
+import type { Attachment, Resource, ResourceType, ScopeType, Visibility } from "@/lib/types";
 import { TYPE_META, SCOPE_META } from "@/lib/utils";
+
+// Audiences selectable per home scope (narrowest first = the default).
+const VIS_BY_SCOPE: Record<string, Visibility[]> = {
+  POD: ["POD", "PROJECT", "ORG"],
+  PROJECT: ["PROJECT", "ORG"],
+  ORG: ["ORG"],
+  PUBLIC: [],
+};
+const VIS_LABEL: Record<Visibility, string> = {
+  POD: "Only this pod's members",
+  PROJECT: "Everyone in this project",
+  ORG: "Everyone in the org",
+};
 import { MarkdownEditor } from "./MarkdownEditor";
 import { AttachmentsEditor } from "./AttachmentsEditor";
 import { GithubImport } from "./GithubImport";
@@ -98,6 +111,13 @@ export function ResourceForm({
     ? { scope_type: resource.scope_type, scope_id: resource.scope_id }
     : defaultScope ?? scopeOptions[0];
   const [scope, setScope] = useState<{ scope_type: ScopeType; scope_id: string | null } | undefined>(initialScope);
+  // Audience for the resource; defaults to the narrowest allowed by the scope.
+  const [visibility, setVisibility] = useState<Visibility>(
+    resource?.visibility ?? (VIS_BY_SCOPE[initialScope?.scope_type ?? "ORG"]?.[0] ?? "ORG")
+  );
+  const visOptions = VIS_BY_SCOPE[scope?.scope_type ?? "ORG"] ?? [];
+  // Keep visibility valid when the scope changes (render-time reconcile).
+  if (visOptions.length && !visOptions.includes(visibility)) setVisibility(visOptions[0]);
 
   // If opened from a pod, that pod is the first (default) option.
   const allScopeOptions = useMemo<ScopeOption[]>(() => {
@@ -148,6 +168,8 @@ export function ResourceForm({
         file_url: fileUrl,
         scope_type: scope?.scope_type ?? "ORG",
         scope_id: scope?.scope_id ?? null,
+        // PUBLIC scope has no audience choice (it's public); omit there.
+        ...(scope?.scope_type !== "PUBLIC" ? { visibility } : {}),
       };
       return editing ? api.updateResource(resource.id, body) : api.createResource(body);
     },
@@ -319,6 +341,27 @@ export function ResourceForm({
                 </select>
               </div>
             </div>
+
+            {/* Audience — who can see it. Hidden for PUBLIC (marketplace) and
+                when there's only one option (org-scoped is always org-wide). */}
+            {visOptions.length > 1 && (
+              <div>
+                <label className="field-label" htmlFor="rf-visibility">Who can see this?</label>
+                <select
+                  id="rf-visibility"
+                  className="field"
+                  value={visibility}
+                  onChange={(e) => setVisibility(e.target.value as Visibility)}
+                >
+                  {visOptions.map((v) => (
+                    <option key={v} value={v}>{VIS_LABEL[v]}</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-muted">
+                  Default is the narrowest — widen it to share with the whole {scope?.scope_type === "POD" ? `${terms.project.toLowerCase()} or org` : "org"}.
+                </p>
+              </div>
+            )}
 
             <div>
               <label className="field-label" htmlFor="rf-tags">Tags</label>

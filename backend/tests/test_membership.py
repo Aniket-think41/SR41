@@ -354,6 +354,81 @@ def test_publisher_can_add_public_resource_to_marketplace():
     assert any(x["id"] == body["id"] for x in market)
 
 
+def test_pod_resource_visibility_default_and_elevation():
+    """A pod resource is pod-members-only by default; a sibling-pod member can't
+    see it until it's elevated to PROJECT (or ORG) visibility or moved up."""
+    owner_h, _, _ = _user()
+    slug = _org(owner_h)
+    p1 = _project(owner_h, slug, "P1")
+    pod_a = _pod(owner_h, p1, "A")
+    pod_b = _pod(owner_h, p1, "B")
+
+    # bob is in pod B only (cascades: project + org member, but NOT pod A).
+    bob_h, bob_id, bob_email = _user()
+    c.post(f"/api/pods/{pod_b}/members", json={"email": bob_email, "role": "MEMBER"}, headers=owner_h)
+
+    # owner adds a POD-default resource in pod A
+    r = c.post("/api/resources", json={"type": "NOTE", "title": "Secret", "scope_type": "POD", "scope_id": pod_a}, headers=owner_h)
+    assert r.status_code < 400, r.text
+    rid = r.json()["id"]
+    assert r.json()["visibility"] == "POD"
+
+    # bob can't read it, and it isn't in his available feed or the project view
+    assert c.get(f"/api/resources/{rid}", headers=bob_h).status_code == 403
+    assert all(x["id"] != rid for x in c.get("/api/auth/me/resources", headers=bob_h).json())
+    assert all(x["id"] != rid for x in c.get(f"/api/projects/{p1}/resources", headers=bob_h).json())
+
+    # elevate to PROJECT → now every project member (bob) can see it
+    up = c.patch(f"/api/resources/{rid}", json={"visibility": "PROJECT"}, headers=owner_h)
+    assert up.status_code < 400 and up.json()["visibility"] == "PROJECT"
+    assert c.get(f"/api/resources/{rid}", headers=bob_h).status_code == 200
+    assert any(x["id"] == rid for x in c.get(f"/api/projects/{p1}/resources", headers=bob_h).json())
+    assert any(x["id"] == rid for x in c.get("/api/auth/me/resources", headers=bob_h).json())
+
+
+def test_project_visibility_hidden_from_other_project_member():
+    """A PROJECT-default resource is invisible to an org member who isn't in that
+    project; elevating to ORG makes it visible org-wide."""
+    owner_h, _, _ = _user()
+    slug = _org(owner_h)
+    p1 = _project(owner_h, slug, "P1")
+    p2 = _project(owner_h, slug, "P2")
+
+    # carol is an org member via P2 only (not a member of P1)
+    carol_h, _, carol_email = _user()
+    c.post(f"/api/projects/{p2}/members", json={"email": carol_email, "role": "MEMBER"}, headers=owner_h)
+
+    r = c.post("/api/resources", json={"type": "NOTE", "title": "P1 only", "scope_type": "PROJECT", "scope_id": p1}, headers=owner_h)
+    rid = r.json()["id"]
+    assert r.json()["visibility"] == "PROJECT"
+    assert c.get(f"/api/resources/{rid}", headers=carol_h).status_code == 403
+
+    # elevate to ORG → any org member (carol) can read it
+    c.patch(f"/api/resources/{rid}", json={"visibility": "ORG"}, headers=owner_h)
+    assert c.get(f"/api/resources/{rid}", headers=carol_h).status_code == 200
+    assert any(x["id"] == rid for x in c.get(f"/api/orgs/{slug}/resources", headers=carol_h).json())
+
+
+def test_move_resource_between_scopes_resets_visibility():
+    """Moving a pod resource up to project scope re-homes it and defaults its
+    audience to the new scope; a project member then sees it."""
+    owner_h, _, _ = _user()
+    slug = _org(owner_h)
+    p1 = _project(owner_h, slug, "P1")
+    pod_a = _pod(owner_h, p1, "A")
+    pod_b = _pod(owner_h, p1, "B")
+    bob_h, _, bob_email = _user()
+    c.post(f"/api/pods/{pod_b}/members", json={"email": bob_email, "role": "MEMBER"}, headers=owner_h)
+
+    rid = c.post("/api/resources", json={"type": "NOTE", "title": "Movable", "scope_type": "POD", "scope_id": pod_a}, headers=owner_h).json()["id"]
+    assert c.get(f"/api/resources/{rid}", headers=bob_h).status_code == 403  # pod-private
+
+    mv = c.post(f"/api/resources/{rid}/move", json={"scope_type": "PROJECT", "scope_id": p1}, headers=owner_h)
+    assert mv.status_code < 400, mv.text
+    assert mv.json()["scope_type"] == "PROJECT" and mv.json()["visibility"] == "PROJECT"
+    assert c.get(f"/api/resources/{rid}", headers=bob_h).status_code == 200  # now project-visible
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:

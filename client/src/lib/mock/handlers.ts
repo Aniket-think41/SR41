@@ -20,6 +20,7 @@ import type {
   Resource,
   ScopeType,
   User,
+  Visibility,
 } from "../types";
 
 type Json = Record<string, unknown>;
@@ -175,6 +176,20 @@ function ensurePodMember(db: Db, podId: string, userId: string, role = "MEMBER")
   return m;
 }
 const withUser = (m: { user_id: string }, db: Db) => ({ ...m, user: db.users.find((u) => u.id === m.user_id) });
+
+// Resource audience (visibility) — mirrors backend/app/visibility.py.
+const VIS_ALLOWED: Record<string, string[]> = {
+  POD: ["POD", "PROJECT", "ORG"],
+  PROJECT: ["PROJECT", "ORG"],
+  ORG: ["ORG"],
+  PUBLIC: ["ORG"],
+};
+const defaultVisibility = (scope: string): Visibility =>
+  (({ POD: "POD", PROJECT: "PROJECT", ORG: "ORG" } as Record<string, Visibility>)[scope] ?? "ORG");
+const normVisibility = (scope: string, vis?: string): Visibility => {
+  const v = String(vis ?? "").toUpperCase();
+  return (VIS_ALLOWED[scope] ?? ["ORG"]).includes(v) ? (v as Visibility) : defaultVisibility(scope);
+};
 
 /* ---------------- route table ---------------- */
 
@@ -828,6 +843,7 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
       attachments: (body.attachments as Resource["attachments"]) ?? [],
       scope_type: scopeType,
       scope_id: isPublic ? null : ((body.scope_id as string) ?? null),
+      visibility: normVisibility(scopeType, body.visibility as string | undefined),
       author_id: me.id,
       is_public: isPublic,
       stars_count: 0,
@@ -865,8 +881,27 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
       file_url: body.file_url !== undefined ? body.file_url : r.file_url,
       updated_at: now(),
     });
+    // Re-validate audience against the (possibly new) scope.
+    r.visibility = normVisibility(r.scope_type, (body.visibility as string | undefined) ?? r.visibility);
     const orgId = scopeOrgId(db, r);
     if (orgId) logActivity(db, { user_id: me.id, org_id: orgId, verb: "updated", object_type: "resource", object_id: r.id, object_title: r.title, meta: `v${r.version}` });
+    saveDb();
+    return enrich(r, db);
+  }],
+
+  ["POST", "/api/resources/:id/move", (p, body, _q, db) => {
+    const me = currentUser(db);
+    const r = db.resources.find((x) => x.id === p.id);
+    if (!r) throw notFound("Resource");
+    const scopeType = String(body.scope_type ?? "");
+    if (!["ORG", "PROJECT", "POD"].includes(scopeType)) throw new HttpError(422, "VALIDATION_ERROR", "scope_type must be ORG, PROJECT, or POD");
+    if (!body.scope_id) throw new HttpError(422, "VALIDATION_ERROR", "scope_id is required");
+    r.scope_type = scopeType as ScopeType;
+    r.scope_id = String(body.scope_id);
+    r.visibility = normVisibility(scopeType, body.visibility as string | undefined);
+    r.updated_at = now();
+    const orgId = scopeOrgId(db, r);
+    if (orgId) logActivity(db, { user_id: me.id, org_id: orgId, verb: "updated", object_type: "resource", object_id: r.id, object_title: r.title, meta: "moved" });
     saveDb();
     return enrich(r, db);
   }],

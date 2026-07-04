@@ -9,11 +9,11 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
-  X, Star, Pin, PinOff, Pencil, Trash2, Globe, Copy, Download, Check, ExternalLink,
+  X, Star, Pin, PinOff, Pencil, Trash2, Globe, Copy, Download, Check, ExternalLink, Eye,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/api/http";
-import { qk, useFeature, useInvalidateResources, useSession } from "@/lib/hooks";
+import { qk, useCurrentOrg, useFeature, useInvalidateResources, useSession } from "@/lib/hooks";
 import { useUi } from "@/lib/store";
 import type { Resource } from "@/lib/types";
 import { fmt, longDate, SCOPE_META } from "@/lib/utils";
@@ -23,6 +23,12 @@ import { Avatar } from "./Avatar";
 import { ScopeBadge, TypeBadge } from "./badges";
 import { useToast } from "./Toast";
 import { ResourceForm } from "./ResourceForm";
+
+const VISIBILITY_LABEL: Record<string, string> = {
+  POD: "Pod only",
+  PROJECT: "Project",
+  ORG: "Org-wide",
+};
 
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
@@ -94,6 +100,11 @@ function DetailView({ resource: initial, onClose }: { resource: Resource; onClos
           <div className="flex flex-wrap items-center gap-2">
             <TypeBadge type={r.type} />
             {r.scope_label && <ScopeBadge scope={r.scope_label} />}
+            {!r.is_public && r.visibility && (
+              <span className="tag" title="Who can see this resource">
+                <Eye className="h-3 w-3" /> {VISIBILITY_LABEL[r.visibility] ?? r.visibility}
+              </span>
+            )}
             {r.is_public && (
               <span className={`tag ${SCOPE_META.PUBLIC.chip}`}>
                 <Globe className="h-3 w-3" /> Marketplace
@@ -178,6 +189,9 @@ function DetailView({ resource: initial, onClose }: { resource: Resource; onClos
         <AttachmentsView items={r.attachments} />
       </div>
 
+      {/* Audience & location (author only, not for marketplace resources) */}
+      {canEdit && !r.is_public && r.scope_type !== "PUBLIC" && <VisibilityMoveControl resource={r} />}
+
       {/* Action bar */}
       <div className="flex flex-wrap items-center gap-2 border-t border-line bg-surface p-4">
         <button
@@ -237,6 +251,119 @@ function DetailView({ resource: initial, onClose }: { resource: Resource; onClos
         )}
       </div>
     </>
+  );
+}
+
+const VIS_BY_SCOPE: Record<string, ("POD" | "PROJECT" | "ORG")[]> = {
+  POD: ["POD", "PROJECT", "ORG"],
+  PROJECT: ["PROJECT", "ORG"],
+  ORG: ["ORG"],
+};
+
+/** Author control to change a resource's audience (visibility) and move it
+ *  between pod / project / org. Cascading pickers fetch projects then pods. */
+function VisibilityMoveControl({ resource: r }: { resource: Resource }) {
+  const { org } = useCurrentOrg();
+  const invalidate = useInvalidateResources();
+  const { toast } = useToast();
+  const [moving, setMoving] = useState(false);
+  const [destType, setDestType] = useState<"ORG" | "PROJECT" | "POD">("PROJECT");
+  const [destProject, setDestProject] = useState("");
+  const [destPod, setDestPod] = useState("");
+
+  const { data: projects } = useQuery({
+    queryKey: qk.projects(org?.slug ?? ""),
+    queryFn: () => api.projects(org!.slug),
+    enabled: !!org && moving,
+  });
+  const { data: pods } = useQuery({
+    queryKey: qk.pods(destProject),
+    queryFn: () => api.pods(destProject),
+    enabled: !!destProject && destType === "POD",
+  });
+
+  const visMut = useMutation({
+    mutationFn: (visibility: string) => api.updateResource(r.id, { visibility } as Partial<Resource>),
+    onSuccess: async () => {
+      await invalidate();
+      toast("Audience updated");
+    },
+    onError: (e) => toast(errorMessage(e), "error"),
+  });
+
+  const moveMut = useMutation({
+    mutationFn: () => {
+      const scope_id = destType === "ORG" ? org!.id : destType === "PROJECT" ? destProject : destPod;
+      return api.moveResource(r.id, { scope_type: destType, scope_id });
+    },
+    onSuccess: async () => {
+      await invalidate();
+      toast("Resource moved");
+      setMoving(false);
+    },
+    onError: (e) => toast(errorMessage(e), "error"),
+  });
+
+  const visOptions = VIS_BY_SCOPE[r.scope_type] ?? [];
+  const canMove =
+    destType === "ORG" || (destType === "PROJECT" && destProject) || (destType === "POD" && destPod);
+
+  return (
+    <div className="border-t border-line bg-surface/60 p-4">
+      <div className="flex flex-wrap items-center gap-3">
+        {visOptions.length > 1 && (
+          <label className="flex items-center gap-2 text-xs font-semibold text-muted">
+            <Eye className="h-3.5 w-3.5" /> Who can see this
+            <select
+              value={r.visibility ?? r.scope_type}
+              onChange={(e) => visMut.mutate(e.target.value)}
+              disabled={visMut.isPending}
+              className="rounded-full border border-line bg-white px-3 py-1 text-xs font-bold text-ink"
+            >
+              {visOptions.map((v) => (
+                <option key={v} value={v}>{VISIBILITY_LABEL[v]}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        <button onClick={() => setMoving((m) => !m)} className="btn btn-secondary btn-sm ml-auto">
+          <ExternalLink className="h-3.5 w-3.5" /> Move
+        </button>
+      </div>
+
+      {moving && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <select
+            value={destType}
+            onChange={(e) => { setDestType(e.target.value as "ORG" | "PROJECT" | "POD"); setDestPod(""); }}
+            className="field !w-auto !py-1.5 text-sm"
+          >
+            <option value="ORG">Org</option>
+            <option value="PROJECT">Project</option>
+            <option value="POD">Pod</option>
+          </select>
+          {destType !== "ORG" && (
+            <select value={destProject} onChange={(e) => { setDestProject(e.target.value); setDestPod(""); }} className="field !w-auto !py-1.5 text-sm">
+              <option value="">Choose project…</option>
+              {(projects ?? []).map((p) => (
+                <option key={p.id} value={p.id}>{p.name.split("—")[0].trim()}</option>
+              ))}
+            </select>
+          )}
+          {destType === "POD" && destProject && (
+            <select value={destPod} onChange={(e) => setDestPod(e.target.value)} className="field !w-auto !py-1.5 text-sm">
+              <option value="">Choose pod…</option>
+              {(pods ?? []).map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          )}
+          <button onClick={() => moveMut.mutate()} disabled={!canMove || moveMut.isPending} className="btn btn-primary btn-sm">
+            Move here
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

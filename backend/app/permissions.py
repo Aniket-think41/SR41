@@ -323,20 +323,14 @@ def scope_org(db: Session, resource: Resource) -> Organization | None:
 
 
 def require_resource_read(db: Session, resource: Resource, user: User) -> None:
-    if resource.is_public or resource.scope_type == "PUBLIC":
-        return
-    if resource.scope_type == "ORG":
-        org = db.get(Organization, resource.scope_id)
-        if org:
-            require_org_member(db, org, user)
-        return
-    if resource.scope_type == "PROJECT":
-        project = project_or_404(db, resource.scope_id)
-        require_project_read(db, project, user)
-        return
-    if resource.scope_type == "POD":
-        pod = pod_or_404(db, resource.scope_id)
-        require_pod_read(db, pod, user)
+    """Read gate — now audience-based (Resource.visibility), not just scope
+    membership. A pod resource is pod-members-only by default; elevating it to
+    PROJECT/ORG widens who can read it. See app/visibility.py."""
+    # Local import avoids a permissions ⇄ visibility import cycle.
+    from .visibility import resource_visible
+
+    if not resource_visible(db, resource, user):
+        raise forbidden("You don't have access to this resource")
 
 
 def require_resource_write(db: Session, resource: Resource, user: User) -> None:

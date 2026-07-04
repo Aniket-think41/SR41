@@ -339,19 +339,27 @@ def my_resources(user: User = Depends(get_current_user), db: Session = Depends(g
     """Every resource visible to me across the scopes I belong to (org/project/
     pod), newest first. The CLI subtracts what's already installed locally to get
     the "available to install" set behind `skillshare available` and the panel."""
+    # Candidate = everything homed anywhere in the orgs I belong to; then keep
+    # only what my membership + the resource's audience (visibility) permit. This
+    # correctly surfaces sibling-pod resources that were elevated to PROJECT/ORG,
+    # and hides pod-private resources from pods I'm not in.
+    from ..visibility import filter_visible
+
     org_ids = [r[0] for r in db.query(OrgMember.org_id).filter(OrgMember.user_id == user.id).all()]
-    project_ids = [r[0] for r in db.query(ProjectMember.project_id).filter(ProjectMember.user_id == user.id).all()]
-    pod_ids = [r[0] for r in db.query(PodMember.pod_id).filter(PodMember.user_id == user.id).all()]
-    clauses = []
-    if org_ids:
-        clauses.append(and_(Resource.scope_type == "ORG", Resource.scope_id.in_(org_ids)))
+    if not org_ids:
+        return []
+    project_ids = [r[0] for r in db.query(Project.id).filter(Project.org_id.in_(org_ids)).all()]
+    pod_ids = (
+        [r[0] for r in db.query(Pod.id).filter(Pod.project_id.in_(project_ids)).all()]
+        if project_ids else []
+    )
+    clauses = [and_(Resource.scope_type == "ORG", Resource.scope_id.in_(org_ids))]
     if project_ids:
         clauses.append(and_(Resource.scope_type == "PROJECT", Resource.scope_id.in_(project_ids)))
     if pod_ids:
         clauses.append(and_(Resource.scope_type == "POD", Resource.scope_id.in_(pod_ids)))
-    if not clauses:
-        return []
     rows = db.query(Resource).filter(or_(*clauses)).order_by(Resource.updated_at.desc()).all()
+    rows = filter_visible(db, rows, user)
     return [resource_out(db, r, user) for r in rows]
 
 

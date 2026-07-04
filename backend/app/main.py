@@ -62,6 +62,11 @@ def _ensure_additive_columns() -> None:
     # (table, column, DDL type with default) — keep in sync with models.py.
     additive = [
         ("users", "must_change_password", "BOOLEAN NOT NULL DEFAULT FALSE"),
+        # Nullable, NO default: legacy rows stay NULL, which the read logic
+        # interprets as the home-scope default (pod resources become pod-private,
+        # project resources project-private) — matching the scoped-visibility
+        # intent rather than leaving everything org-wide.
+        ("resources", "visibility", "VARCHAR"),
     ]
     try:
         inspector = inspect(engine)

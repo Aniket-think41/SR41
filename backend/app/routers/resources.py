@@ -43,11 +43,13 @@ from ..schemas import (
     GithubPreviewIn,
     ImportIn,
     ResourceCreate,
+    ResourceMove,
     ResourcePatch,
     UploadIn,
 )
 from ..security import get_current_user
 from ..serialize import log_activity, resource_out, search_rank
+from ..visibility import filter_visible, normalize_visibility
 
 router = APIRouter(prefix="/api", tags=["resources"])
 settings = get_settings()
@@ -82,14 +84,21 @@ def _log_resource(
     notify_scope: str | None = None,
 ) -> None:
     org = scope_org(db, r)
-    if org:
-        # Created-in-a-pod notifies pod members; publish notifies the whole org.
-        scope_type = notify_scope or r.scope_type
-        log_activity(
-            db, user_id=user.id, org_id=org.id, verb=verb,
-            object_type="resource", object_id=r.id, object_title=r.title, meta=meta,
-            scope_type=scope_type, scope_id=r.scope_id,
-        )
+    if not org:
+        return
+    # Notify the resource's AUDIENCE (its visibility), not just its home scope —
+    # a pod resource elevated to PROJECT notifies project members, ORG notifies
+    # the whole org. Publish overrides to ORG via notify_scope.
+    from ..visibility import home_ids, normalize_visibility
+
+    audience = notify_scope or normalize_visibility(r.scope_type, r.visibility)
+    org_id, project_id, pod_id = home_ids(db, r)
+    audience_id = {"POD": pod_id, "PROJECT": project_id, "ORG": org.id}.get(audience, org.id)
+    log_activity(
+        db, user_id=user.id, org_id=org.id, verb=verb,
+        object_type="resource", object_id=r.id, object_title=r.title, meta=meta,
+        scope_type=audience, scope_id=audience_id,
+    )
 
 
 @router.post("/resources")
@@ -117,6 +126,9 @@ def create_resource(body: ResourceCreate, user: User = Depends(get_current_user)
         attachments=[a.model_dump() for a in body.attachments],
         scope_type=body.scope_type,
         scope_id=scope_id,
+        # Audience: defaults to the home scope (pod resources are pod-only) unless
+        # the author widens it. See app/visibility.py.
+        visibility=normalize_visibility(body.scope_type, body.visibility),
         author_id=user.id,
         is_public=body.scope_type == "PUBLIC",
         source_fingerprint=body.source_fingerprint,
@@ -238,9 +250,39 @@ def update_resource(
         raise validation("scope_type must be ORG, PROJECT, POD, or PUBLIC")
     if "scope_type" in data or "scope_id" in data:
         _require_scope_write(db, data.get("scope_type", r.scope_type), data.get("scope_id", r.scope_id), user)
+    requested_vis = data.pop("visibility", "__keep__")
     for field, value in data.items():
         setattr(r, field, value)
+    # Re-validate the audience against the (possibly new) home scope. If the
+    # scope moved and no visibility was given, re-default to the new scope.
+    if requested_vis != "__keep__":
+        r.visibility = normalize_visibility(r.scope_type, requested_vis)
+    else:
+        r.visibility = normalize_visibility(r.scope_type, r.visibility)
     _log_resource(db, user, r, "updated", meta=f"v{r.version}")
+    db.commit()
+    return resource_out(db, r, user)
+
+
+@router.post("/resources/{resource_id}/move")
+def move_resource(
+    resource_id: str, body: ResourceMove,
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
+):
+    """Move a resource to a new home scope (pod ⇆ project ⇆ org). Requires write
+    on the resource (author or org admin) AND membership at the destination. The
+    audience re-defaults to the new scope unless `visibility` is supplied."""
+    r = resource_or_404(db, resource_id)
+    require_resource_write(db, r, user)
+    if body.scope_type not in ("ORG", "PROJECT", "POD"):
+        raise validation("scope_type must be ORG, PROJECT, or POD")
+    if not body.scope_id:
+        raise validation("scope_id (the destination pod/project/org id) is required")
+    _require_scope_write(db, body.scope_type, body.scope_id, user)
+    r.scope_type = body.scope_type
+    r.scope_id = body.scope_id
+    r.visibility = normalize_visibility(body.scope_type, body.visibility)
+    _log_resource(db, user, r, "updated", meta="moved")
     db.commit()
     return resource_out(db, r, user)
 
@@ -266,6 +308,42 @@ def _list_params(
     return {"q": q, "type_": type, "tag": tag, "sort": sort}
 
 
+# These listings are audience-aware (Resource.visibility). Each fetches the
+# candidate rows whose HOME is in the requested subtree, then filter_visible()
+# drops anything the viewer can't read. "Elevated" pod/project resources
+# (visibility widened to PROJECT/ORG) surface in the broader views so other
+# pods / the whole org can find them.
+
+def _org_subtree_ids(db: Session, org_id: str) -> tuple[list[str], list[str]]:
+    project_ids = [p.id for p in db.query(Project.id).filter(Project.org_id == org_id)]
+    pod_ids = (
+        [p.id for p in db.query(Pod.id).filter(Pod.project_id.in_(project_ids))]
+        if project_ids else []
+    )
+    return project_ids, pod_ids
+
+
+def _org_view_rows(db: Session, org_id: str) -> list[Resource]:
+    """Org-level shelf: org-scoped resources + anything below elevated to ORG."""
+    project_ids, pod_ids = _org_subtree_ids(db, org_id)
+    clause = (Resource.scope_type == "ORG") & (Resource.scope_id == org_id)
+    if project_ids:
+        clause = clause | ((Resource.scope_type == "PROJECT") & Resource.scope_id.in_(project_ids) & (Resource.visibility == "ORG"))
+    if pod_ids:
+        clause = clause | ((Resource.scope_type == "POD") & Resource.scope_id.in_(pod_ids) & (Resource.visibility == "ORG"))
+    return db.query(Resource).filter(clause).all()
+
+
+def _project_view_rows(db: Session, project_id: str) -> list[Resource]:
+    """Project view: project-scoped resources + pod resources in this project
+    elevated to PROJECT/ORG (so other pods and project members see them)."""
+    pod_ids = [p.id for p in db.query(Pod.id).filter(Pod.project_id == project_id)]
+    clause = (Resource.scope_type == "PROJECT") & (Resource.scope_id == project_id)
+    if pod_ids:
+        clause = clause | ((Resource.scope_type == "POD") & Resource.scope_id.in_(pod_ids) & Resource.visibility.in_(("PROJECT", "ORG")))
+    return db.query(Resource).filter(clause).all()
+
+
 @router.get("/orgs/{slug}/resources")
 def org_resources(
     slug: str, params: dict = Depends(_list_params),
@@ -273,7 +351,7 @@ def org_resources(
 ):
     org = org_by_slug(db, slug)
     require_org_member(db, org, user)
-    rows = db.query(Resource).filter(Resource.scope_type == "ORG", Resource.scope_id == org.id).all()
+    rows = filter_visible(db, _org_view_rows(db, org.id), user)
     rows = search_rank(rows, params["q"], params["type_"], params["tag"], params["sort"])
     return [resource_out(db, r, user) for r in rows]
 
@@ -285,7 +363,7 @@ def project_resources(
 ):
     project = project_or_404(db, project_id)
     require_project_read(db, project, user)
-    rows = db.query(Resource).filter(Resource.scope_type == "PROJECT", Resource.scope_id == project.id).all()
+    rows = filter_visible(db, _project_view_rows(db, project.id), user)
     rows = search_rank(rows, params["q"], params["type_"], params["tag"], params["sort"])
     return [resource_out(db, r, user) for r in rows]
 
@@ -298,22 +376,28 @@ def pod_resources(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Inheritance union (BACKEND_SPEC §5): pod + project + org, filtered by ?scope=."""
+    """Inheritance union (BACKEND_SPEC §5): pod + project + org, filtered by ?scope=
+    and by audience (visibility). The pod tab shows this pod's own resources; the
+    project/org tabs show what's shared up to those levels."""
     pod = pod_or_404(db, pod_id)
     require_pod_read(db, pod, user)
     project = project_or_404(db, pod.project_id)
     scope = scope.lower()
 
-    conditions = {
-        "pod": (Resource.scope_type == "POD") & (Resource.scope_id == pod.id),
-        "project": (Resource.scope_type == "PROJECT") & (Resource.scope_id == project.id),
-        "org": (Resource.scope_type == "ORG") & (Resource.scope_id == project.org_id),
-    }
-    if scope in conditions:
-        clause = conditions[scope]
-    else:  # all
-        clause = conditions["pod"] | conditions["project"] | conditions["org"]
-    rows = db.query(Resource).filter(clause).all()
+    if scope == "pod":
+        rows = db.query(Resource).filter(Resource.scope_type == "POD", Resource.scope_id == pod.id).all()
+    elif scope == "project":
+        rows = _project_view_rows(db, project.id)
+    elif scope == "org":
+        rows = _org_view_rows(db, project.org_id)
+    else:  # all — union, deduped by id
+        pod_own = db.query(Resource).filter(Resource.scope_type == "POD", Resource.scope_id == pod.id).all()
+        merged = {r.id: r for r in pod_own}
+        for r in _project_view_rows(db, project.id) + _org_view_rows(db, project.org_id):
+            merged.setdefault(r.id, r)
+        rows = list(merged.values())
+
+    rows = filter_visible(db, rows, user)
     rows = search_rank(rows, params["q"], params["type_"], params["tag"], params["sort"])
     return [resource_out(db, r, user) for r in rows]
 

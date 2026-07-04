@@ -108,6 +108,7 @@ def resource_out(db: Session, r: Resource, me: User | None) -> dict:
         "scope_type": r.scope_type,
         "scope_id": r.scope_id,
         "scope_name": scope_name(db, r.scope_type, r.scope_id),
+        "visibility": r.visibility or r.scope_type,
         "author_id": r.author_id,
         "is_public": r.is_public,
         "source_fingerprint": r.source_fingerprint,

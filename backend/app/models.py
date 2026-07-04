@@ -173,6 +173,13 @@ class Resource(Base):
     attachments: Mapped[list] = mapped_column(JSON, default=list)
     scope_type: Mapped[str] = mapped_column(String, index=True)  # ORG | PROJECT | POD | PUBLIC
     scope_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    # Who can READ this resource (audience), independent of where it lives:
+    # POD (only the owning pod's members), PROJECT (all project members),
+    # ORG (all org members). Can't be narrower than the home scope. NULL/empty is
+    # interpreted as the home-scope default (see visibility.normalize_visibility),
+    # so a legacy row with no value is pod-private / project-private by default —
+    # NOT org-wide. Set explicitly on create/move. PUBLIC rows ignore this.
+    visibility: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     author_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
     is_public: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     # Set when a resource was pushed from a local artifact (F2). Lets us detect

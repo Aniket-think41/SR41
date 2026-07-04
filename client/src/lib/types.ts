@@ -13,6 +13,9 @@ export type OrgRole = ScopeRole;
 export type ProjectRole = ScopeRole | "LEAD";
 export type PodRole = ScopeRole | "OWNER";
 export type ProjectVisibility = "ORG" | "PUBLIC";
+// Resource audience: who can read it. Narrowest is POD (only the owning pod's
+// members); widen to PROJECT or ORG to share further. See backend visibility.py.
+export type Visibility = "POD" | "PROJECT" | "ORG";
 
 export interface User {
   id: string;
@@ -154,6 +157,8 @@ export interface Resource {
   tags: string[];
   scope_type: ScopeType;
   scope_id: string | null;
+  /** Audience — who can read it: POD | PROJECT | ORG (see backend visibility). */
+  visibility?: Visibility;
   author_id: string;
   is_public: boolean;
   stars_count: number;

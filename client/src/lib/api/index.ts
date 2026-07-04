@@ -227,10 +227,13 @@ export const api = {
     tags?: string[];
     scope_type: ScopeType;
     scope_id: string | null;
+    visibility?: string;
   }) => request<Resource>("POST", "/api/resources", body),
   resource: (id: string) => request<Resource>("GET", `/api/resources/${id}`),
   updateResource: (id: string, body: Partial<Resource>) =>
     request<Resource>("PATCH", `/api/resources/${id}`, body),
+  moveResource: (id: string, body: { scope_type: ScopeType; scope_id: string | null; visibility?: string }) =>
+    request<Resource>("POST", `/api/resources/${id}/move`, body),
   deleteResource: (id: string) => request<{ ok: true }>("DELETE", `/api/resources/${id}`),
   orgResources: (slug: string, query: ResourceQuery = {}) =>
     request<Resource[]>("GET", `/api/orgs/${slug}/resources${qs(query as Record<string, string>)}`),

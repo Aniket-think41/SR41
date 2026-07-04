@@ -157,6 +157,9 @@ class ResourceCreate(BaseModel):
     attachments: list[Attachment] = []
     scope_type: str  # ORG | PROJECT | POD | PUBLIC
     scope_id: str | None = None
+    # Audience (who can read): POD | PROJECT | ORG. Omit → defaults to the home
+    # scope (pod resources are pod-only by default). Validated against scope_type.
+    visibility: str | None = None
     source_fingerprint: str | None = None  # set when pushed from a local artifact (F2)
 
 
@@ -172,6 +175,16 @@ class ResourcePatch(BaseModel):
     attachments: list[Attachment] | None = None
     scope_type: str | None = None
     scope_id: str | None = None
+    visibility: str | None = None  # POD | PROJECT | ORG (validated against scope_type)
+
+
+class ResourceMove(BaseModel):
+    """Move a resource to a new home scope (pod⇆project⇆org). visibility is
+    re-defaulted to the new scope unless explicitly provided."""
+
+    scope_type: str  # ORG | PROJECT | POD
+    scope_id: str | None = None
+    visibility: str | None = None
 
 
 class UploadIn(BaseModel):
