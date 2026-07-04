@@ -14,11 +14,23 @@ import { setToken } from "@/lib/api/http";
 import { Logo } from "../Logo";
 import { Avatar } from "../Avatar";
 import { OrgSwitcher } from "./OrgSwitcher";
+import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
-/** Nav items; `label` may be overridden by org terminology, `feature` gates visibility. */
+/** Nav items per workspace. Org mode = projects/members/RBAC; publisher mode =
+ *  just the marketplace + the publisher's own resources (no org/RBAC surfaces).
+ *  `label` may be overridden by org terminology; `feature` gates visibility. */
 function useNav() {
   const terms = useTerms();
   const marketplace = useFeature("marketplace");
+  const { workspace } = useUi();
+
+  if (workspace === "publisher") {
+    return [
+      { label: "My Resources", href: "/dashboard/publisher", icon: Library, exact: true },
+      { label: "Marketplace", href: "/dashboard/marketplace", icon: Store },
+    ];
+  }
+
   return [
     { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, exact: true },
     { label: terms.projects, href: "/dashboard/projects", icon: FolderKanban },
@@ -36,7 +48,7 @@ export function Sidebar() {
   const router = useRouter();
   const qc = useQueryClient();
   const { data: user } = useSession();
-  const { sidebarCollapsed: collapsed, toggleSidebar } = useUi();
+  const { sidebarCollapsed: collapsed, toggleSidebar, workspace } = useUi();
   const NAV = useNav();
 
   const logout = async () => {
@@ -64,9 +76,10 @@ export function Sidebar() {
         </Link>
       </div>
 
-      {/* Org switcher */}
-      <div className="px-3 pt-4">
-        <OrgSwitcher collapsed={collapsed} />
+      {/* Workspace switch (Org ⇆ Publisher) + org switcher (org mode only) */}
+      <div className="space-y-2 px-3 pt-4">
+        <WorkspaceSwitcher collapsed={collapsed} />
+        {workspace === "org" && <OrgSwitcher collapsed={collapsed} />}
       </div>
 
       {/* Nav */}

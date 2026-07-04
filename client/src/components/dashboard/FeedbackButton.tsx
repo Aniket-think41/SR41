@@ -8,6 +8,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMutation } from "@tanstack/react-query";
 import { MessageSquarePlus, Star, X } from "lucide-react";
 import { api } from "@/lib/api";
@@ -72,7 +73,7 @@ export function FeedbackButton() {
         Feedback
       </button>
 
-      {open && (
+      {open && typeof document !== "undefined" && createPortal(
         <div
           className="fixed inset-0 z-[80] flex items-start justify-center bg-ink/30 px-4 pt-[12vh] backdrop-blur-sm"
           onMouseDown={() => setOpen(false)}
@@ -172,7 +173,8 @@ export function FeedbackButton() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );

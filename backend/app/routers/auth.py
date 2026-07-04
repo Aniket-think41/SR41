@@ -108,6 +108,9 @@ def signup(body: SignupIn, response: Response, db: Session = Depends(get_db)):
         password_hash=hash_password(body.password),
         username=_unique_username(db, body.display_name or email.split("@")[0]),
         display_name=body.display_name,
+        # Every first-time account confirms a password of their own on first
+        # entry — the dashboard gates on must_change_password until they do.
+        must_change_password=True,
     )
     db.add(user)
     db.commit()
@@ -143,10 +146,13 @@ async def google(body: GoogleIn, response: Response, db: Session = Depends(get_d
         name = info.get("name") or email.split("@")[0]
         user = User(
             email=email,
-            password_hash="",  # OAuth-only account
+            password_hash="",  # OAuth-only account — no password set yet
             username=_unique_username(db, name),
             display_name=name,
             avatar_url=info.get("picture"),
+            # Google accounts have no password of their own; make them set one on
+            # first entry so they can also sign in with email/password later.
+            must_change_password=True,
         )
         db.add(user)
         db.commit()

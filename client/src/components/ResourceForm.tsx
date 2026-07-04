@@ -14,7 +14,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, Github, Loader2, Upload, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/api/http";
-import { qk, useCurrentOrg, useInvalidateResources, useTerms } from "@/lib/hooks";
+import { qk, useCurrentOrg, useInvalidateResources, useSession, useTerms } from "@/lib/hooks";
 import type { Attachment, Resource, ResourceType, ScopeType } from "@/lib/types";
 import { TYPE_META, SCOPE_META } from "@/lib/utils";
 import { MarkdownEditor } from "./MarkdownEditor";
@@ -58,6 +58,7 @@ export function ResourceForm({
 }) {
   const editing = mode === "edit" && resource;
   const { org } = useCurrentOrg();
+  const { data: me } = useSession();
   const invalidate = useInvalidateResources();
   const { toast } = useToast();
   const terms = useTerms();
@@ -84,11 +85,14 @@ export function ResourceForm({
   });
   const scopeOptions = useMemo<ScopeOption[]>(() => {
     const opts: ScopeOption[] = [];
+    // Publishers can author straight onto the public marketplace (no org needed).
+    if (me?.is_publisher)
+      opts.push({ scope_type: "PUBLIC", scope_id: null, label: "Public — Marketplace" });
     if (org) opts.push({ scope_type: "ORG", scope_id: org.id, label: `Org — ${org.name}` });
     for (const p of projects ?? [])
       opts.push({ scope_type: "PROJECT", scope_id: p.id, label: `${terms.project} — ${p.name.split("—")[0].trim()}` });
     return opts;
-  }, [org, projects, terms.project]);
+  }, [org, projects, terms.project, me?.is_publisher]);
 
   const initialScope = editing
     ? { scope_type: resource.scope_type, scope_id: resource.scope_id }

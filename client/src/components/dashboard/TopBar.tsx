@@ -11,9 +11,11 @@ import { Avatar } from "../Avatar";
 import { FeedbackButton } from "./FeedbackButton";
 import { NotificationBell } from "./NotificationBell";
 
-/** Breadcrumb: Org › Project › Pod — clickable (frontend spec §3.2). */
+/** Breadcrumb: Org › Project › Pod — clickable (frontend spec §3.2). In the
+ *  publisher workspace there's no org hierarchy, so it just anchors "Publisher". */
 function Breadcrumb() {
   const { org } = useCurrentOrg();
+  const { workspace } = useUi();
   const params = useParams<{ projectId?: string; podId?: string }>();
   const projectId = params?.projectId;
   const podId = params?.podId;
@@ -21,13 +23,23 @@ function Breadcrumb() {
   const { data: project } = useQuery({
     queryKey: qk.project(projectId ?? ""),
     queryFn: () => api.project(org!.slug, projectId!),
-    enabled: !!org && !!projectId,
+    enabled: !!org && !!projectId && workspace === "org",
   });
   const { data: pod } = useQuery({
     queryKey: qk.pod(podId ?? ""),
     queryFn: () => api.pod(projectId!, podId!),
-    enabled: !!projectId && !!podId,
+    enabled: !!projectId && !!podId && workspace === "org",
   });
+
+  if (workspace === "publisher") {
+    return (
+      <nav className="flex min-w-0 items-center gap-1.5 text-sm" aria-label="Breadcrumb">
+        <Link href="/dashboard/publisher" className="shrink-0 font-semibold text-muted transition hover:text-primary">
+          Publisher
+        </Link>
+      </nav>
+    );
+  }
 
   return (
     <nav className="flex min-w-0 items-center gap-1.5 text-sm" aria-label="Breadcrumb">
@@ -56,9 +68,11 @@ function Breadcrumb() {
 }
 
 export function TopBar() {
-  const { setPaletteOpen, sidebarCollapsed } = useUi();
+  const { setPaletteOpen, sidebarCollapsed, workspace } = useUi();
   const { data: user } = useSession();
   const palette = useFeature("command-palette");
+  // ⌘K searches the current org — only meaningful in the org workspace.
+  const showPalette = palette.enabled && workspace === "org";
 
   return (
     <header
@@ -69,7 +83,7 @@ export function TopBar() {
       <Breadcrumb />
 
       <div className="flex shrink-0 items-center gap-2.5">
-        {palette.enabled && (
+        {showPalette && (
           <button
             onClick={() => setPaletteOpen(true)}
             className="flex items-center gap-2 rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-muted transition hover:border-primary hover:text-primary"

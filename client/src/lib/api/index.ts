@@ -122,6 +122,8 @@ export const api = {
   google: (idToken: string) => request<AuthSession>("POST", "/api/auth/google", { id_token: idToken }),
   logout: () => request<{ ok: true }>("POST", "/api/auth/logout"),
   me: () => request<User>("GET", "/api/auth/me"),
+  changePassword: (body: { current_password?: string; new_password: string }) =>
+    request<User>("POST", "/api/auth/change-password", body),
 
   /* ---- device login (CLI / MCP browser approval) ---- */
   deviceInfo: (userCode: string) =>
@@ -182,10 +184,16 @@ export const api = {
     request<Project>("PATCH", `/api/orgs/${slug}/projects/${projectId}`, body),
   deleteProject: (slug: string, projectId: string) =>
     request<{ ok: true }>("DELETE", `/api/orgs/${slug}/projects/${projectId}`),
-  projectMembers: (slug: string, projectId: string) =>
-    request<ProjectMember[]>("GET", `/api/orgs/${slug}/projects/${projectId}/members`),
-  addProjectMember: (slug: string, projectId: string, body: { user_id: string; role?: string }) =>
-    request<ProjectMember>("POST", `/api/orgs/${slug}/projects/${projectId}/members`, body),
+  // Member management is id-addressed (shared with CLI/MCP). Add by user_id OR
+  // email — an unknown email auto-provisions the account and cascades membership.
+  projectMembers: (projectId: string) =>
+    request<ProjectMember[]>("GET", `/api/projects/${projectId}/members`),
+  addProjectMember: (projectId: string, body: { user_id?: string; email?: string; role?: string }) =>
+    request<ProjectMember>("POST", `/api/projects/${projectId}/members`, body),
+  setProjectMemberRole: (projectId: string, userId: string, role: string) =>
+    request<ProjectMember>("PATCH", `/api/projects/${projectId}/members/${userId}`, { role }),
+  removeProjectMember: (projectId: string, userId: string) =>
+    request<{ ok: true }>("DELETE", `/api/projects/${projectId}/members/${userId}`),
 
   /* ---- pods ---- */
   pods: (projectId: string) => request<Pod[]>("GET", `/api/projects/${projectId}/pods`),
@@ -197,10 +205,14 @@ export const api = {
     request<Pod>("PATCH", `/api/projects/${projectId}/pods/${podId}`, body),
   deletePod: (projectId: string, podId: string) =>
     request<{ ok: true }>("DELETE", `/api/projects/${projectId}/pods/${podId}`),
-  podMembers: (projectId: string, podId: string) =>
-    request<PodMember[]>("GET", `/api/projects/${projectId}/pods/${podId}/members`),
-  addPodMember: (projectId: string, podId: string, body: { user_id: string; role?: string }) =>
-    request<PodMember>("POST", `/api/projects/${projectId}/pods/${podId}/members`, body),
+  podMembers: (podId: string) =>
+    request<PodMember[]>("GET", `/api/pods/${podId}/members`),
+  addPodMember: (podId: string, body: { user_id?: string; email?: string; role?: string }) =>
+    request<PodMember>("POST", `/api/pods/${podId}/members`, body),
+  setPodMemberRole: (podId: string, userId: string, role: string) =>
+    request<PodMember>("PATCH", `/api/pods/${podId}/members/${userId}`, { role }),
+  removePodMember: (podId: string, userId: string) =>
+    request<{ ok: true }>("DELETE", `/api/pods/${podId}/members/${userId}`),
 
   /* ---- resources ---- */
   createResource: (body: {

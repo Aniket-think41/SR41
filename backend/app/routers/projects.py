@@ -7,17 +7,14 @@ from ..database import get_db
 from ..errors import validation
 from ..models import Pod, PodMember, Project, ProjectMember, Resource, User
 from ..permissions import (
-    ensure_org_member,
-    ensure_project_member,
     org_by_slug,
     project_or_404,
     require_org_member,
     require_project_access,
-    resolve_user,
 )
-from ..schemas import AddMemberIn, ProjectCreate, ProjectPatch
+from ..schemas import ProjectCreate, ProjectPatch
 from ..security import get_current_user
-from ..serialize import log_activity, member_out, project_out
+from ..serialize import log_activity, project_out
 from ..models import ResourceStar
 
 router = APIRouter(prefix="/api/orgs/{slug}/projects", tags=["projects"])
@@ -42,7 +39,7 @@ def create_project(slug: str, body: ProjectCreate, user: User = Depends(get_curr
     )
     db.add(project)
     db.flush()
-    db.add(ProjectMember(project_id=project.id, user_id=user.id, role="LEAD"))
+    db.add(ProjectMember(project_id=project.id, user_id=user.id, role="ADMIN"))
     log_activity(
         db, user_id=user.id, org_id=org.id, verb="created",
         object_type="project", object_id=project.id, object_title=project.name,
@@ -103,27 +100,6 @@ def delete_project(slug: str, project_id: str, user: User = Depends(get_current_
     return {"ok": True}
 
 
-@router.get("/{project_id}/members")
-def project_members(slug: str, project_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    org = org_by_slug(db, slug)
-    require_org_member(db, org, user)
-    project_or_404(db, project_id)
-    rows = db.query(ProjectMember).filter(ProjectMember.project_id == project_id).all()
-    return [member_out(m, "project_id") for m in rows]
-
-
-@router.post("/{project_id}/members")
-def add_project_member(
-    slug: str, project_id: str, body: AddMemberIn,
-    user: User = Depends(get_current_user), db: Session = Depends(get_db),
-):
-    org = org_by_slug(db, slug)
-    project = project_or_404(db, project_id)
-    require_project_access(db, project, user)
-    target = resolve_user(db, user_id=body.user_id, email=body.email)
-    role = body.role if body.role in ("LEAD", "MEMBER") else "MEMBER"
-    # Cascade: project membership implies org membership (created if missing).
-    ensure_org_member(db, org.id, target.id)
-    m = ensure_project_member(db, project.id, target.id, role=role)
-    db.commit()
-    return member_out(m, "project_id")
+# Project membership (list / add / change-role / remove) now lives in the
+# id-addressed members router (routers/members.py) so the dashboard, CLI, and
+# MCP all share one code path with add-by-email + cascade + role management.

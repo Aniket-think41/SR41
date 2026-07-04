@@ -7,9 +7,6 @@ from ..database import get_db
 from ..errors import not_found, validation
 from ..models import Pod, PodMember, PodService, Resource, ResourceStar, User
 from ..permissions import (
-    ensure_org_member,
-    ensure_pod_member,
-    ensure_project_member,
     pod_or_404,
     project_or_404,
     require_pod_access,
@@ -17,11 +14,10 @@ from ..permissions import (
     require_pod_read,
     require_project_access,
     require_project_read,
-    resolve_user,
 )
-from ..schemas import AddMemberIn, PodCreate, PodPatch, PodServiceCreate, PodServicePatch
+from ..schemas import PodCreate, PodPatch, PodServiceCreate, PodServicePatch
 from ..security import get_current_user
-from ..serialize import log_activity, member_out, pod_out, pod_service_out
+from ..serialize import log_activity, pod_out, pod_service_out
 
 router = APIRouter(prefix="/api/projects/{project_id}/pods", tags=["pods"])
 
@@ -45,7 +41,7 @@ def create_pod(project_id: str, body: PodCreate, user: User = Depends(get_curren
     )
     db.add(pod)
     db.flush()
-    db.add(PodMember(pod_id=pod.id, user_id=user.id, role="OWNER"))
+    db.add(PodMember(pod_id=pod.id, user_id=user.id, role="ADMIN"))
     log_activity(
         db, user_id=user.id, org_id=project.org_id, verb="created",
         object_type="pod", object_id=pod.id, object_title=pod.name,
@@ -94,29 +90,9 @@ def delete_pod(project_id: str, pod_id: str, user: User = Depends(get_current_us
     return {"ok": True}
 
 
-@router.get("/{pod_id}/members")
-def pod_members(project_id: str, pod_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    pod = pod_or_404(db, pod_id)
-    require_pod_read(db, pod, user)
-    return [member_out(m, "pod_id") for m in db.query(PodMember).filter(PodMember.pod_id == pod_id).all()]
-
-
-@router.post("/{pod_id}/members")
-def add_pod_member(
-    project_id: str, pod_id: str, body: AddMemberIn,
-    user: User = Depends(get_current_user), db: Session = Depends(get_db),
-):
-    pod = pod_or_404(db, pod_id)
-    require_pod_access(db, pod, user)
-    project = project_or_404(db, pod.project_id)
-    target = resolve_user(db, user_id=body.user_id, email=body.email)
-    role = body.role if body.role in ("OWNER", "MEMBER") else "MEMBER"
-    # Cascade: pod ⇒ project ⇒ org (each created only if missing).
-    ensure_org_member(db, project.org_id, target.id)
-    ensure_project_member(db, project.id, target.id)
-    m = ensure_pod_member(db, pod.id, target.id, role=role)
-    db.commit()
-    return member_out(m, "pod_id")
+# Pod membership (list / add / change-role / remove) now lives in the
+# id-addressed members router (routers/members.py) — one shared code path for
+# the dashboard, CLI, and MCP with add-by-email, cascade, and role management.
 
 
 # ---- pod service registry (service management) ----

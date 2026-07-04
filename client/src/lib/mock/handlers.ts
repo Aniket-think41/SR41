@@ -115,6 +115,67 @@ function featureEnabled(db: Db, orgId: string | null, key: string): boolean {
   return resolveFeatures(db, orgId).find((f) => f.key === key)?.enabled ?? true;
 }
 
+/* ---- membership: normalize / provision / cascade (mirrors permissions.py) ---- */
+
+const ADMIN_ALIASES = ["ADMIN", "OWNER", "LEAD"];
+const normRole = (role: unknown): "ADMIN" | "MEMBER" =>
+  ADMIN_ALIASES.includes(String(role ?? "").toUpperCase()) ? "ADMIN" : "MEMBER";
+
+function uniqueUsername(db: Db, base: string): string {
+  const cand = base.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "user";
+  let username = cand;
+  let n = 1;
+  while (db.users.some((u) => u.username === username)) username = `${cand}-${++n}`;
+  return username;
+}
+
+/** Find by user_id/email, or auto-provision a brand-new account by email
+ *  (must_change_password) — mirrors resolve_or_provision_user on the backend. */
+function resolveOrProvision(db: Db, body: Json): User {
+  if (body.user_id) {
+    const u = db.users.find((x) => x.id === body.user_id);
+    if (!u) throw notFound("User");
+    return u;
+  }
+  const email = String(body.email ?? "").toLowerCase();
+  if (!email) throw notFound("User");
+  const found = db.users.find((x) => x.email === email);
+  if (found) return found;
+  const u: User = {
+    id: uid("u"), email, username: uniqueUsername(db, email.split("@")[0]),
+    display_name: email.split("@")[0], avatar_url: null, bio: "",
+    is_publisher: false, must_change_password: true, created_at: now(), updated_at: now(),
+  };
+  db.users.push(u);
+  return u;
+}
+
+function ensureOrgMember(db: Db, orgId: string, userId: string, role: OrgRole = "MEMBER") {
+  let m = db.org_members.find((x) => x.org_id === orgId && x.user_id === userId);
+  if (!m) {
+    m = { id: uid("om"), org_id: orgId, user_id: userId, role, joined_at: now(), last_active: now() };
+    db.org_members.push(m);
+  }
+  return m;
+}
+function ensureProjectMember(db: Db, projectId: string, userId: string, role = "MEMBER") {
+  let m = db.project_members.find((x) => x.project_id === projectId && x.user_id === userId);
+  if (!m) {
+    m = { id: uid("pm"), project_id: projectId, user_id: userId, role: role as "LEAD" | "MEMBER" };
+    db.project_members.push(m);
+  }
+  return m;
+}
+function ensurePodMember(db: Db, podId: string, userId: string, role = "MEMBER") {
+  let m = db.pod_members.find((x) => x.pod_id === podId && x.user_id === userId);
+  if (!m) {
+    m = { id: uid("pdm"), pod_id: podId, user_id: userId, role: role as "OWNER" | "MEMBER" };
+    db.pod_members.push(m);
+  }
+  return m;
+}
+const withUser = (m: { user_id: string }, db: Db) => ({ ...m, user: db.users.find((u) => u.id === m.user_id) });
+
 /* ---------------- route table ---------------- */
 
 const routes: [method: string, pattern: string, fn: Handler][] = [
@@ -135,6 +196,8 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
       avatar_url: null,
       bio: "",
       is_publisher: false,
+      // First-time accounts confirm a password on first entry (change-password gate).
+      must_change_password: true,
       created_at: now(),
       updated_at: now(),
     };
@@ -142,6 +205,14 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     db.session_user_id = user.id;
     saveDb();
     return { user, access_token: "mock-access-token", refresh_token: "mock-refresh-token" };
+  }],
+
+  ["POST", "/api/auth/change-password", (_p, _b, _q, db) => {
+    const me = currentUser(db);
+    me.must_change_password = false;
+    me.updated_at = now();
+    saveDb();
+    return me;
   }],
 
   ["POST", "/api/auth/login", (_p, body, _q, db) => {
@@ -574,7 +645,7 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
       visibility: "ORG", created_by: me.id, created_at: now(),
     };
     db.projects.push(project);
-    db.project_members.push({ id: uid("pm"), project_id: project.id, user_id: me.id, role: "LEAD" });
+    db.project_members.push({ id: uid("pm"), project_id: project.id, user_id: me.id, role: "ADMIN" });
     logActivity(db, { user_id: me.id, org_id: org.id, verb: "created", object_type: "project", object_id: project.id, object_title: project.name });
     saveDb();
     return projectWithCounts(project, db);
@@ -614,21 +685,38 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     return { ok: true };
   }],
 
-  ["GET", "/api/orgs/:slug/projects/:projectId/members", (p, _b, _q, db) =>
-    db.project_members
-      .filter((m) => m.project_id === p.projectId)
-      .map((m) => ({ ...m, user: db.users.find((u) => u.id === m.user_id) })),
+  // Member management is id-addressed (shared with CLI/MCP). Add by user_id OR
+  // email (unknown email → auto-provision); adding cascades org membership.
+  ["GET", "/api/projects/:projectId/members", (p, _b, _q, db) =>
+    db.project_members.filter((m) => m.project_id === p.projectId).map((m) => withUser(m, db)),
   ],
 
-  ["POST", "/api/orgs/:slug/projects/:projectId/members", (p, body, _q, db) => {
-    const m = {
-      id: uid("pm"), project_id: p.projectId,
-      user_id: String(body.user_id),
-      role: (body.role as "LEAD" | "MEMBER") ?? "MEMBER",
-    };
-    db.project_members.push(m);
+  ["POST", "/api/projects/:projectId/members", (p, body, _q, db) => {
+    const project = db.projects.find((x) => x.id === p.projectId);
+    if (!project) throw notFound("Project");
+    const target = resolveOrProvision(db, body);
+    const role = normRole(body.role);
+    ensureOrgMember(db, project.org_id, target.id);
+    const m = ensureProjectMember(db, project.id, target.id, role);
+    m.role = role as "LEAD" | "MEMBER";
     saveDb();
-    return m;
+    return withUser(m, db);
+  }],
+
+  ["PATCH", "/api/projects/:projectId/members/:userId", (p, body, _q, db) => {
+    const m = db.project_members.find((x) => x.project_id === p.projectId && x.user_id === p.userId);
+    if (!m) throw notFound("Member");
+    m.role = normRole(body.role) as "LEAD" | "MEMBER";
+    saveDb();
+    return withUser(m, db);
+  }],
+
+  ["DELETE", "/api/projects/:projectId/members/:userId", (p, _b, _q, db) => {
+    const podIds = db.pods.filter((x) => x.project_id === p.projectId).map((x) => x.id);
+    db.pod_members = db.pod_members.filter((m) => !(podIds.includes(m.pod_id) && m.user_id === p.userId));
+    db.project_members = db.project_members.filter((m) => !(m.project_id === p.projectId && m.user_id === p.userId));
+    saveDb();
+    return { ok: true };
   }],
 
   /* ---- 3.4 Pods ---- */
@@ -649,7 +737,7 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
       created_by: me.id, created_at: now(),
     };
     db.pods.push(pod);
-    db.pod_members.push({ id: uid("pdm"), pod_id: pod.id, user_id: me.id, role: "OWNER" });
+    db.pod_members.push({ id: uid("pdm"), pod_id: pod.id, user_id: me.id, role: "ADMIN" });
     logActivity(db, { user_id: me.id, org_id: project.org_id, verb: "created", object_type: "pod", object_id: pod.id, object_title: pod.name });
     saveDb();
     return podWithCounts(pod, db);
@@ -681,21 +769,38 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     return { ok: true };
   }],
 
-  ["GET", "/api/projects/:projectId/pods/:podId/members", (p, _b, _q, db) =>
-    db.pod_members
-      .filter((m) => m.pod_id === p.podId)
-      .map((m) => ({ ...m, user: db.users.find((u) => u.id === m.user_id) })),
+  ["GET", "/api/pods/:podId/members", (p, _b, _q, db) =>
+    db.pod_members.filter((m) => m.pod_id === p.podId).map((m) => withUser(m, db)),
   ],
 
-  ["POST", "/api/projects/:projectId/pods/:podId/members", (p, body, _q, db) => {
-    const m = {
-      id: uid("pdm"), pod_id: p.podId,
-      user_id: String(body.user_id),
-      role: (body.role as "OWNER" | "MEMBER") ?? "MEMBER",
-    };
-    db.pod_members.push(m);
+  ["POST", "/api/pods/:podId/members", (p, body, _q, db) => {
+    const pod = db.pods.find((x) => x.id === p.podId);
+    if (!pod) throw notFound("Pod");
+    const project = db.projects.find((x) => x.id === pod.project_id);
+    if (!project) throw notFound("Project");
+    const target = resolveOrProvision(db, body);
+    const role = normRole(body.role);
+    // Cascade: pod ⇒ project ⇒ org, each as MEMBER (only the pod row gets `role`).
+    ensureOrgMember(db, project.org_id, target.id);
+    ensureProjectMember(db, project.id, target.id);
+    const m = ensurePodMember(db, pod.id, target.id, role);
+    m.role = role as "OWNER" | "MEMBER";
     saveDb();
-    return m;
+    return withUser(m, db);
+  }],
+
+  ["PATCH", "/api/pods/:podId/members/:userId", (p, body, _q, db) => {
+    const m = db.pod_members.find((x) => x.pod_id === p.podId && x.user_id === p.userId);
+    if (!m) throw notFound("Member");
+    m.role = normRole(body.role) as "OWNER" | "MEMBER";
+    saveDb();
+    return withUser(m, db);
+  }],
+
+  ["DELETE", "/api/pods/:podId/members/:userId", (p, _b, _q, db) => {
+    db.pod_members = db.pod_members.filter((m) => !(m.pod_id === p.podId && m.user_id === p.userId));
+    saveDb();
+    return { ok: true };
   }],
 
   /* ---- 3.5 Resources ---- */
@@ -703,6 +808,12 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     const me = currentUser(db);
     const title = String(body.title ?? "").trim();
     if (!title) throw new HttpError(422, "VALIDATION_ERROR", "Title is required");
+    const scopeType = body.scope_type as ScopeType;
+    // PUBLIC = the publisher's own marketplace shelf: no org/scope_id, public on
+    // creation, and gated on being a registered publisher (mirrors the backend).
+    if (scopeType === "PUBLIC" && !me.is_publisher)
+      throw new HttpError(403, "FORBIDDEN", "Become a publisher first to add resources to the marketplace");
+    const isPublic = scopeType === "PUBLIC";
     const r: Resource = {
       id: uid("res"),
       type: body.type as Resource["type"],
@@ -715,10 +826,10 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
       version: String(body.version ?? "0.1.0"),
       tags: (body.tags as string[]) ?? [],
       attachments: (body.attachments as Resource["attachments"]) ?? [],
-      scope_type: body.scope_type as ScopeType,
-      scope_id: (body.scope_id as string) ?? null,
+      scope_type: scopeType,
+      scope_id: isPublic ? null : ((body.scope_id as string) ?? null),
       author_id: me.id,
-      is_public: false,
+      is_public: isPublic,
       stars_count: 0,
       created_at: now(),
       updated_at: now(),

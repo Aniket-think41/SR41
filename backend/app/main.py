@@ -29,6 +29,7 @@ from .routers import (
     auth,
     feedback,
     local_state,
+    members,
     notifications,
     orgs,
     pods,
@@ -136,6 +137,7 @@ app.include_router(auth.router)
 app.include_router(orgs.router)
 app.include_router(projects.router)
 app.include_router(pods.router)
+app.include_router(members.router)
 app.include_router(resources.router)
 app.include_router(public.router)
 app.include_router(users.router)

@@ -6,9 +6,12 @@
 
 export type ResourceType = "SKILL" | "MCP" | "NOTE";
 export type ScopeType = "ORG" | "PROJECT" | "POD" | "PUBLIC";
-export type OrgRole = "ADMIN" | "MEMBER";
-export type ProjectRole = "LEAD" | "MEMBER";
-export type PodRole = "OWNER" | "MEMBER";
+// Every scope speaks the same two roles. Legacy rows (LEAD/OWNER) are still
+// accepted by the API and normalized to ADMIN, so the union stays permissive.
+export type ScopeRole = "ADMIN" | "MEMBER";
+export type OrgRole = ScopeRole;
+export type ProjectRole = ScopeRole | "LEAD";
+export type PodRole = ScopeRole | "OWNER";
 export type ProjectVisibility = "ORG" | "PUBLIC";
 
 export interface User {
@@ -23,6 +26,11 @@ export interface User {
   website?: string;
   is_publisher: boolean;
   verified?: boolean;
+  /** Platform admin — only present on the self (/me) payload. */
+  is_admin?: boolean;
+  /** Set for first-time accounts; the dashboard forces a password change until
+   *  cleared via POST /api/auth/change-password. */
+  must_change_password?: boolean;
   created_at: string;
   updated_at: string;
 }

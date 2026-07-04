@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/api/http";
-import { qk } from "@/lib/hooks";
+import { qk, useCurrentOrg, useSession } from "@/lib/hooks";
 import { MembersCard } from "@/components/dashboard/MembersCard";
 import { useToast } from "@/components/Toast";
 
@@ -19,6 +19,8 @@ export default function PodSettings({
   const router = useRouter();
   const qc = useQueryClient();
   const { toast } = useToast();
+  const { org } = useCurrentOrg();
+  const { data: me } = useSession();
 
   const { data: pod } = useQuery({
     queryKey: qk.pod(podId),
@@ -26,8 +28,11 @@ export default function PodSettings({
   });
   const { data: members } = useQuery({
     queryKey: [...qk.pod(podId), "members"],
-    queryFn: () => api.podMembers(projectId, podId),
+    queryFn: () => api.podMembers(podId),
   });
+  const selfRole = members?.find((m) => m.user_id === me?.id)?.role;
+  const canManage =
+    org?.my_role === "ADMIN" || selfRole === "ADMIN" || selfRole === "OWNER";
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -56,10 +61,33 @@ export default function PodSettings({
     onError: (e) => toast(errorMessage(e), "error"),
   });
 
+  const invalidateMembers = () =>
+    qc.invalidateQueries({ queryKey: [...qk.pod(podId), "members"] });
+
   const addMemberMut = useMutation({
+    mutationFn: ({ payload, role }: { payload: { user_id?: string; email?: string }; role: string }) =>
+      api.addPodMember(podId, { ...payload, role }),
+    onSuccess: async (m) => {
+      await invalidateMembers();
+      toast(`Added ${m.user?.display_name ?? "member"}`);
+    },
+    onError: (e) => toast(errorMessage(e), "error"),
+  });
+
+  const roleMut = useMutation({
     mutationFn: ({ userId, role }: { userId: string; role: string }) =>
-      api.addPodMember(projectId, podId, { user_id: userId, role }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: [...qk.pod(podId), "members"] }),
+      api.setPodMemberRole(podId, userId, role),
+    onSuccess: invalidateMembers,
+    onError: (e) => toast(errorMessage(e), "error"),
+  });
+
+  const removeMut = useMutation({
+    mutationFn: (userId: string) => api.removePodMember(podId, userId),
+    onSuccess: async () => {
+      await invalidateMembers();
+      toast("Member removed");
+    },
+    onError: (e) => toast(errorMessage(e), "error"),
   });
 
   const deleteMut = useMutation({
@@ -102,9 +130,14 @@ export default function PodSettings({
 
       <MembersCard
         members={members ?? []}
-        roles={["OWNER", "MEMBER"]}
-        onAdd={(userId, role) => addMemberMut.mutate({ userId, role })}
+        onAdd={(payload, role) => addMemberMut.mutate({ payload, role })}
+        onChangeRole={(userId, role) => roleMut.mutate({ userId, role })}
+        onRemove={(userId) => {
+          if (window.confirm("Remove this member from the pod?")) removeMut.mutate(userId);
+        }}
         adding={addMemberMut.isPending}
+        canManage={canManage}
+        selfUserId={me?.id}
       />
 
       <div className="card border-[var(--color-danger)]/30 p-6">

@@ -7,6 +7,7 @@ is the source of truth — email delivery is a notification layer.
 """
 
 import logging
+import re
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -132,6 +133,99 @@ def _invite_text(
         f"\n"
         f"— SkillShare by Think41"
     )
+
+
+def send_scope_add_email(
+    *,
+    to_email: str,
+    org_name: str,
+    scope_label: str,
+    scope_name: str,
+    inviter_name: str,
+    role: str,
+    username: str | None = None,
+    temp_password: str | None = None,
+) -> bool:
+    """Notify someone they were added directly to a pod/project (no accept step —
+    they're already a member). When username/temp_password are given the account
+    was just provisioned, so the email also carries sign-in credentials and the
+    login link. Best-effort, like send_invite_email."""
+    from .config import get_settings
+
+    settings = get_settings()
+    if not settings.ses_enabled or not settings.ses_sender:
+        logger.info("SES is disabled — skipping scope-add email to %s", to_email)
+        return False
+
+    frontend = settings.frontend_url.rstrip("/")
+    login_url = f"{frontend}/login"
+    dash_url = f"{frontend}/dashboard"
+    subject = f"You've been added to {scope_name} on SkillShare"
+
+    credentials_block = ""
+    credentials_text = ""
+    if username and temp_password:
+        credentials_block = _credentials_block_html(
+            login_url=login_url, username=to_email, temp_password=temp_password
+        )
+        credentials_text = (
+            f"\nYour sign-in details:\n"
+            f"  Email / username: {to_email}\n"
+            f"  Temporary password: {temp_password}\n"
+            f"Sign in at {login_url} — you'll be asked to set a new password right away.\n"
+        )
+
+    intro_html = (
+        f"<strong style=\"color:#1a1a1a;\">{inviter_name}</strong> added you to the "
+        f"{scope_label} <strong style=\"color:#735ae5;\">{scope_name}</strong> in "
+        f"<strong style=\"color:#1a1a1a;\">{org_name}</strong> as "
+        f"<strong style=\"color:#1a1a1a;\">{role}</strong>."
+    )
+    html = _invite_html(
+        org_name=org_name, inviter_name=inviter_name, role=role,
+        accept_url=dash_url, credentials_block=credentials_block,
+    ).replace("You&#39;ve been invited", f"You've been added to {scope_name}") \
+     .replace("Accept invitation &rarr;", "Open SkillShare &rarr;")
+    # Swap the invite sentence for the direct-add sentence.
+    html = re.sub(
+        r"<p style=\"margin:0 0 24px;color:#555;font-size:15px;line-height:1\.5;\">.*?</p>",
+        f"<p style=\"margin:0 0 24px;color:#555;font-size:15px;line-height:1.5;\">{intro_html}</p>",
+        html, count=1, flags=re.DOTALL,
+    )
+    text = (
+        f"You've been added to {scope_name}\n\n"
+        f"{inviter_name} added you to the {scope_label} {scope_name} in {org_name} as {role}.\n"
+        f"{credentials_text}\n"
+        f"Open SkillShare: {dash_url}\n\n"
+        f"— SkillShare by Think41"
+    )
+    return _send(subject=subject, to_email=to_email, html=html, text=text)
+
+
+def _send(*, subject: str, to_email: str, html: str, text: str) -> bool:
+    """Shared SMTP send used by the invite + scope-add emails."""
+    from .config import get_settings
+
+    settings = get_settings()
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = f"Think41 <{settings.ses_sender}>"
+        msg["To"] = to_email
+        msg.attach(MIMEText(text, "plain"))
+        msg.attach(MIMEText(html, "html"))
+
+        with smtplib.SMTP(settings.ses_smtp_host, settings.ses_smtp_port, timeout=15) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(settings.ses_smtp_username, settings.ses_smtp_password)
+            server.send_message(msg)
+        logger.info("Email sent to %s (%s)", to_email, subject)
+        return True
+    except Exception:
+        logger.exception("Failed to send email to %s (%s)", to_email, subject)
+        return False
 
 
 def send_invite_email(

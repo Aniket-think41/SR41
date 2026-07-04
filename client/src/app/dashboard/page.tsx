@@ -5,7 +5,9 @@
  * freshest resources across the org (frontend spec route map).
  */
 
+import { useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { FolderKanban, Library, Users, Star, ArrowRight, Plus } from "lucide-react";
 import { api } from "@/lib/api";
@@ -27,9 +29,15 @@ const VERBS: Record<string, string> = {
 export default function DashboardHome() {
   const { data: user } = useSession();
   const { org } = useCurrentOrg();
-  const { openAdd, openDetail } = useUi();
+  const { openAdd, openDetail, workspace } = useUi();
   const terms = useTerms();
+  const router = useRouter();
   const activityFeature = useFeature("activity-feed");
+
+  // The org home is org-only; publisher-workspace users belong on their space.
+  useEffect(() => {
+    if (workspace === "publisher") router.replace("/dashboard/publisher");
+  }, [workspace, router]);
 
   const { data: projects } = useQuery({
     queryKey: qk.projects(org?.slug ?? ""),

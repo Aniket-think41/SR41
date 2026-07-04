@@ -58,7 +58,9 @@ MAX_PINS = 6  # GitHub-style: a small, curated set on the profile
 
 
 def _require_scope_write(db: Session, scope_type: str, scope_id: str | None, user: User) -> None:
-    """Creating into a scope requires membership at that level (§4.2)."""
+    """Creating into a scope requires membership at that level (§4.2). The PUBLIC
+    scope is the publisher's own marketplace shelf — no org needed, but you must
+    be a registered publisher (this is what "add as a publisher" writes to)."""
     if scope_type == "ORG":
         org = db.get(Organization, scope_id)
         if not org:
@@ -68,6 +70,11 @@ def _require_scope_write(db: Session, scope_type: str, scope_id: str | None, use
         require_project_access(db, project_or_404(db, scope_id or ""), user)
     elif scope_type == "POD":
         require_pod_access(db, pod_or_404(db, scope_id or ""), user)
+    elif scope_type == "PUBLIC":
+        if not user.is_publisher:
+            raise forbidden(
+                "Become a publisher first (POST /api/auth/become-publisher) to add resources to the marketplace"
+            )
 
 
 def _log_resource(
@@ -93,7 +100,10 @@ def create_resource(body: ResourceCreate, user: User = Depends(get_current_user)
         raise validation("scope_type must be ORG, PROJECT, POD, or PUBLIC")
     if not body.title.strip():
         raise validation("Title is required")
-    _require_scope_write(db, body.scope_type, body.scope_id, user)
+    # PUBLIC resources are authored straight onto the marketplace, so they carry
+    # no scope_id and are public on creation.
+    scope_id = None if body.scope_type == "PUBLIC" else body.scope_id
+    _require_scope_write(db, body.scope_type, scope_id, user)
     r = Resource(
         type=body.type,
         title=body.title.strip(),
@@ -106,13 +116,18 @@ def create_resource(body: ResourceCreate, user: User = Depends(get_current_user)
         tags=body.tags,
         attachments=[a.model_dump() for a in body.attachments],
         scope_type=body.scope_type,
-        scope_id=body.scope_id,
+        scope_id=scope_id,
         author_id=user.id,
+        is_public=body.scope_type == "PUBLIC",
         source_fingerprint=body.source_fingerprint,
     )
     db.add(r)
     db.flush()
     _log_resource(db, user, r, "created")
+    # A publisher's PUBLIC resource lands on the marketplace immediately → tell
+    # their followers, just like an explicit publish.
+    if r.scope_type == "PUBLIC":
+        _notify_followers(db, user, r)
     db.commit()
     return resource_out(db, r, user)
 

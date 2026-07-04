@@ -78,7 +78,7 @@ def test_add_project_member_by_email_cascades_to_org():
     assert c.get(f"/api/orgs/{slug}/resources", headers=out_h).status_code == 403
 
     # add by email to the project → cascades org membership
-    r = c.post(f"/api/orgs/{slug}/projects/{p1}/members", json={"email": out_email}, headers=owner_h)
+    r = c.post(f"/api/projects/{p1}/members", json={"email": out_email}, headers=owner_h)
     assert r.status_code < 400, r.text
     assert r.json()["user_id"] == out_id
 
@@ -95,7 +95,7 @@ def test_org_member_reads_other_projects_but_cannot_write():
 
     out_h, _, out_email = _user()
     # make the outsider an org member by adding to p2 (not p1)
-    c.post(f"/api/orgs/{slug}/projects/{p2}/members", json={"email": out_email}, headers=owner_h)
+    c.post(f"/api/projects/{p2}/members", json={"email": out_email}, headers=owner_h)
 
     # READ transparency: can view p1 (not a member) and pod1
     assert c.get(f"/api/orgs/{slug}/projects/{p1}", headers=out_h).status_code == 200
@@ -121,7 +121,7 @@ def test_add_pod_member_cascades_to_project_and_org():
     # brand-new user, not in the org at all
     assert c.get(f"/api/orgs/{slug}/resources", headers=newbie_h).status_code == 403
 
-    r = c.post(f"/api/projects/{p1}/pods/{pod1}/members", json={"email": newbie_email}, headers=owner_h)
+    r = c.post(f"/api/pods/{pod1}/members", json={"email": newbie_email}, headers=owner_h)
     assert r.status_code < 400, r.text
 
     # cascaded to org + project + pod
@@ -130,17 +130,63 @@ def test_add_pod_member_cascades_to_project_and_org():
     assert _make_resource(newbie_h, "PROJECT", p1).status_code < 400                        # project member → write
 
     # idempotent: re-adding doesn't duplicate the pod membership
-    c.post(f"/api/projects/{p1}/pods/{pod1}/members", json={"email": newbie_email}, headers=owner_h)
-    members = c.get(f"/api/projects/{p1}/pods/{pod1}/members", headers=owner_h).json()
+    c.post(f"/api/pods/{pod1}/members", json={"email": newbie_email}, headers=owner_h)
+    members = c.get(f"/api/pods/{pod1}/members", headers=owner_h).json()
     assert sum(1 for m in members if m["user_id"] == newbie_id) == 1
 
 
-def test_add_member_unknown_user_404():
+def test_add_unknown_email_provisions_and_adds():
+    """Adding an unknown email to a pod/project auto-provisions an account
+    (temp password, must_change_password) and adds them — no org invite needed."""
+    from app.database import SessionLocal
+    from app.models import User
+
     owner_h, _, _ = _user()
     slug = _org(owner_h)
     p1 = _project(owner_h, slug, "P1")
-    r = c.post(f"/api/orgs/{slug}/projects/{p1}/members", json={"email": "ghost-nobody@example.com"}, headers=owner_h)
-    assert r.status_code == 404
+    pod1 = _pod(owner_h, p1)
+    _n[0] += 1
+    ghost = f"ghost{_n[0]}_{os.getpid()}@example.com"
+
+    # add unknown email to the POD as ADMIN → provisions + cascades to project/org
+    r = c.post(f"/api/pods/{pod1}/members", json={"email": ghost, "role": "ADMIN"}, headers=owner_h)
+    assert r.status_code < 400, r.text
+    assert r.json()["role"] == "ADMIN"
+
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.email == ghost).first()
+        assert u is not None and u.must_change_password is True and u.password_hash
+        ghost_id = u.id
+    finally:
+        db.close()
+
+    # pod ADMIN, but only MEMBER at project + org (cascade adds shallower as MEMBER)
+    pod_members = c.get(f"/api/pods/{pod1}/members", headers=owner_h).json()
+    proj_members = c.get(f"/api/projects/{p1}/members", headers=owner_h).json()
+    org_members = c.get(f"/api/orgs/{slug}/members", headers=owner_h).json()
+    assert next(m for m in pod_members if m["user_id"] == ghost_id)["role"] == "ADMIN"
+    assert next(m for m in proj_members if m["user_id"] == ghost_id)["role"] == "MEMBER"
+    assert next(m for m in org_members if m["user_id"] == ghost_id)["role"] == "MEMBER"
+
+
+def test_change_and_remove_pod_member_role():
+    """A scope admin can promote/demote (ADMIN|MEMBER) and remove a member."""
+    owner_h, _, _ = _user()
+    slug = _org(owner_h)
+    p1 = _project(owner_h, slug, "P1")
+    pod1 = _pod(owner_h, p1)
+    m_h, m_id, m_email = _user()
+    c.post(f"/api/pods/{pod1}/members", json={"email": m_email, "role": "MEMBER"}, headers=owner_h)
+
+    # promote to ADMIN
+    up = c.patch(f"/api/pods/{pod1}/members/{m_id}", json={"role": "ADMIN"}, headers=owner_h)
+    assert up.status_code < 400 and up.json()["role"] == "ADMIN"
+
+    # remove
+    assert c.delete(f"/api/pods/{pod1}/members/{m_id}", headers=owner_h).status_code < 400
+    members = c.get(f"/api/pods/{pod1}/members", headers=owner_h).json()
+    assert all(m["user_id"] != m_id for m in members)
 
 
 def test_pod_service_registry_crud_and_access():
@@ -164,7 +210,7 @@ def test_pod_service_registry_crud_and_access():
     # an org member who is NOT a pod member can VIEW but not CREATE
     out_h, _, out_email = _user()
     p2 = _project(owner_h, slug, "P2")
-    c.post(f"/api/orgs/{slug}/projects/{p2}/members", json={"email": out_email}, headers=owner_h)
+    c.post(f"/api/projects/{p2}/members", json={"email": out_email}, headers=owner_h)
     assert c.get(base, headers=out_h).status_code == 200
     assert len(c.get(base, headers=out_h).json()) == 1
     assert c.post(base, json={"name": "Nope"}, headers=out_h).status_code == 403
@@ -221,7 +267,7 @@ def test_pod_member_cannot_delete_pod_but_admin_can():
     # Add a second user as a plain pod MEMBER (cascades them into the org).
     member_h, member_id, member_email = _user()
     r = c.post(
-        f"/api/projects/{project_id}/pods/{pod_id}/members",
+        f"/api/pods/{pod_id}/members",
         json={"email": member_email, "role": "MEMBER"},
         headers=owner_h,
     )
@@ -257,30 +303,55 @@ def test_invite_unregistered_user_provisions_account_with_password_change_flag()
         db.close()
 
 
-def test_change_password_flow():
-    """A normal user must supply the correct current password; doing so clears any
-    must_change_password flag and lets them log in with the new password."""
+def test_first_time_forced_change_then_normal_change():
+    """Every new signup is flagged must_change_password. The first change is
+    mandatory and skips current-password verification; once cleared, later
+    changes require the correct current password."""
     _n[0] += 1
     email = f"pw{_n[0]}_{os.getpid()}@example.com"
     r = c.post("/api/auth/signup", json={"email": email, "password": "oldpassword1", "display_name": "PW"})
+    assert r.json()["user"]["must_change_password"] is True
     h = {"Authorization": f"Bearer {r.json()['access_token']}"}
 
-    # wrong current password is rejected
-    bad = c.post("/api/auth/change-password", json={"current_password": "nope", "new_password": "newpassword1"}, headers=h)
-    assert bad.status_code == 401, bad.text
-
-    # correct current password succeeds
-    ok = c.post(
-        "/api/auth/change-password",
-        json={"current_password": "oldpassword1", "new_password": "newpassword1"},
-        headers=h,
-    )
+    # First (mandatory) change: no current password required, flag clears.
+    ok = c.post("/api/auth/change-password", json={"new_password": "newpassword1"}, headers=h)
     assert ok.status_code < 400, ok.text
     assert ok.json()["must_change_password"] is False
 
     # new password works, old one doesn't
     assert c.post("/api/auth/login", json={"email": email, "password": "newpassword1"}).status_code < 400
     assert c.post("/api/auth/login", json={"email": email, "password": "oldpassword1"}).status_code == 401
+
+    # A subsequent change now DOES require the correct current password.
+    bad = c.post("/api/auth/change-password", json={"current_password": "nope", "new_password": "third1234"}, headers=h)
+    assert bad.status_code == 401, bad.text
+    good = c.post("/api/auth/change-password", json={"current_password": "newpassword1", "new_password": "third1234"}, headers=h)
+    assert good.status_code < 400, good.text
+
+
+def test_publisher_can_add_public_resource_to_marketplace():
+    """A registered publisher adds a resource at PUBLIC scope (no org) — it's
+    public immediately and appears in the marketplace. Non-publishers can't."""
+    h, _, _ = _user()
+
+    # not a publisher yet → PUBLIC create is forbidden
+    r = _make_resource(h, "PUBLIC", None)
+    assert r.status_code == 403, r.text
+
+    # register as a publisher, then it works
+    assert c.post("/api/auth/become-publisher", headers=h).status_code < 400
+    r = c.post(
+        "/api/resources",
+        json={"type": "SKILL", "title": "Public Skill", "scope_type": "PUBLIC", "scope_id": None},
+        headers=h,
+    )
+    assert r.status_code < 400, r.text
+    body = r.json()
+    assert body["is_public"] is True and body["scope_type"] == "PUBLIC"
+
+    # visible on the public marketplace (no auth needed)
+    market = c.get("/api/public/resources").json()
+    assert any(x["id"] == body["id"] for x in market)
 
 
 def _run_all():

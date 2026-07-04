@@ -11,6 +11,7 @@ import { Sidebar, MobileNav } from "@/components/dashboard/Sidebar";
 import { TopBar } from "@/components/dashboard/TopBar";
 import { CommandPalette } from "@/components/dashboard/CommandPalette";
 import { ResourceDrawer } from "@/components/ResourceDrawer";
+import { ChangePasswordGate } from "@/components/dashboard/ChangePasswordGate";
 import { Logo } from "@/components/Logo";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -26,6 +27,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </p>
       </div>
     );
+  }
+
+  // First-entry gate: brand-new / Google / invited accounts must set a password
+  // before they can use the dashboard.
+  if (user.must_change_password) {
+    return <ChangePasswordGate user={user} />;
   }
 
   return (

@@ -29,7 +29,7 @@ export default function PodDetail({
   });
   const { data: members } = useQuery({
     queryKey: [...qk.pod(podId), "members"],
-    queryFn: () => api.podMembers(projectId, podId),
+    queryFn: () => api.podMembers(podId),
   });
 
   return (

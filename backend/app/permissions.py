@@ -2,10 +2,30 @@
 Scope-based access checks (BACKEND_SPEC §4.2).
 """
 
+import re
+
 from sqlalchemy.orm import Session
 
 from .errors import forbidden, not_found
 from .models import Organization, OrgMember, Pod, PodMember, Project, ProjectMember, Resource, User
+
+# --- role vocabulary -------------------------------------------------------
+# Every scope now speaks the same two words: ADMIN | MEMBER. Older rows used
+# LEAD (project) and OWNER (pod) for the admin role; we still honour those as
+# admin so pre-existing data keeps working, and we normalize new writes to
+# ADMIN. Use normalize_role() when persisting and the *_ADMIN_ROLES sets when
+# checking.
+PROJECT_ADMIN_ROLES = ("ADMIN", "LEAD")
+POD_ADMIN_ROLES = ("ADMIN", "OWNER")
+
+
+def normalize_role(role: str | None, *, admin_aliases: tuple[str, ...] = ()) -> str:
+    """Coerce an incoming role to ADMIN | MEMBER. Anything in admin_aliases (or
+    the literal 'ADMIN') becomes ADMIN; everything else becomes MEMBER."""
+    r = (role or "").strip().upper()
+    if r == "ADMIN" or r in admin_aliases:
+        return "ADMIN"
+    return "MEMBER"
 
 
 def require_admin(user: User) -> User:
@@ -105,6 +125,52 @@ def resolve_user(db: Session, *, user_id: str | None = None, email: str | None =
     return u
 
 
+def _unique_username(db: Session, base: str) -> str:
+    candidate = re.sub(r"^-+|-+$", "", re.sub(r"[^a-z0-9]+", "-", base.lower())) or "user"
+    username = candidate
+    n = 1
+    while db.query(User.id).filter(User.username == username).first():
+        n += 1
+        username = f"{candidate}-{n}"
+    return username
+
+
+def resolve_or_provision_user(
+    db: Session, *, user_id: str | None = None, email: str | None = None
+) -> tuple[User, str | None]:
+    """Like resolve_user, but when only an email is given and no account exists
+    yet, auto-provision one with a temporary password (must_change_password) so
+    a teammate can be added to a pod/project directly by email — the same
+    onboarding the org-invite flow uses. Returns (user, temp_password) where
+    temp_password is non-None only for a freshly-created account (so the caller
+    can email the credentials). Callers must commit."""
+    # Deferred import avoids a security ⇄ permissions import cycle.
+    from .security import generate_temp_password, hash_password
+
+    if user_id:
+        u = db.get(User, user_id)
+        if not u:
+            raise not_found("User")
+        return u, None
+    if not email:
+        raise not_found("User")
+    email = email.lower()
+    u = db.query(User).filter(User.email == email).first()
+    if u:
+        return u, None
+    temp_password = generate_temp_password()
+    u = User(
+        email=email,
+        password_hash=hash_password(temp_password),
+        username=_unique_username(db, email.split("@")[0]),
+        display_name=email.split("@")[0],
+        must_change_password=True,
+    )
+    db.add(u)
+    db.flush()
+    return u, temp_password
+
+
 def project_or_404(db: Session, project_id: str) -> Project:
     p = db.get(Project, project_id)
     if not p:
@@ -143,6 +209,30 @@ def require_project_access(db: Session, project: Project, user: User) -> None:
         raise forbidden("You are not a member of this project")
 
 
+def require_project_admin(db: Session, project: Project, user: User) -> OrgMember | None:
+    """Manage a project's membership (add/change-role/remove): a project ADMIN
+    (legacy LEAD) or an org ADMIN. A plain project MEMBER may contribute
+    resources but must not manage people."""
+    org = db.get(Organization, project.org_id)
+    m = org_membership(db, org, user) if org else None
+    if not m:
+        raise forbidden("You are not a member of this organization")
+    if m.role == "ADMIN":
+        return m
+    is_admin = (
+        db.query(ProjectMember.id)
+        .filter(
+            ProjectMember.project_id == project.id,
+            ProjectMember.user_id == user.id,
+            ProjectMember.role.in_(PROJECT_ADMIN_ROLES),
+        )
+        .first()
+    )
+    if not is_admin:
+        raise forbidden("Only a project admin or org admin can manage members")
+    return None
+
+
 def require_pod_access(db: Session, pod: Pod, user: User) -> None:
     """Pod member OR project lead OR org admin (§4.2)."""
     project = project_or_404(db, pod.project_id)
@@ -162,7 +252,7 @@ def require_pod_access(db: Session, pod: Pod, user: User) -> None:
         .filter(
             ProjectMember.project_id == project.id,
             ProjectMember.user_id == user.id,
-            ProjectMember.role == "LEAD",
+            ProjectMember.role.in_(PROJECT_ADMIN_ROLES),
         )
         .first()
     )
@@ -183,7 +273,7 @@ def require_pod_admin(db: Session, pod: Pod, user: User) -> None:
         return
     pod_owner = (
         db.query(PodMember.id)
-        .filter(PodMember.pod_id == pod.id, PodMember.user_id == user.id, PodMember.role == "OWNER")
+        .filter(PodMember.pod_id == pod.id, PodMember.user_id == user.id, PodMember.role.in_(POD_ADMIN_ROLES))
         .first()
     )
     if pod_owner:
@@ -193,12 +283,12 @@ def require_pod_admin(db: Session, pod: Pod, user: User) -> None:
         .filter(
             ProjectMember.project_id == project.id,
             ProjectMember.user_id == user.id,
-            ProjectMember.role == "LEAD",
+            ProjectMember.role.in_(PROJECT_ADMIN_ROLES),
         )
         .first()
     )
     if not lead:
-        raise forbidden("Only a pod owner, project lead, or org admin can delete this pod")
+        raise forbidden("Only a pod admin, project admin, or org admin can delete this pod")
 
 
 def require_project_read(db: Session, project: Project, user: User) -> None:
