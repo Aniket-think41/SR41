@@ -6,12 +6,14 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..errors import not_found, validation
-from ..models import BlogPost, ChangelogEntry, ContentPage, Follow, Organization, Resource, User
+from ..models import BlogPost, ChangelogEntry, ContentPage, Feedback, Follow, Organization, Resource, User
+from ..schemas import PublicFeedbackIn
 from ..security import get_current_user, get_current_user_optional
 from ..serialize import (
     blog_post_out,
     changelog_out,
     content_page_out,
+    public_feedback_out,
     resource_out,
     search_rank,
     user_out,
@@ -256,3 +258,50 @@ def public_plans():
     from ..entitlements import plan_catalog
 
     return plan_catalog()
+
+
+# ---- public feedback (spec §4) ----
+
+
+@router.get("/feedback")
+def public_feedback_list(
+    db: Session = Depends(get_db),
+    limit: int = Query(default=30, ge=1, le=100),
+):
+    """Approved testimonials for the public website, newest first."""
+    rows = (
+        db.query(Feedback)
+        .filter(Feedback.public_status == "approved")
+        .order_by(Feedback.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [public_feedback_out(f) for f in rows]
+
+
+@router.post("/feedback")
+def public_feedback_submit(
+    body: PublicFeedbackIn,
+    user: User | None = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+):
+    """Submit feedback from the marketing site — no account required. Enters the
+    moderation queue (pending) until an admin approves it for public display."""
+    if body.target_type == "resource":
+        if not body.target_id or not db.get(Resource, body.target_id):
+            raise not_found("Resource")
+    fb = Feedback(
+        user_id=user.id if user else None,
+        author_name=(body.name or "").strip() or (user.display_name if user else None),
+        author_email=(body.email or "").strip() or None,
+        target_type=body.target_type,
+        target_id=body.target_id if body.target_type == "resource" else None,
+        rating=body.rating,
+        category=body.category,
+        message=body.message.strip(),
+        source="website",
+        public_status="pending",
+    )
+    db.add(fb)
+    db.commit()
+    return {"ok": True, "id": fb.id, "status": "pending"}

@@ -27,6 +27,7 @@ from ..schemas import (
     ChangelogCreate,
     ChangelogPatch,
     ContentPagePatch,
+    FeedbackModerateIn,
     FeedbackStatusIn,
     SetPlanIn,
     VerifyPublisherIn,
@@ -211,6 +212,22 @@ def set_feedback_status(
     if not fb:
         raise not_found("Feedback")
     fb.status = body.status
+    db.commit()
+    return feedback_out(db, fb, include_user=True)
+
+
+@router.post("/feedback/{feedback_id}/moderate")
+def moderate_feedback(
+    feedback_id: str,
+    body: FeedbackModerateIn,
+    _: User = Depends(admin_user),
+    db: Session = Depends(get_db),
+):
+    """Approve/reject a feedback item for public display on the website (spec §4)."""
+    fb = db.get(Feedback, feedback_id)
+    if not fb:
+        raise not_found("Feedback")
+    fb.public_status = "approved" if body.decision == "approve" else "rejected"
     db.commit()
     return feedback_out(db, fb, include_user=True)
 

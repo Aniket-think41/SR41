@@ -76,10 +76,18 @@ def _ensure_additive_columns() -> None:
         ("resources", "review_note", "VARCHAR"),
         ("resources", "reviewed_by", "VARCHAR"),
         ("resources", "reviewed_at", "TIMESTAMP"),
+        # Public feedback (spec §4): anonymous website submissions + moderation.
+        ("feedback", "author_name", "VARCHAR"),
+        ("feedback", "author_email", "VARCHAR"),
+        ("feedback", "public_status", "VARCHAR NOT NULL DEFAULT 'pending'"),
     ]
+    # One-off NOT NULL relaxations (Postgres only — SQLite dev DBs are rebuilt by
+    # create_all). feedback.user_id must allow NULL for anonymous website feedback.
+    relax_not_null = [("feedback", "user_id")]
     try:
         inspector = inspect(engine)
         existing_tables = set(inspector.get_table_names())
+        is_postgres = engine.dialect.name == "postgresql"
         with engine.begin() as conn:
             for table, column, ddl in additive:
                 if table not in existing_tables:
@@ -89,6 +97,14 @@ def _ensure_additive_columns() -> None:
                     continue
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
                 log.info("Added column %s.%s", table, column)
+            if is_postgres:
+                for table, column in relax_not_null:
+                    if table not in existing_tables:
+                        continue
+                    col = next((c for c in inspector.get_columns(table) if c["name"] == column), None)
+                    if col is not None and not col.get("nullable", True):
+                        conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} DROP NOT NULL"))
+                        log.info("Relaxed NOT NULL on %s.%s", table, column)
     except Exception:
         log.exception("Additive column migration failed")
 

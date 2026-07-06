@@ -569,6 +569,7 @@ def feedback_out(db: Session, f: Feedback, *, include_user: bool = False) -> dic
     out = {
         "id": f.id,
         "user_id": f.user_id,
+        "author_name": f.author_name,
         "target_type": f.target_type,
         "target_id": f.target_id,
         "target": target,
@@ -578,12 +579,28 @@ def feedback_out(db: Session, f: Feedback, *, include_user: bool = False) -> dic
         "source": f.source,
         "context": f.context,
         "status": f.status,
+        "public_status": f.public_status,
         "created_at": f.created_at,
         "updated_at": f.updated_at,
     }
     if include_user:
         out["user"] = user_out(f.user) if f.user else None
+        out["author_email"] = f.author_email
     return out
+
+
+def public_feedback_out(f: Feedback) -> dict:
+    """A safe, minimal testimonial for the public website — no email, no ids."""
+    display = f.author_name or (f.user.display_name if f.user else "Anonymous")
+    return {
+        "id": f.id,
+        "author": display,
+        "avatar_url": f.user.avatar_url if f.user else None,
+        "rating": f.rating,
+        "category": f.category,
+        "message": f.message,
+        "created_at": f.created_at,
+    }
 
 
 def sort_resources(rows: list[Resource], sort: str | None) -> list[Resource]:

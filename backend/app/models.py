@@ -342,15 +342,23 @@ class Feedback(Base):
     __tablename__ = "feedback"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("fb"))
-    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
+    # Nullable since spec §4: the public website accepts anonymous feedback
+    # (identified by author_name/author_email instead of an account).
+    user_id: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"), nullable=True, index=True)
+    author_name: Mapped[str | None] = mapped_column(String, nullable=True)   # anonymous website submitter
+    author_email: Mapped[str | None] = mapped_column(String, nullable=True)
     target_type: Mapped[str] = mapped_column(String, default="platform", index=True)  # platform | resource
     target_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)  # resource id when resource-scoped
     rating: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 1..5, optional
     category: Mapped[str] = mapped_column(String, default="general")  # bug | idea | praise | question | other | general
     message: Mapped[str] = mapped_column(Text, default="")
-    source: Mapped[str] = mapped_column(String, default="dashboard")  # dashboard | cli | mcp
+    source: Mapped[str] = mapped_column(String, default="dashboard")  # dashboard | cli | mcp | website
     context: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # {page, app_version, …}
-    status: Mapped[str] = mapped_column(String, default="open", index=True)  # open | reviewed
+    status: Mapped[str] = mapped_column(String, default="open", index=True)  # open | reviewed (triage)
+    # Public display moderation (spec §4): only "approved" feedback is shown as a
+    # testimonial on the website. Defaults to pending so nothing surfaces publicly
+    # until an admin approves it.
+    public_status: Mapped[str] = mapped_column(String, default="pending", index=True)  # pending | approved | rejected
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 

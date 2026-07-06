@@ -278,6 +278,25 @@ class FeedbackIn(BaseModel):
     context: dict | None = None
 
 
+class PublicFeedbackIn(BaseModel):
+    """Anonymous feedback from the marketing website (spec §4). Enters the
+    moderation queue (public_status=pending) until an admin approves it."""
+
+    message: str = Field(min_length=1, max_length=4000)
+    rating: int | None = Field(default=None, ge=1, le=5)
+    category: FeedbackCategory = "general"
+    name: str | None = Field(default=None, max_length=120)
+    email: str | None = Field(default=None, max_length=200)
+    target_type: Literal["platform", "resource"] = "platform"
+    target_id: str | None = None
+
+
+class FeedbackModerateIn(BaseModel):
+    """Admin decision on whether a feedback item shows publicly (spec §4)."""
+
+    decision: Literal["approve", "reject"]
+
+
 class FeedbackStatusIn(BaseModel):
     """Admin triage: flip an item open ⇄ reviewed."""
 
