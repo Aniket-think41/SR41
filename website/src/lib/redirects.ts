@@ -35,3 +35,7 @@ export const addToOrg = (id: string) =>
 /** Publisher page — "Follow" (no public publisher page in the dashboard yet). */
 export const followPublisher = () =>
   `${login}?redirect=${encodeURIComponent(`/dashboard/marketplace`)}`;
+
+/** Org page — "Follow" (send to the org in the dashboard after sign-in). */
+export const followOrg = (slug: string) =>
+  `${login}?redirect=${encodeURIComponent(`/dashboard/orgs/${slug}`)}`;

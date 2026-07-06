@@ -20,6 +20,7 @@ const columns = [
       { label: "Skills", href: "/?type=skill" },
       { label: "MCP servers", href: "/?type=mcp" },
       { label: "Notes", href: "/?type=note" },
+      { label: "Organizations", href: "/orgs" },
       { label: "Publishers", href: "/publishers/think41" },
     ],
   },
@@ -28,6 +29,7 @@ const columns = [
     links: [
       { label: "Think41", href: "https://think41.com" },
       { label: "Blog", href: "/blog" },
+      { label: "Feedback", href: "/feedback" },
       { label: "Privacy", href: "/privacy" },
       { label: "Terms", href: "/terms" },
     ],

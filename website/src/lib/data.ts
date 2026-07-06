@@ -362,3 +362,225 @@ export const initialsOf = (name: string) => {
 };
 
 export const yearOf = (iso?: string) => (iso ? new Date(iso).getFullYear().toString() : "");
+
+// ---------------------------------------------------------------------------
+// Pricing plans — backend-driven (GET /api/public/plans), seed fallback below.
+// Mirrors backend/app/entitlements.py PLAN_SPECS field-for-field.
+// ---------------------------------------------------------------------------
+
+export type PlanKey = "FREE" | "PRO" | "ENTERPRISE";
+
+export interface Plan {
+  key: PlanKey;
+  name: string;
+  price_usd: number;
+  max_orgs: number | null; // null = unlimited, 0 = none
+  resource_quota: number | null; // null = unlimited
+  mcp_included: boolean;
+  tagline: string;
+}
+
+const PLAN_SEED: Plan[] = [
+  {
+    key: "FREE",
+    name: "Free",
+    price_usd: 0,
+    max_orgs: 0,
+    resource_quota: 100,
+    mcp_included: false,
+    tagline: "Publish as an individual. Up to 100 resources.",
+  },
+  {
+    key: "PRO",
+    name: "Pro",
+    price_usd: 20,
+    max_orgs: 2,
+    resource_quota: 500,
+    mcp_included: true,
+    tagline: "Up to 2 organizations, 500 resources each, MCP included.",
+  },
+  {
+    key: "ENTERPRISE",
+    name: "Enterprise",
+    price_usd: 100,
+    max_orgs: null,
+    resource_quota: null,
+    mcp_included: true,
+    tagline: "Unlimited organizations and resources. MCP unlimited.",
+  },
+];
+
+export async function getPlans(): Promise<Plan[]> {
+  return (await apiGet<Plan[]>("/plans")) ?? PLAN_SEED;
+}
+
+// ---------------------------------------------------------------------------
+// Public feedback / testimonials — GET/POST /api/public/feedback.
+// Mirrors backend/app/serialize.py public_feedback_out.
+// ---------------------------------------------------------------------------
+
+export interface Feedback {
+  id: string;
+  author: string;
+  avatar_url: string | null;
+  rating: number | null;
+  category: string | null;
+  message: string;
+  created_at: string;
+}
+
+export interface FeedbackInput {
+  message: string;
+  rating?: number | null;
+  category?: string | null;
+  name?: string | null;
+  email?: string | null;
+}
+
+export interface FeedbackResult {
+  ok: boolean;
+  id?: string;
+  status?: string;
+}
+
+const FEEDBACK_SEED: Feedback[] = [
+  {
+    id: "fb-1",
+    author: "Priya Menon",
+    avatar_url: null,
+    rating: 5,
+    category: "praise",
+    message:
+      "SkillShare finally gave our team one place to publish skills and MCP servers. Org-level inheritance means every pod picks up our conventions without us copy-pasting anything.",
+    created_at: "2026-05-28T00:00:00",
+  },
+  {
+    id: "fb-2",
+    author: "Marcus Lee",
+    avatar_url: null,
+    rating: 5,
+    category: "praise",
+    message:
+      "The CLI-to-marketplace flow is the smoothest I've used. `scan_local` found three skills I'd built and never shared — secrets stripped automatically before push.",
+    created_at: "2026-05-20T00:00:00",
+  },
+  {
+    id: "fb-3",
+    author: "Ada Rao",
+    avatar_url: null,
+    rating: 4,
+    category: "feature",
+    message:
+      "Verified-publisher profiles make it easy for teams to trust what they install. Would love private marketplaces next.",
+    created_at: "2026-05-11T00:00:00",
+  },
+];
+
+export async function getFeedback(): Promise<Feedback[]> {
+  return (await apiGet<Feedback[]>("/feedback")) ?? FEEDBACK_SEED;
+}
+
+/** POST a testimonial. Server-side only (keeps API_URL off the client).
+ *  When no backend is configured, acknowledges optimistically so the
+ *  standalone marketing build still confirms "pending review". */
+export async function submitFeedback(input: FeedbackInput): Promise<FeedbackResult> {
+  const message = input.message?.trim();
+  if (!message) return { ok: false };
+  if (!API_BASE) return { ok: true, status: "pending" };
+  try {
+    const res = await fetch(`${API_BASE}/api/public/feedback`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({
+        message,
+        rating: input.rating ?? null,
+        category: input.category ?? null,
+        name: input.name?.trim() || null,
+        email: input.email?.trim() || null,
+      }),
+      cache: "no-store",
+    });
+    if (!res.ok) return { ok: false };
+    const data = (await res.json()) as FeedbackResult;
+    return { ok: true, id: data.id, status: data.status ?? "pending" };
+  } catch {
+    return { ok: false };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public organizations — directory + profile.
+//   GET /api/public/orgs        → OrgSummary[]
+//   GET /api/public/orgs/{slug} → OrgProfile
+// ---------------------------------------------------------------------------
+
+export interface OrgSummary {
+  slug: string;
+  name: string;
+  logo_url: string | null;
+  description: string | null;
+  public_resources: number;
+}
+
+export interface OrgProfile {
+  slug: string;
+  name: string;
+  logo_url: string | null;
+  description: string | null;
+  created_at?: string;
+  followers_count: number;
+  following: boolean;
+  resources: Resource[];
+}
+
+// Fallback directory — maps the two seed orgs to their public resources.
+const ORG_RESOURCE_AUTHORS: Record<string, string[]> = {
+  think41: ["think41"],
+  "studio-mono": ["studio-mono"],
+};
+
+const ORG_SEED: Record<string, Omit<OrgProfile, "resources" | "public_resources">> = {
+  think41: {
+    slug: "think41",
+    name: "Think41",
+    logo_url: null,
+    description: "AI-native product studio. Home of SkillShare.",
+    created_at: "2025-09-12T00:00:00",
+    followers_count: 128,
+    following: false,
+  },
+  "studio-mono": {
+    slug: "studio-mono",
+    name: "Studio Mono",
+    logo_url: null,
+    description: "Design-system and frontend skills for AI agents.",
+    created_at: "2025-08-02T00:00:00",
+    followers_count: 47,
+    following: false,
+  },
+};
+
+const seedOrgResources = (slug: string): Resource[] => {
+  const authors = ORG_RESOURCE_AUTHORS[slug] ?? [];
+  return SEED.filter((r) => r.author && authors.includes(r.author.username));
+};
+
+export async function getOrgs(): Promise<OrgSummary[]> {
+  const live = await apiGet<OrgSummary[]>("/orgs");
+  if (live) return live;
+  return Object.values(ORG_SEED).map((o) => ({
+    slug: o.slug,
+    name: o.name,
+    logo_url: o.logo_url,
+    description: o.description,
+    public_resources: seedOrgResources(o.slug).length,
+  }));
+}
+
+export async function getOrg(slug: string): Promise<OrgProfile | undefined> {
+  const live = await apiGet<OrgProfile>(`/orgs/${slug}`);
+  if (live) return live;
+  const o = ORG_SEED[slug];
+  if (!o) return undefined;
+  return { ...o, resources: seedOrgResources(slug) };
+}
