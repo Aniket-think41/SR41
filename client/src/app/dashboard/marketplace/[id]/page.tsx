@@ -72,7 +72,7 @@ function Detail({ params }: { params: Promise<{ id: string }> }) {
   });
 
   if (isLoading)
-    return <div className="card mx-auto h-96 max-w-3xl animate-pulse bg-surface" />;
+    return <div className="skeleton mx-auto h-96 max-w-3xl" />;
   if (!r)
     return (
       <div className="py-20 text-center">

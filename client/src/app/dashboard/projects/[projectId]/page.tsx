@@ -94,7 +94,7 @@ export default function ProjectDetail({ params }: { params: Promise<{ projectId:
         {podsLoading ? (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="card h-36 animate-pulse bg-surface" />
+              <div key={i} className="skeleton h-36" />
             ))}
           </div>
         ) : (

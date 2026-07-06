@@ -346,6 +346,58 @@ h1, h2, h3, h4 {
   .drawer-panel, .overlay-fade, .pop { animation: none; }
 }
 
+/* --- Loading: shimmer skeletons + global fetch bar --- */
+@keyframes shimmer {
+  100% { transform: translateX(100%); }
+}
+/* A skeleton block with a sweeping highlight — reads as "loading", not "empty". */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-surface-2, #eef0f3);
+  border-radius: 0.75rem;
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.65),
+    transparent
+  );
+  animation: shimmer 1.4s infinite;
+}
+/* Top-of-viewport progress bar shown whenever a request is in flight, so the
+   app never looks frozen during a slow/cold-start API call. */
+@keyframes fetchbar {
+  0%   { left: -35%; width: 35%; }
+  50%  { left: 40%;  width: 45%; }
+  100% { left: 100%; width: 35%; }
+}
+.fetch-bar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  z-index: 100;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  pointer-events: none;
+}
+.fetch-bar > span {
+  position: absolute;
+  top: 0; bottom: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--color-primary), var(--color-primary-700, #5b45c9));
+  animation: fetchbar 1.1s var(--ease-out-quint) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after { animation: none; }
+  .fetch-bar > span { animation: none; left: 0; width: 100%; opacity: 0.5; }
+}
+
 /* --- Markdown prose (notes, SKILL.md) --- */
 .prose-md {
   font-size: 0.92rem;

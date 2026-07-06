@@ -12,6 +12,7 @@ import { TopBar } from "@/components/dashboard/TopBar";
 import { CommandPalette } from "@/components/dashboard/CommandPalette";
 import { ResourceDrawer } from "@/components/ResourceDrawer";
 import { ChangePasswordGate } from "@/components/dashboard/ChangePasswordGate";
+import { GlobalFetchingBar } from "@/components/dashboard/GlobalFetchingBar";
 import { Logo } from "@/components/Logo";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -37,6 +38,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="min-h-screen bg-surface">
+      <GlobalFetchingBar />
       <Sidebar />
       <TopBar />
       <CommandPalette />

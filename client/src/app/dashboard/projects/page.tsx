@@ -83,7 +83,7 @@ export default function ProjectsPage() {
       {isLoading ? (
         <div className="mt-6 grid gap-4 sm:grid-cols-2">
           {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="card h-40 animate-pulse bg-surface" />
+            <div key={i} className="skeleton h-40" />
           ))}
         </div>
       ) : (

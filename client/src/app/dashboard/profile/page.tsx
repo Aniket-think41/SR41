@@ -228,7 +228,7 @@ export default function ProfilePage() {
   };
 
   if (!profile) {
-    return <div className="card mx-auto h-96 max-w-4xl animate-pulse bg-surface" />;
+    return <div className="skeleton mx-auto h-96 max-w-4xl" />;
   }
 
   return (

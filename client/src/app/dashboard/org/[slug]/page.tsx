@@ -139,7 +139,7 @@ export default function OrgPage({ params }: { params: Promise<{ slug: string }> 
         </h2>
         {published === undefined ? (
           <div className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {[0, 1, 2].map((i) => <div key={i} className="card h-40 animate-pulse bg-surface" />)}
+            {[0, 1, 2].map((i) => <div key={i} className="skeleton h-40" />)}
           </div>
         ) : list.length === 0 ? (
           <p className="mt-5 flex flex-col items-center gap-2 rounded-2xl border border-dashed border-line p-10 text-center text-sm text-muted">

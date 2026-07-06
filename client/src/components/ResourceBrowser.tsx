@@ -125,7 +125,7 @@ export function ResourceBrowser({
       {isLoading ? (
         <div className="mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="card h-56 animate-pulse bg-surface" />
+            <div key={i} className="skeleton h-56" />
           ))}
         </div>
       ) : list && list.length > 0 ? (

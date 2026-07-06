@@ -16,6 +16,7 @@ import { useUi } from "@/lib/store";
 import { timeAgo } from "@/lib/utils";
 import { Avatar } from "@/components/Avatar";
 import { TypeGlyph } from "@/components/badges";
+import { Skeleton } from "@/components/Loading";
 
 const VERBS: Record<string, string> = {
   created: "created",
@@ -109,7 +110,11 @@ export default function DashboardHome() {
             <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary-50 text-primary">
               <Icon className="h-4.5 w-4.5" />
             </span>
-            <p className="font-display mt-3 text-3xl font-semibold">{value}</p>
+            {value === "—" ? (
+              <Skeleton className="mt-3 h-8 w-12" />
+            ) : (
+              <p className="font-display mt-3 text-3xl font-semibold">{value}</p>
+            )}
             <p className="text-xs font-semibold uppercase tracking-wider text-muted">{label}</p>
           </Link>
         ))}
@@ -125,6 +130,8 @@ export default function DashboardHome() {
             </Link>
           </div>
           <div className="space-y-2">
+            {orgResources === undefined &&
+              Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
             {(orgResources ?? []).slice(0, 5).map((r) => (
               <button
                 key={r.id}
@@ -150,6 +157,8 @@ export default function DashboardHome() {
         <section className="card min-w-0 p-6">
           <h2 className="font-display mb-4 text-lg font-semibold">Recent activity</h2>
           <ol className="relative space-y-4 before:absolute before:bottom-2 before:left-[11px] before:top-2 before:w-px before:bg-line">
+            {activity === undefined &&
+              Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
             {(activity ?? []).slice(0, 8).map((a) => (
               <li key={a.id} className="relative flex items-start gap-3 pl-0.5">
                 <Avatar name={a.user?.display_name ?? "?"} src={a.user?.avatar_url} size="xs" className="relative z-10 ring-2 ring-white" />
