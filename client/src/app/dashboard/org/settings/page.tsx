@@ -14,6 +14,8 @@ import { errorMessage, USING_MOCK } from "@/lib/api/http";
 import { useCurrentOrg } from "@/lib/hooks";
 import { Avatar } from "@/components/Avatar";
 import { FeaturesCard } from "@/components/dashboard/FeaturesCard";
+import { PlanUsageCard } from "@/components/dashboard/PlanUsageCard";
+import { OrgReviewQueueCard } from "@/components/dashboard/OrgReviewQueueCard";
 import { TerminologyCard } from "@/components/dashboard/TerminologyCard";
 import { useToast } from "@/components/Toast";
 
@@ -114,6 +116,10 @@ export default function OrgSettingsPage() {
           )}
         </div>
       </div>
+
+      <PlanUsageCard />
+
+      <OrgReviewQueueCard />
 
       <FeaturesCard />
 

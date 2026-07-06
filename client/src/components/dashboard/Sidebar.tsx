@@ -6,6 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   LayoutDashboard, FolderKanban, Library, Users, Settings,
   Store, LogOut, PanelLeftClose, PanelLeftOpen, UserCircle,
+  CreditCard, ShieldCheck, MessagesSquare,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useFeature, useSession, useTerms } from "@/lib/hooks";
@@ -19,15 +20,29 @@ import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 /** Nav items per workspace. Org mode = projects/members/RBAC; publisher mode =
  *  just the marketplace + the publisher's own resources (no org/RBAC surfaces).
  *  `label` may be overridden by org terminology; `feature` gates visibility. */
-function useNav() {
+type NavItem = { label: string; href: string; icon: typeof LayoutDashboard; exact?: boolean };
+
+function useNav(): NavItem[] {
   const terms = useTerms();
   const marketplace = useFeature("marketplace");
   const { workspace } = useUi();
+  const { data: user } = useSession();
+
+  // Platform-admin surfaces (review queue + feedback moderation), shown in
+  // either workspace when the signed-in user is a platform admin (spec §3/§4).
+  const adminItems = user?.is_admin
+    ? [
+        { label: "Review Queue", href: "/dashboard/admin/review", icon: ShieldCheck },
+        { label: "Feedback", href: "/dashboard/admin/feedback", icon: MessagesSquare },
+      ]
+    : [];
 
   if (workspace === "publisher") {
     return [
       { label: "My Resources", href: "/dashboard/publisher", icon: Library, exact: true },
       { label: "Marketplace", href: "/dashboard/marketplace", icon: Store },
+      { label: "Billing", href: "/dashboard/billing", icon: CreditCard },
+      ...adminItems,
     ];
   }
 
@@ -40,6 +55,7 @@ function useNav() {
       : []),
     { label: "Members", href: "/dashboard/members", icon: Users },
     { label: "Settings", href: "/dashboard/org/settings", icon: Settings },
+    ...adminItems,
   ];
 }
 

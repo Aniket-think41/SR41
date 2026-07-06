@@ -11,7 +11,7 @@ import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { FolderKanban, Library, Users, Star, ArrowRight, Plus } from "lucide-react";
 import { api } from "@/lib/api";
-import { qk, useCurrentOrg, useFeature, useSession, useTerms } from "@/lib/hooks";
+import { qk, useCanCreateOrg, useCurrentOrg, useFeature, useSession, useTerms } from "@/lib/hooks";
 import { useUi } from "@/lib/store";
 import { timeAgo } from "@/lib/utils";
 import { Avatar } from "@/components/Avatar";
@@ -29,8 +29,9 @@ const VERBS: Record<string, string> = {
 
 export default function DashboardHome() {
   const { data: user } = useSession();
-  const { org } = useCurrentOrg();
-  const { openAdd, openDetail, workspace } = useUi();
+  const { org, orgs, isLoading: orgsLoading } = useCurrentOrg();
+  const { openAdd, openDetail, workspace, setWorkspace } = useUi();
+  const { canCreate, reason } = useCanCreateOrg();
   const terms = useTerms();
   const router = useRouter();
   const activityFeature = useFeature("activity-feed");
@@ -39,6 +40,10 @@ export default function DashboardHome() {
   useEffect(() => {
     if (workspace === "publisher") router.replace("/dashboard/publisher");
   }, [workspace, router]);
+
+  // Onboarding: a user with no organizations can't dead-end here. FREE users
+  // can't create one (spec §2) — point them at their publisher space / upgrade.
+  const noOrgs = !orgsLoading && orgs.length === 0;
 
   const { data: projects } = useQuery({
     queryKey: qk.projects(org?.slug ?? ""),
@@ -62,6 +67,44 @@ export default function DashboardHome() {
   });
 
   const firstName = user?.display_name.split(" ")[0] ?? "";
+
+  if (noOrgs) {
+    return (
+      <div className="mx-auto max-w-xl py-10">
+        <div className="card p-8 text-center">
+          <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-50 text-primary">
+            <Plus className="h-6 w-6" />
+          </span>
+          <h1 className="font-display mt-4 text-2xl font-semibold">
+            Welcome{firstName ? `, ${firstName}` : ""}!
+          </h1>
+          <p className="mt-2 text-sm text-body">
+            {canCreate
+              ? "Create your first organization to start collaborating with a team — or publish resources to the marketplace on your own."
+              : "You're not part of any organization yet. Publish to the marketplace as an individual, or upgrade to create an organization for your team."}
+          </p>
+          {reason && !canCreate && <p className="mt-2 text-xs text-muted">{reason}</p>}
+          <div className="mt-6 flex flex-wrap justify-center gap-3">
+            <button
+              onClick={() => {
+                setWorkspace("publisher");
+                router.push("/dashboard/publisher");
+              }}
+              className="btn btn-primary"
+            >
+              Go to your publisher space
+            </button>
+            {!canCreate && (
+              <Link href="/dashboard/billing" className="btn btn-secondary">
+                See plans
+              </Link>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 

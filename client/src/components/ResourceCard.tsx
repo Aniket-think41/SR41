@@ -83,6 +83,16 @@ export function ResourceCard({
             </span>
           )}
           <span className="text-xs text-muted">v{r.version}</span>
+          {r.approval_status === "pending" && (
+            <span className="tag !bg-amber-100 !text-amber-800" title="Awaiting a reviewer's decision">
+              Pending review
+            </span>
+          )}
+          {r.approval_status === "rejected" && (
+            <span className="tag !bg-red-100 !text-red-700" title={r.review_note ?? undefined}>
+              Rejected
+            </span>
+          )}
         </div>
 
         <h3 className="font-display mt-3 break-words text-lg font-semibold leading-snug transition group-hover:text-primary">

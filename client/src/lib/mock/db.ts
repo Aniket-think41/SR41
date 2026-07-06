@@ -15,6 +15,7 @@ import type {
   Notification,
   Organization,
   OrgMember,
+  Payment,
   Pod,
   PodMember,
   Project,
@@ -39,6 +40,7 @@ export const FEATURES: FeatureFlag[] = [
     key: "publishing",
     name: "Marketplace publishing",
     description: "Let members publish org resources to the public marketplace.",
+    min_plan: "PRO",
     premium: true,
     default_enabled: true,
   },
@@ -67,6 +69,7 @@ export const FEATURES: FeatureFlag[] = [
     key: "custom-terminology",
     name: "Custom terminology",
     description: "Rename Projects and Pods to match how your org works — e.g. call pods “Teams”.",
+    min_plan: "PRO",
     premium: true,
     default_enabled: true,
   },
@@ -93,6 +96,8 @@ export interface Db {
   notifications: Notification[];
   /** product feedback submitted from the dashboard / CLI / MCP */
   feedback: Feedback[];
+  /** billing payments (spec §5) — populated by a paid webhook in real mode */
+  payments: Payment[];
   /** per-org feature overrides (absent key → catalog default) */
   org_features: { id: string; org_id: string; key: string; enabled: boolean }[];
   /** CLI/MCP device-login sessions awaiting approval on /activate */
@@ -108,7 +113,7 @@ export interface Db {
   session_user_id: string | null;
 }
 
-const STORAGE_KEY = "skillshare.mockdb.v8"; // v8: product feedback
+const STORAGE_KEY = "skillshare.mockdb.v9"; // v9: plans/entitlements, review, billing
 
 const t = (iso: string) => new Date(iso).toISOString();
 
@@ -124,6 +129,8 @@ const seedUsers: User[] = [
     website: "https://think41.com",
     is_publisher: true,
     verified: true,
+    plan: "ENTERPRISE",
+    is_admin: true, // platform admin (review queue, feedback moderation, plan grants)
     created_at: t("2025-09-12"),
     updated_at: t("2026-05-01"),
   },
@@ -136,6 +143,7 @@ const seedUsers: User[] = [
     bio: "The team behind SkillShare. Foundational skills and MCP servers, maintained and verified.",
     is_publisher: true,
     verified: true,
+    plan: "ENTERPRISE",
     created_at: t("2025-06-01"),
     updated_at: t("2026-05-01"),
   },
@@ -148,6 +156,7 @@ const seedUsers: User[] = [
     bio: "Platform engineer. I build retrieval and code-review skills for fast-moving teams.",
     is_publisher: true,
     verified: true,
+    plan: "PRO",
     created_at: t("2025-07-15"),
     updated_at: t("2026-04-20"),
   },
@@ -160,6 +169,7 @@ const seedUsers: User[] = [
     bio: "Infra & observability. MCP servers that connect agents to real production systems.",
     is_publisher: true,
     verified: false,
+    plan: "FREE",
     created_at: t("2026-01-10"),
     updated_at: t("2026-05-10"),
   },
@@ -172,6 +182,7 @@ const seedUsers: User[] = [
     bio: "A two-person studio shipping design-system and frontend skills for AI agents.",
     is_publisher: true,
     verified: true,
+    plan: "FREE",
     created_at: t("2025-08-02"),
     updated_at: t("2026-05-02"),
   },
@@ -183,6 +194,7 @@ const seedUsers: User[] = [
     avatar_url: null,
     bio: "Product engineer, Atlas team.",
     is_publisher: false,
+    plan: "FREE",
     created_at: t("2025-10-05"),
     updated_at: t("2026-04-28"),
   },
@@ -194,6 +206,7 @@ const seedUsers: User[] = [
     avatar_url: null,
     bio: "Agent infrastructure, Forge team.",
     is_publisher: false,
+    plan: "FREE",
     created_at: t("2025-11-21"),
     updated_at: t("2026-05-12"),
   },
@@ -816,6 +829,92 @@ const seedInvitations: Invitation[] = [
   },
 ];
 
+/** Two resources awaiting a public-listing decision (spec §3), so the review
+ *  queues aren't empty in the demo. One PUBLIC item (→ platform-admin queue),
+ *  one org-owned item published by a non-admin member (→ org-admin queue). */
+const seedReviewQueue: Resource[] = [
+  {
+    id: "review-public-1",
+    type: "SKILL",
+    title: "Changelog Writer",
+    description: "Turns a range of commits into a clean, categorized changelog entry.",
+    content_md: "# Changelog Writer\n\nGroups commits by type and drafts release notes.",
+    file_url: null,
+    version: "0.2.0",
+    tags: ["release", "changelog", "git"],
+    scope_type: "PUBLIC",
+    scope_id: null,
+    author_id: "u-ada",
+    is_public: true,
+    approval_status: "pending",
+    review_note: null,
+    stars_count: 0,
+    installs_count: 0,
+    created_at: t("2026-06-30"),
+    updated_at: t("2026-06-30"),
+  },
+  {
+    id: "review-org-1",
+    type: "NOTE",
+    title: "Atlas Onboarding Notes",
+    description: "How the Atlas team runs its retrieval evals — proposed for the public marketplace.",
+    content_md: "# Atlas Onboarding\n\nInternal notes the team wants to share publicly.",
+    file_url: null,
+    version: "1.0.0",
+    tags: ["onboarding", "atlas"],
+    scope_type: "ORG",
+    scope_id: "org-think41",
+    visibility: "ORG",
+    author_id: "u-priya", // a MEMBER, not an org admin → needs admin approval
+    is_public: true,
+    approval_status: "pending",
+    review_note: null,
+    stars_count: 0,
+    installs_count: 0,
+    created_at: t("2026-07-01"),
+    updated_at: t("2026-07-01"),
+  },
+];
+
+const seedFeedback: Feedback[] = [
+  {
+    id: "fb-seed-1",
+    user_id: "u-priya",
+    target_type: "platform",
+    target_id: null,
+    rating: 5,
+    category: "praise",
+    message: "The command palette is incredibly fast. Love it.",
+    source: "dashboard",
+    status: "open",
+    public_status: "pending",
+    created_at: t("2026-06-28"),
+    updated_at: t("2026-06-28"),
+  },
+  {
+    id: "fb-seed-2",
+    user_id: "u-dev",
+    target_type: "platform",
+    target_id: null,
+    rating: 3,
+    category: "idea",
+    message: "Would love keyboard shortcuts for publishing.",
+    source: "cli",
+    status: "open",
+    public_status: "pending",
+    created_at: t("2026-06-29"),
+    updated_at: t("2026-06-29"),
+  },
+];
+
+/** Public read paths only surface approved+public resources (spec §3), but
+ *  most seed rows predate the review workflow — default them to "approved". */
+const withApproval = (r: Resource): Resource => ({
+  approval_status: "approved",
+  review_note: null,
+  ...r,
+});
+
 export function seed(): Db {
   return {
     users: structuredClone(seedUsers),
@@ -825,7 +924,9 @@ export function seed(): Db {
     project_members: structuredClone(seedProjectMembers),
     pods: structuredClone(seedPods),
     pod_members: structuredClone(seedPodMembers),
-    resources: structuredClone([...seedPublicResources, ...seedInternalResources]),
+    resources: structuredClone(
+      [...seedPublicResources, ...seedInternalResources, ...seedReviewQueue].map(withApproval)
+    ),
     resource_stars: structuredClone(seedStars),
     resource_pins: structuredClone(seedPins),
     follows: structuredClone(seedFollows),
@@ -833,7 +934,8 @@ export function seed(): Db {
     invitations: structuredClone(seedInvitations),
     activities: structuredClone(seedActivities),
     notifications: structuredClone(seedNotifications),
-    feedback: [],
+    feedback: structuredClone(seedFeedback),
+    payments: [],
     org_features: [],
     device_auths: [],
     // Mock mode only: start signed in as the demo user so the dashboard shows

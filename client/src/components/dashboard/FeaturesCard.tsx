@@ -49,7 +49,8 @@ export function FeaturesCard() {
   const [licenseKey, setLicenseKey] = useState("");
 
   const isAdmin = org?.my_role === "ADMIN";
-  const premiumOrg = org?.plan === "PREMIUM";
+  // Any paid tier (PRO / ENTERPRISE / legacy PREMIUM) unlocks premium features.
+  const premiumOrg = !!org && org.plan !== "FREE";
 
   const invalidate = () =>
     Promise.all([

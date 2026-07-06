@@ -5,6 +5,9 @@
  */
 
 export type ResourceType = "SKILL" | "MCP" | "NOTE";
+/** Public-listing review state (spec §3). Only `approved` + `is_public`
+ *  resources appear on public read paths. */
+export type ApprovalStatus = "pending" | "approved" | "rejected";
 export type ScopeType = "ORG" | "PROJECT" | "POD" | "PUBLIC";
 // Every scope speaks the same two roles. Legacy rows (LEAD/OWNER) are still
 // accepted by the API and normalized to ADMIN, so the union stays permissive.
@@ -29,6 +32,8 @@ export interface User {
   website?: string;
   is_publisher: boolean;
   verified?: boolean;
+  /** Personal/publisher plan tier (spec §2). Present on the /me payload. */
+  plan?: Plan;
   /** Platform admin — only present on the self (/me) payload. */
   is_admin?: boolean;
   /** Set for first-time accounts; the dashboard forces a password change until
@@ -38,7 +43,72 @@ export interface User {
   updated_at: string;
 }
 
-export type PlanTier = "FREE" | "PREMIUM";
+/** Plan ladder (spec §2). Two billable entities share it: a user's personal /
+ *  publisher space (User.plan) and each Organization (Organization.plan). */
+export type Plan = "FREE" | "PRO" | "ENTERPRISE";
+/** `PREMIUM` is the legacy binary tier (old license flow); the backend
+ *  normalizes it to ENTERPRISE. Kept in the union so old rows still type-check. */
+export type PlanTier = Plan | "PREMIUM";
+
+/** Personal / publisher-space entitlements (GET /api/auth/me/entitlements). */
+export interface UserEntitlements {
+  plan: Plan;
+  plan_name: string;
+  publisher_resource_quota: number | null;
+  publisher_resource_used: number;
+  max_orgs: number | null;
+  orgs_owned: number;
+  mcp_included: boolean;
+}
+
+/** Per-org entitlements (GET /api/orgs/{slug}/entitlements). */
+export interface OrgEntitlements {
+  plan: Plan;
+  plan_name: string;
+  resource_quota: number | null;
+  resource_used: number;
+  mcp_included: boolean;
+}
+
+/** Public pricing entry (billing config / marketing pricing page). */
+export interface BillingPlan {
+  key: Plan;
+  name: string;
+  price_usd: number;
+  max_orgs: number | null;
+  resource_quota: number | null;
+  mcp_included: boolean;
+  tagline: string;
+}
+
+/** Billing/checkout config (GET /api/billing/config). Scaffolded/disabled until
+ *  Razorpay keys are set — `enabled:false` means the UI shows "coming soon". */
+export interface BillingConfig {
+  enabled: boolean;
+  key_id: string | null;
+  provider: string;
+  currency: string;
+  plans: BillingPlan[];
+}
+
+export interface Payment {
+  id: string;
+  target_type: "user" | "org";
+  target_id: string;
+  plan: Plan;
+  amount: number;
+  currency: string;
+  status: "created" | "paid" | "failed";
+  provider: string;
+  created_at: string;
+}
+
+/** GET /api/billing/subscription — current plans + recent payments. */
+export interface BillingSubscription {
+  user: UserEntitlements;
+  orgs: (OrgEntitlements & { slug: string; name: string })[];
+  payments: Payment[];
+}
 
 /** Org-facing labels for the hierarchy. Data model stays projects → pods;
  *  orgs that think in "Teams" relabel the UI (premium: custom-terminology). */
@@ -56,6 +126,7 @@ export interface Organization {
   is_public: boolean;
   owner_id: string;
   plan: PlanTier;
+  plan_name?: string;
   terminology?: Terminology;
   created_at: string;
 }
@@ -65,7 +136,10 @@ export interface FeatureFlag {
   key: string;
   name: string;
   description: string;
-  /** premium flags require an org license to enable */
+  /** Minimum plan that unlocks the flag (spec §2). `premium` is derived from
+   *  this (= min_plan !== "FREE") and kept for older clients. */
+  min_plan?: Plan;
+  /** premium flags require a paid plan to enable */
   premium: boolean;
   default_enabled: boolean;
 }
@@ -161,6 +235,10 @@ export interface Resource {
   visibility?: Visibility;
   author_id: string;
   is_public: boolean;
+  /** Public-listing review state (spec §3). */
+  approval_status?: ApprovalStatus;
+  /** Reviewer's note, set when rejected. */
+  review_note?: string | null;
   stars_count: number;
   installs_count?: number;
   /** stable hash of the source artifact (local push or GitHub import) */
@@ -233,6 +311,8 @@ export interface Feedback {
   source: "dashboard" | "cli" | "mcp";
   context?: Record<string, unknown> | null;
   status: "open" | "reviewed";
+  /** Admin moderation decision for public display on the website (spec §4). */
+  public_status?: "pending" | "approved" | "rejected";
   created_at: string;
   updated_at: string;
   user?: User;
@@ -247,6 +327,8 @@ export interface ApiError {
       | "NOT_FOUND"
       | "VALIDATION_ERROR"
       | "CONFLICT"
+      | "PAYMENT_REQUIRED"
+      | "SERVICE_UNAVAILABLE"
       | "INTERNAL_ERROR";
     message: string;
     status: number;
@@ -281,7 +363,7 @@ export interface Notification {
   org_id: string | null;
   scope_type: ScopeType;
   scope_id: string | null;
-  verb: "created" | "published";
+  verb: "created" | "published" | "approved" | "rejected";
   object_type: "resource";
   object_id: string;
   object_title: string;

@@ -73,7 +73,19 @@ export default function MyResourcesPage() {
             <button onClick={() => openDetail(r)} className="flex min-w-0 flex-1 items-center gap-4 text-left">
               <TypeBadge type={r.type} withLabel={false} />
               <span className="min-w-0">
-                <span className="block truncate text-base font-bold text-ink">{r.title}</span>
+                <span className="flex items-center gap-2">
+                  <span className="truncate text-base font-bold text-ink">{r.title}</span>
+                  {r.approval_status === "pending" && (
+                    <span className="tag !bg-amber-100 !text-amber-800" title="Awaiting a reviewer's decision">
+                      Pending review
+                    </span>
+                  )}
+                  {r.approval_status === "rejected" && (
+                    <span className="tag !bg-red-100 !text-red-700" title={r.review_note ?? undefined}>
+                      Rejected
+                    </span>
+                  )}
+                </span>
                 <span className="block truncate text-xs text-muted">
                   v{r.version} · ★ {fmt(r.stars_count)} · ↓ {fmt(r.installs_count ?? 0)} · updated {timeAgo(r.updated_at)}
                 </span>

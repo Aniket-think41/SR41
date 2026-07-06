@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   X, Star, Pin, PinOff, Pencil, Trash2, Globe, Copy, Download, Check, ExternalLink, Eye,
+  Clock, AlertTriangle,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/api/http";
@@ -77,9 +78,12 @@ function DetailView({ resource: initial, onClose }: { resource: Resource; onClos
   });
   const publishMut = useMutation({
     mutationFn: () => (r.is_public ? api.unpublish(r.id) : api.publish(r.id)),
-    onSuccess: async () => {
+    onSuccess: async (updated) => {
       await invalidate();
-      toast(r.is_public ? "Removed from the public marketplace" : "Published to the public marketplace 🎉");
+      if (r.is_public) toast("Removed from the public marketplace");
+      else if (updated.approval_status === "pending")
+        toast("Submitted for review — it will go live once approved");
+      else toast("Published to the public marketplace 🎉");
     },
     onError: (e) => toast(errorMessage(e), "error"),
   });
@@ -105,9 +109,19 @@ function DetailView({ resource: initial, onClose }: { resource: Resource; onClos
                 <Eye className="h-3 w-3" /> {VISIBILITY_LABEL[r.visibility] ?? r.visibility}
               </span>
             )}
-            {r.is_public && (
+            {r.is_public && r.approval_status === "approved" && (
               <span className={`tag ${SCOPE_META.PUBLIC.chip}`}>
                 <Globe className="h-3 w-3" /> Marketplace
+              </span>
+            )}
+            {r.is_public && r.approval_status === "pending" && (
+              <span className="tag !bg-amber-100 !text-amber-800" title="Awaiting a reviewer's decision">
+                <Clock className="h-3 w-3" /> Pending review
+              </span>
+            )}
+            {r.approval_status === "rejected" && (
+              <span className="tag !bg-red-100 !text-red-700" title={r.review_note ?? undefined}>
+                <AlertTriangle className="h-3 w-3" /> Rejected
               </span>
             )}
           </div>
@@ -140,6 +154,24 @@ function DetailView({ resource: initial, onClose }: { resource: Resource; onClos
 
       {/* Body */}
       <div className="thin-scroll flex-1 overflow-y-auto p-6">
+        {r.approval_status === "pending" && r.is_public && (
+          <div className="mb-5 flex items-start gap-2.5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+            <Clock className="mt-0.5 h-4 w-4 shrink-0" />
+            <p>
+              <span className="font-bold">Pending review.</span> This resource won&rsquo;t appear on the
+              marketplace until a reviewer approves it.
+            </p>
+          </div>
+        )}
+        {r.approval_status === "rejected" && (
+          <div className="mb-5 flex items-start gap-2.5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <p>
+              <span className="font-bold">Not approved for the marketplace.</span>
+              {r.review_note ? <> Reviewer note: “{r.review_note}”.</> : null} Edit and republish to resubmit.
+            </p>
+          </div>
+        )}
         {r.type === "MCP" ? (
           <div className="space-y-5">
             {r.server_url && (

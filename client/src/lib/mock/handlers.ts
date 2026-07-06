@@ -96,14 +96,175 @@ function logActivity(db: Db, a: Omit<Activity, "id" | "created_at">) {
   db.activities.unshift({ ...a, id: uid("act"), created_at: now() });
 }
 
-/** Resolve one org's feature flags: catalog defaults + overrides + license. */
+/* ---- plans & entitlements (mirrors backend/app/entitlements.py) ---- */
+
+type Plan = "FREE" | "PRO" | "ENTERPRISE";
+const PLAN_RANK: Record<Plan, number> = { FREE: 0, PRO: 1, ENTERPRISE: 2 };
+
+interface PlanSpec {
+  key: Plan;
+  name: string;
+  price_usd: number;
+  max_orgs: number | null;
+  resource_quota: number | null;
+  mcp_included: boolean;
+  tagline: string;
+}
+const PLAN_SPECS: Record<Plan, PlanSpec> = {
+  FREE: { key: "FREE", name: "Free", price_usd: 0, max_orgs: 0, resource_quota: 100, mcp_included: false, tagline: "Publish as an individual. Up to 100 resources." },
+  PRO: { key: "PRO", name: "Pro", price_usd: 20, max_orgs: 2, resource_quota: 500, mcp_included: true, tagline: "Up to 2 organizations, 500 resources each, MCP included." },
+  ENTERPRISE: { key: "ENTERPRISE", name: "Enterprise", price_usd: 100, max_orgs: null, resource_quota: null, mcp_included: true, tagline: "Unlimited organizations and resources. MCP unlimited." },
+};
+const PLANS: Plan[] = ["FREE", "PRO", "ENTERPRISE"];
+
+function normPlan(plan?: string | null): Plan {
+  const p = String(plan ?? "").toUpperCase();
+  if (p === "PREMIUM") return "ENTERPRISE"; // legacy binary tier → top tier
+  return (PLANS as string[]).includes(p) ? (p as Plan) : "FREE";
+}
+const specFor = (plan?: string | null): PlanSpec => PLAN_SPECS[normPlan(plan)];
+const planAtLeast = (plan: string | null | undefined, min: string) =>
+  PLAN_RANK[normPlan(plan)] >= PLAN_RANK[normPlan(min)];
+
+const payment_required = (message: string) => new HttpError(402, "PAYMENT_REQUIRED", message);
+
+/** Resources homed anywhere in an org's subtree (ORG + its projects + pods). */
+function orgResourceUsage(db: Db, orgId: string): number {
+  const projectIds = db.projects.filter((p) => p.org_id === orgId).map((p) => p.id);
+  const podIds = db.pods.filter((p) => projectIds.includes(p.project_id)).map((p) => p.id);
+  return db.resources.filter(
+    (r) =>
+      (r.scope_type === "ORG" && r.scope_id === orgId) ||
+      (r.scope_type === "PROJECT" && projectIds.includes(r.scope_id ?? "")) ||
+      (r.scope_type === "POD" && podIds.includes(r.scope_id ?? ""))
+  ).length;
+}
+const publisherUsage = (db: Db, userId: string): number =>
+  db.resources.filter((r) => r.scope_type === "PUBLIC" && r.author_id === userId).length;
+const userOrgCount = (db: Db, userId: string): number =>
+  db.organizations.filter((o) => o.owner_id === userId).length;
+
+function mcpIncludedForUser(db: Db, user: User): boolean {
+  if (specFor(user.plan).mcp_included) return true;
+  return db.org_members
+    .filter((m) => m.user_id === user.id)
+    .some((m) => specFor(db.organizations.find((o) => o.id === m.org_id)?.plan).mcp_included);
+}
+
+function userEntitlements(db: Db, user: User) {
+  const spec = specFor(user.plan);
+  return {
+    plan: spec.key,
+    plan_name: spec.name,
+    publisher_resource_quota: spec.resource_quota,
+    publisher_resource_used: publisherUsage(db, user.id),
+    max_orgs: spec.max_orgs,
+    orgs_owned: userOrgCount(db, user.id),
+    mcp_included: mcpIncludedForUser(db, user),
+  };
+}
+function orgEntitlements(db: Db, org: { id: string; plan?: string }) {
+  const spec = specFor(org.plan);
+  return {
+    plan: spec.key,
+    plan_name: spec.name,
+    resource_quota: spec.resource_quota,
+    resource_used: orgResourceUsage(db, org.id),
+    mcp_included: spec.mcp_included,
+  };
+}
+function planCatalog() {
+  return PLANS.map((k) => {
+    const s = PLAN_SPECS[k];
+    return { key: s.key, name: s.name, price_usd: s.price_usd, max_orgs: s.max_orgs, resource_quota: s.resource_quota, mcp_included: s.mcp_included, tagline: s.tagline };
+  });
+}
+
+function enforceCanCreateOrg(db: Db, user: User) {
+  const spec = specFor(user.plan);
+  if (spec.max_orgs === 0)
+    throw payment_required("Creating organizations requires a paid plan. Upgrade to Pro to create up to 2 organizations.");
+  if (spec.max_orgs !== null && userOrgCount(db, user.id) >= spec.max_orgs)
+    throw payment_required(`Your ${spec.name} plan allows up to ${spec.max_orgs} organizations. Upgrade to Enterprise for unlimited organizations.`);
+}
+
+function enforceCanAddResource(db: Db, user: User, scopeType: string, scopeId: string | null) {
+  if (scopeType === "PUBLIC") {
+    const spec = specFor(user.plan);
+    if (spec.resource_quota !== null && publisherUsage(db, user.id) >= spec.resource_quota)
+      throw payment_required(`Your ${spec.name} plan allows up to ${spec.resource_quota} published resources. Upgrade to publish more.`);
+    return;
+  }
+  const orgId = resolveOwningOrgId(db, scopeType, scopeId);
+  if (!orgId) return;
+  const org = db.organizations.find((o) => o.id === orgId);
+  const spec = specFor(org?.plan);
+  if (spec.resource_quota !== null && orgResourceUsage(db, orgId) >= spec.resource_quota)
+    throw payment_required(`"${org?.name}" is on the ${spec.name} plan (limit ${spec.resource_quota} resources). Upgrade the organization to add more.`);
+}
+
+function resolveOwningOrgId(db: Db, scopeType: string, scopeId: string | null): string | null {
+  if (scopeType === "ORG") return scopeId;
+  if (scopeType === "PROJECT") return db.projects.find((p) => p.id === scopeId)?.org_id ?? null;
+  if (scopeType === "POD") {
+    const pod = db.pods.find((p) => p.id === scopeId);
+    return db.projects.find((p) => p.id === pod?.project_id)?.org_id ?? null;
+  }
+  return null;
+}
+
+/* ---- resource review (mirrors backend/app/review.py) ---- */
+
+function isOrgAdmin(db: Db, orgId: string | null, userId: string): boolean {
+  if (!orgId) return false;
+  return db.org_members.some((m) => m.org_id === orgId && m.user_id === userId && m.role === "ADMIN");
+}
+function canReview(db: Db, r: Resource, user: User): boolean {
+  if (user.is_admin) return true;
+  return isOrgAdmin(db, scopeOrgId(db, r), user.id);
+}
+function submitForReview(db: Db, r: Resource, actor: User) {
+  if (canReview(db, r, actor)) {
+    r.approval_status = "approved";
+    r.review_note = null;
+  } else {
+    r.approval_status = "pending";
+    r.review_note = null;
+  }
+}
+function notifyAuthorOfReview(db: Db, r: Resource, actor: User, verb: "approved" | "rejected", note: string | null) {
+  if (r.author_id === actor.id) return;
+  db.notifications.unshift({
+    id: uid("ntf"), actor_id: actor.id, org_id: scopeOrgId(db, r),
+    scope_type: r.scope_type, scope_id: r.scope_id, verb, object_type: "resource",
+    object_id: r.id, object_title: r.title, meta: note ?? null, read_at: null, created_at: now(),
+  });
+}
+function approveResource(db: Db, r: Resource, reviewer: User) {
+  r.approval_status = "approved";
+  r.review_note = null;
+  if (!r.is_public) r.is_public = true; // approving a queued item makes it live
+  notifyAuthorOfReview(db, r, reviewer, "approved", null);
+}
+function rejectResource(db: Db, r: Resource, reviewer: User, note: string | null) {
+  r.approval_status = "rejected";
+  r.review_note = note;
+  r.is_public = false; // rejected content is not live
+  notifyAuthorOfReview(db, r, reviewer, "rejected", note);
+}
+const isPubliclyVisible = (r: Resource) => !!r.is_public && r.approval_status === "approved";
+
+/** Resolve one org's feature flags: catalog defaults + overrides + plan (spec §2). */
 function resolveFeatures(db: Db, orgId: string) {
   const org = db.organizations.find((o) => o.id === orgId);
   return FEATURES.map((f) => {
-    const licensed = !f.premium || org?.plan === "PREMIUM";
+    const min_plan = f.min_plan ?? "FREE";
+    const licensed = planAtLeast(org?.plan, min_plan);
     const override = db.org_features.find((x) => x.org_id === orgId && x.key === f.key);
     return {
       ...f,
+      min_plan,
+      premium: min_plan !== "FREE",
       licensed,
       // unlicensed premium features are always off, regardless of override
       enabled: licensed && (override ? override.enabled : f.default_enabled),
@@ -314,7 +475,13 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     return { ok: true };
   }],
 
-  ["GET", "/api/auth/me", (_p, _b, _q, db) => currentUser(db)],
+  ["GET", "/api/auth/me", (_p, _b, _q, db) => {
+    const me = currentUser(db);
+    // /me carries the plan (spec §2); default FREE for older seed rows.
+    return { ...me, plan: normPlan(me.plan) };
+  }],
+
+  ["GET", "/api/auth/me/entitlements", (_p, _b, _q, db) => userEntitlements(db, currentUser(db))],
 
   ["PATCH", "/api/auth/me", (_p, body, _q, db) => {
     const me = currentUser(db);
@@ -344,6 +511,7 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
 
   ["POST", "/api/orgs", (_p, body, _q, db) => {
     const me = currentUser(db);
+    enforceCanCreateOrg(db, me); // 402 for FREE users (spec §2)
     const name = String(body.name ?? "").trim();
     const slug = String(body.slug ?? name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
     if (!name || !slug) throw new HttpError(422, "VALIDATION_ERROR", "Organization name is required");
@@ -405,6 +573,36 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     return org;
   }],
 
+  /* ---- entitlements & review queue (spec §2 / §3) ---- */
+  ["GET", "/api/orgs/:slug/entitlements", (p, _b, _q, db) => {
+    const org = orgBySlug(db, p.slug);
+    const me = currentUser(db);
+    if (!db.org_members.some((m) => m.org_id === org.id && m.user_id === me.id))
+      throw new HttpError(403, "FORBIDDEN", "You are not a member of this organization");
+    return orgEntitlements(db, org);
+  }],
+
+  ["GET", "/api/orgs/:slug/review-queue", (p, _b, q, db) => {
+    const org = orgBySlug(db, p.slug);
+    const me = currentUser(db);
+    const membership = db.org_members.find((m) => m.org_id === org.id && m.user_id === me.id);
+    if (membership?.role !== "ADMIN")
+      throw new HttpError(403, "FORBIDDEN", "Only org admins can review resources");
+    const status = q.get("status") ?? "pending";
+    const projectIds = db.projects.filter((x) => x.org_id === org.id).map((x) => x.id);
+    const podIds = db.pods.filter((x) => projectIds.includes(x.project_id)).map((x) => x.id);
+    return db.resources
+      .filter(
+        (r) =>
+          r.approval_status === status &&
+          ((r.scope_type === "ORG" && r.scope_id === org.id) ||
+            (r.scope_type === "PROJECT" && projectIds.includes(r.scope_id ?? "")) ||
+            (r.scope_type === "POD" && podIds.includes(r.scope_id ?? "")))
+      )
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+      .map((r) => enrich(r, db));
+  }],
+
   /* ---- feature flags & licensing (BACKEND SPEC §3.8) ---- */
   ["GET", "/api/orgs/:slug/features", (p, _b, _q, db) => {
     const org = orgBySlug(db, p.slug);
@@ -441,7 +639,7 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
       throw new HttpError(422, "VALIDATION_ERROR", "Invalid license key (mock format: T41-PREM-XXXX)");
     org.plan = "PREMIUM";
     saveDb();
-    return { plan: org.plan, features: resolveFeatures(db, org.id) };
+    return { plan: org.plan, features: resolveFeatures(db, org.id), entitlements: orgEntitlements(db, org) };
   }],
 
   ["GET", "/api/orgs/:slug/members", (p, _b, _q, db) => {
@@ -547,7 +745,7 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     return db.resources
       .filter(
         (r) =>
-          r.is_public &&
+          isPubliclyVisible(r) &&
           ((r.scope_type === "ORG" && r.scope_id === org.id) ||
             (r.scope_type === "PROJECT" && projectIds.includes(r.scope_id ?? "")) ||
             (r.scope_type === "POD" && podIds.includes(r.scope_id ?? "")))
@@ -828,6 +1026,7 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     // creation, and gated on being a registered publisher (mirrors the backend).
     if (scopeType === "PUBLIC" && !me.is_publisher)
       throw new HttpError(403, "FORBIDDEN", "Become a publisher first to add resources to the marketplace");
+    enforceCanAddResource(db, me, scopeType, (body.scope_id as string) ?? null); // plan/quota gate (spec §2)
     const isPublic = scopeType === "PUBLIC";
     const r: Resource = {
       id: uid("res"),
@@ -846,10 +1045,15 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
       visibility: normVisibility(scopeType, body.visibility as string | undefined),
       author_id: me.id,
       is_public: isPublic,
+      approval_status: "approved",
+      review_note: null,
       stars_count: 0,
       created_at: now(),
       updated_at: now(),
     };
+    // A PUBLIC resource enters the marketplace review queue (spec §3) —
+    // auto-approved when the author is already its reviewer (platform admin).
+    if (isPublic) submitForReview(db, r, me);
     db.resources.push(r);
     const orgId = scopeOrgId(db, r);
     if (orgId) logActivity(db, { user_id: me.id, org_id: orgId, verb: "created", object_type: "resource", object_id: r.id, object_title: r.title });
@@ -883,6 +1087,8 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     });
     // Re-validate audience against the (possibly new) scope.
     r.visibility = normVisibility(r.scope_type, (body.visibility as string | undefined) ?? r.visibility);
+    // Editing a rejected-but-still-public resource resubmits it for review (§3).
+    if (r.is_public && r.approval_status === "rejected") submitForReview(db, r, me);
     const orgId = scopeOrgId(db, r);
     if (orgId) logActivity(db, { user_id: me.id, org_id: orgId, verb: "updated", object_type: "resource", object_id: r.id, object_title: r.title, meta: `v${r.version}` });
     saveDb();
@@ -952,18 +1158,22 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     if (!r) throw notFound("Resource");
     if (!me.is_publisher)
       throw new HttpError(403, "FORBIDDEN", "Enable publisher mode in your profile to publish to the marketplace");
-    if (!featureEnabled(db, scopeOrgId(db, r), "publishing"))
+    // A publisher can always publish a resource they authored. The premium
+    // "publishing" feature gates publishing *other people's* org resources.
+    if (r.author_id !== me.id && !featureEnabled(db, scopeOrgId(db, r), "publishing"))
       throw new HttpError(403, "FORBIDDEN", "Marketplace publishing is disabled for this organization");
-    const wasPublic = r.is_public;
+    const wasVisible = isPubliclyVisible(r);
     r.is_public = true;
     r.updated_at = now();
+    // Enter review (spec §3): org content → org admin, publisher content →
+    // platform admin. Auto-approved when the actor is already its reviewer.
+    submitForReview(db, r, me);
     const orgId = scopeOrgId(db, r);
     if (orgId) logActivity(db, { user_id: me.id, org_id: orgId, verb: "published", object_type: "resource", object_id: r.id, object_title: r.title });
-    // Newly public → notify the author's followers (mirrors backend
-    // notify_followers). The mock inbox is single-user (no recipient field), so
-    // we add one entry per follow; in seed only Ada has a follower (the demo
-    // user), so this fires when viewing the real cross-user flow.
-    if (!wasPublic) {
+    // Notify the author's followers only on the transition to publicly visible
+    // (approved). The mock inbox is single-user (no recipient field), so we add
+    // one entry per follow; in seed only Ada has a follower (the demo user).
+    if (isPubliclyVisible(r) && !wasVisible) {
       for (const f of db.follows.filter((x) => x.publisher_id === r.author_id && x.follower_id !== r.author_id)) {
         void f;
         db.notifications.unshift({
@@ -985,6 +1195,32 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     r.updated_at = now();
     saveDb();
     return enrich(r, db);
+  }],
+
+  // Approve / reject a resource submitted for public listing (spec §3).
+  ["POST", "/api/resources/:id/review", (p, body, _q, db) => {
+    const me = currentUser(db);
+    const r = db.resources.find((x) => x.id === p.id);
+    if (!r) throw notFound("Resource");
+    if (!canReview(db, r, me))
+      throw new HttpError(403, "FORBIDDEN", "You don't have review authority over this resource");
+    const decision = String(body.decision ?? "").trim().toLowerCase();
+    if (decision === "approve") approveResource(db, r, me);
+    else if (decision === "reject") rejectResource(db, r, me, (String(body.note ?? "").trim()) || null);
+    else throw new HttpError(422, "VALIDATION_ERROR", 'decision must be "approve" or "reject"');
+    r.updated_at = now();
+    saveDb();
+    return enrich(r, db);
+  }],
+
+  // Usage ping — records an install/use (spec §7).
+  ["POST", "/api/resources/:id/use", (p, _b, _q, db) => {
+    const me = currentUser(db);
+    void me;
+    const r = db.resources.find((x) => x.id === p.id);
+    if (!r) throw notFound("Resource");
+    // Dashboard source doesn't bump installs (only cli/mcp do on the backend).
+    return { ok: true, installs_count: r.installs_count ?? 0 };
   }],
 
   ["POST", "/api/resources/:id/star", (p, _b, _q, db) => {
@@ -1133,11 +1369,11 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
 
   /* ---- 3.6 Public marketplace ---- */
   ["GET", "/api/public/resources", (_p, _b, q, db) =>
-    filterResources(db.resources.filter((r) => r.is_public), q, db),
+    filterResources(db.resources.filter(isPubliclyVisible), q, db),
   ],
 
   ["GET", "/api/public/resources/:id", (p, _b, _q, db) => {
-    const r = db.resources.find((x) => x.id === p.id && x.is_public);
+    const r = db.resources.find((x) => x.id === p.id && isPubliclyVisible(x));
     if (!r) throw notFound("Resource");
     return enrich(r, db);
   }],
@@ -1149,7 +1385,7 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     return {
       ...user,
       resources: db.resources
-        .filter((r) => r.is_public && r.author_id === user.id)
+        .filter((r) => isPubliclyVisible(r) && r.author_id === user.id)
         .map((r) => enrich(r, db)),
       followers_count: db.follows.filter((f) => f.publisher_id === user.id).length,
       following: !!me && db.follows.some((f) => f.publisher_id === user.id && f.follower_id === me),
@@ -1177,7 +1413,7 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
   }],
 
   ["GET", "/api/public/search", (_p, _b, q, db) =>
-    filterResources(db.resources.filter((r) => r.is_public), q, db),
+    filterResources(db.resources.filter(isPubliclyVisible), q, db),
   ],
 
   /* ---- profile extras (client additions, documented in backend spec §8) ---- */
@@ -1283,12 +1519,109 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
       .map((m) => ({ ...db.organizations.find((o) => o.id === m.org_id)!, my_role: m.role }));
   }],
 
+  /* ---- billing (spec §5; scaffolded, disabled by default) ---- */
+  ["GET", "/api/billing/config", () => ({
+    enabled: false,
+    key_id: null,
+    provider: "razorpay",
+    currency: "USD",
+    plans: planCatalog(),
+  })],
+
+  ["POST", "/api/billing/checkout", (_p, body, _q, db) => {
+    const me = currentUser(db);
+    const plan = normPlan(body.plan as string);
+    if (plan === "FREE") throw new HttpError(422, "VALIDATION_ERROR", "plan must be PRO or ENTERPRISE");
+    if (body.target_type === "org") {
+      if (!body.org_slug) throw new HttpError(422, "VALIDATION_ERROR", "org_slug is required when target_type is 'org'");
+      const org = orgBySlug(db, String(body.org_slug));
+      const m = db.org_members.find((x) => x.org_id === org.id && x.user_id === me.id);
+      if (m?.role !== "ADMIN") throw new HttpError(403, "FORBIDDEN", "Only org admins can upgrade the organization");
+    }
+    // Online upgrades are disabled until Razorpay keys are configured (spec §5).
+    throw new HttpError(503, "SERVICE_UNAVAILABLE", "Online upgrades aren't available yet. Ask a platform admin to grant your plan in the meantime.");
+  }],
+
+  ["GET", "/api/billing/subscription", (_p, _b, _q, db) => {
+    const me = currentUser(db);
+    const owned = db.organizations.filter((o) => o.owner_id === me.id);
+    return {
+      user: userEntitlements(db, me),
+      orgs: owned.map((o) => ({ slug: o.slug, name: o.name, ...orgEntitlements(db, o) })),
+      payments: (db.payments ?? []).filter((p) => p.target_id === me.id || owned.some((o) => o.id === p.target_id)),
+    };
+  }],
+
+  /* ---- platform admin (User.is_admin) ---- */
+  ["GET", "/api/admin/resources", (_p, _b, q, db) => {
+    requireAdmin(db);
+    const status = q.get("status") ?? "pending";
+    return db.resources
+      .filter((r) => r.approval_status === status)
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+      .map((r) => enrich(r, db));
+  }],
+
+  ["GET", "/api/admin/feedback", (_p, _b, q, db) => {
+    requireAdmin(db);
+    const status = q.get("status");
+    return (db.feedback ?? [])
+      .filter((f) => (status === "open" || status === "reviewed" ? f.status === status : true))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .map((f) => ({ ...f, user: db.users.find((u) => u.id === f.user_id) }));
+  }],
+
+  ["POST", "/api/admin/feedback/:id/moderate", (p, body, _q, db) => {
+    requireAdmin(db);
+    const fb = (db.feedback ?? []).find((f) => f.id === p.id);
+    if (!fb) throw notFound("Feedback");
+    fb.public_status = body.decision === "approve" ? "approved" : "rejected";
+    fb.updated_at = now();
+    saveDb();
+    return { ...fb, user: db.users.find((u) => u.id === fb.user_id) };
+  }],
+
+  ["POST", "/api/admin/feedback/:id/status", (p, body, _q, db) => {
+    requireAdmin(db);
+    const fb = (db.feedback ?? []).find((f) => f.id === p.id);
+    if (!fb) throw notFound("Feedback");
+    fb.status = body.status === "open" ? "open" : "reviewed";
+    fb.updated_at = now();
+    saveDb();
+    return { ...fb, user: db.users.find((u) => u.id === fb.user_id) };
+  }],
+
+  ["PATCH", "/api/admin/users/:username/plan", (p, body, _q, db) => {
+    requireAdmin(db);
+    const u = db.users.find((x) => x.username === p.username);
+    if (!u) throw notFound("User");
+    const plan = normPlan(body.plan as string);
+    u.plan = plan;
+    u.updated_at = now();
+    saveDb();
+    return userEntitlements(db, u);
+  }],
+
+  ["PATCH", "/api/admin/orgs/:slug/plan", (p, body, _q, db) => {
+    requireAdmin(db);
+    const org = orgBySlug(db, p.slug);
+    org.plan = normPlan(body.plan as string);
+    saveDb();
+    return orgEntitlements(db, org);
+  }],
+
   /* ---- dev convenience ---- */
   ["POST", "/api/dev/reset", () => {
     resetDb();
     return { ok: true };
   }],
 ];
+
+function requireAdmin(db: Db): User {
+  const me = currentUser(db);
+  if (!me.is_admin) throw new HttpError(403, "FORBIDDEN", "Platform admin access required");
+  return me;
+}
 
 function scopeOrgId(db: Db, r: Resource): string | null {
   if (r.scope_type === "ORG") return r.scope_id;

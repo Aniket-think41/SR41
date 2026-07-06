@@ -1,21 +1,35 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronsUpDown, Plus, Check } from "lucide-react";
+import { ChevronsUpDown, Plus, Check, Lock } from "lucide-react";
 import { api } from "@/lib/api";
-import { useCurrentOrg } from "@/lib/hooks";
+import { isApiError } from "@/lib/api/http";
+import { useCanCreateOrg, useCurrentOrg } from "@/lib/hooks";
+import { useUi } from "@/lib/store";
 import { useToast } from "../Toast";
 import { Avatar } from "../Avatar";
 
 export function OrgSwitcher({ collapsed }: { collapsed: boolean }) {
   const { org, orgs, setOrgSlug } = useCurrentOrg();
+  const { canCreate, reason } = useCanCreateOrg();
+  const { setWorkspace } = useUi();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const ref = useRef<HTMLDivElement>(null);
   const qc = useQueryClient();
   const { toast } = useToast();
+
+  // Route to the publisher space + upgrade page instead of dead-ending (spec §2).
+  const goUpgrade = () => {
+    setOpen(false);
+    setCreating(false);
+    setWorkspace("publisher");
+    router.push("/dashboard/billing");
+  };
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -30,13 +44,20 @@ export function OrgSwitcher({ collapsed }: { collapsed: boolean }) {
     try {
       const created = await api.createOrg({ name: name.trim() });
       await qc.invalidateQueries({ queryKey: ["orgs"] });
+      await qc.invalidateQueries({ queryKey: ["me", "entitlements"] });
       setOrgSlug(created.slug);
       setCreating(false);
       setName("");
       setOpen(false);
       toast(`Organization "${created.name}" created`);
     } catch (e) {
-      toast(e instanceof Object && "error" in e ? (e as { error: { message: string } }).error.message : "Could not create org", "error");
+      // FREE users can't create orgs → don't dead-end; send them to upgrade (spec §2).
+      if (isApiError(e) && e.error.code === "PAYMENT_REQUIRED") {
+        toast(e.error.message, "error");
+        goUpgrade();
+        return;
+      }
+      toast(isApiError(e) ? e.error.message : "Could not create org", "error");
     }
   };
 
@@ -55,9 +76,9 @@ export function OrgSwitcher({ collapsed }: { collapsed: boolean }) {
               <span className="block truncate text-sm font-bold text-ink">{org?.name ?? "…"}</span>
               <span className="block text-[0.68rem] font-semibold uppercase tracking-wider text-muted">
                 {org?.my_role ?? ""}
-                {org?.plan === "PREMIUM" && (
+                {org && org.plan !== "FREE" && (
                   <span className="ml-1.5 rounded-full bg-lime px-1.5 py-px text-[0.58rem] font-bold normal-case tracking-normal text-ink">
-                    Premium
+                    {org.plan === "PREMIUM" ? "Premium" : org.plan}
                   </span>
                 )}
               </span>
@@ -91,7 +112,19 @@ export function OrgSwitcher({ collapsed }: { collapsed: boolean }) {
           ))}
 
           <div className="mt-1 border-t border-line pt-1">
-            {creating ? (
+            {!canCreate ? (
+              <button
+                onClick={goUpgrade}
+                title={reason ?? undefined}
+                className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm font-semibold text-muted hover:bg-surface hover:text-ink"
+              >
+                <Lock className="h-4 w-4 shrink-0" />
+                <span className="min-w-0">
+                  <span className="block">Upgrade to create an organization</span>
+                  {reason && <span className="block text-[0.65rem] font-normal text-muted">{reason}</span>}
+                </span>
+              </button>
+            ) : creating ? (
               <div className="p-2">
                 <input
                   autoFocus

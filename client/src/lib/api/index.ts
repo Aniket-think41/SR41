@@ -8,12 +8,16 @@ import type {
   Activity,
   Attachment,
   AuthSession,
+  BillingConfig,
+  BillingSubscription,
   Contributions,
   Feedback,
   FeedbackInput,
   Invitation,
   Notification,
+  OrgEntitlements,
   OrgFeature,
+  Plan,
   PlanTier,
   Terminology,
   Organization,
@@ -27,6 +31,7 @@ import type {
   ResourceType,
   ScopeType,
   User,
+  UserEntitlements,
 } from "../types";
 
 export type OrgWithRole = Organization & {
@@ -106,6 +111,9 @@ export interface MarketplaceFacets {
   publishers: string[];
 }
 
+/** Review-queue filter (spec §3). */
+export type ApprovalFilter = "pending" | "approved" | "rejected";
+
 const qs = (params: Record<string, string | number | undefined>) => {
   const s = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== "") s.set(k, String(v));
@@ -122,6 +130,8 @@ export const api = {
   google: (idToken: string) => request<AuthSession>("POST", "/api/auth/google", { id_token: idToken }),
   logout: () => request<{ ok: true }>("POST", "/api/auth/logout"),
   me: () => request<User>("GET", "/api/auth/me"),
+  /** Personal / publisher-space plan, quotas, usage (spec §2). */
+  myEntitlements: () => request<UserEntitlements>("GET", "/api/auth/me/entitlements"),
   changePassword: (body: { current_password?: string; new_password: string }) =>
     request<User>("POST", "/api/auth/change-password", body),
 
@@ -143,6 +153,9 @@ export const api = {
   updateOrg: (slug: string, body: Partial<Organization> & { terminology?: Terminology | null }) =>
     request<Organization>("PATCH", `/api/orgs/${slug}`, body),
   uploadOrgLogo: (slug: string, file: File) => uploadOrgLogo(slug, file),
+  /** Per-org plan, quota, and current resource usage (spec §2). */
+  orgEntitlements: (slug: string) =>
+    request<OrgEntitlements>("GET", `/api/orgs/${slug}/entitlements`),
   orgFeatures: (slug: string) => request<OrgFeature[]>("GET", `/api/orgs/${slug}/features`),
   setFeature: (slug: string, key: string, enabled: boolean) =>
     request<OrgFeature>("PATCH", `/api/orgs/${slug}/features/${key}`, { enabled }),
@@ -173,6 +186,10 @@ export const api = {
       "GET",
       `/api/orgs/${slug}/search${qs({ q })}`
     ),
+  /** Org-admin review queue: org-owned resources awaiting a public-listing
+   *  decision (spec §3). status = pending | approved | rejected. */
+  orgReviewQueue: (slug: string, status: ApprovalFilter = "pending") =>
+    request<Resource[]>("GET", `/api/orgs/${slug}/review-queue${qs({ status })}`),
 
   /* ---- projects ---- */
   projects: (slug: string) => request<Project[]>("GET", `/api/orgs/${slug}/projects`),
@@ -243,6 +260,12 @@ export const api = {
     request<Resource[]>("GET", `/api/pods/${podId}/resources${qs(query as Record<string, string>)}`),
   publish: (id: string) => request<Resource>("POST", `/api/resources/${id}/publish`),
   unpublish: (id: string) => request<Resource>("DELETE", `/api/resources/${id}/publish`),
+  /** Approve/reject a resource submitted for public listing (spec §3). */
+  reviewResource: (id: string, body: { decision: "approve" | "reject"; note?: string }) =>
+    request<Resource>("POST", `/api/resources/${id}/review`, body),
+  /** Usage ping — records an install/use (spec §7). */
+  useResource: (id: string) =>
+    request<{ ok: boolean; installs_count: number }>("POST", `/api/resources/${id}/use`),
   star: (id: string) => request<Resource>("POST", `/api/resources/${id}/star`),
   unstar: (id: string) => request<Resource>("DELETE", `/api/resources/${id}/star`),
   pin: (id: string) => request<Resource>("POST", `/api/resources/${id}/pin`),
@@ -277,6 +300,30 @@ export const api = {
   submitFeedback: (body: FeedbackInput) =>
     request<Feedback>("POST", "/api/feedback", { source: "dashboard", ...body }),
   myFeedback: () => request<Feedback[]>("GET", "/api/feedback/mine"),
+
+  /* ---- billing (spec §5; scaffolded/disabled by default) ---- */
+  billingConfig: () => request<BillingConfig>("GET", "/api/billing/config"),
+  billingCheckout: (body: { plan: Plan; target_type: "user" | "org"; org_slug?: string }) =>
+    request<{ payment_id: string; order_id: string; amount: number; currency: string; key_id: string | null }>(
+      "POST",
+      "/api/billing/checkout",
+      body
+    ),
+  billingSubscription: () => request<BillingSubscription>("GET", "/api/billing/subscription"),
+
+  /* ---- platform admin (User.is_admin) ---- */
+  adminReviewQueue: (status: ApprovalFilter = "pending") =>
+    request<Resource[]>("GET", `/api/admin/resources${qs({ status })}`),
+  adminFeedback: (status?: "open" | "reviewed") =>
+    request<Feedback[]>("GET", `/api/admin/feedback${qs({ status })}`),
+  moderateFeedback: (id: string, decision: "approve" | "reject") =>
+    request<Feedback>("POST", `/api/admin/feedback/${id}/moderate`, { decision }),
+  setFeedbackStatus: (id: string, status: "open" | "reviewed") =>
+    request<Feedback>("POST", `/api/admin/feedback/${id}/status`, { status }),
+  setUserPlan: (username: string, plan: Plan) =>
+    request<UserEntitlements>("PATCH", `/api/admin/users/${username}/plan`, { plan }),
+  setOrgPlan: (slug: string, plan: Plan) =>
+    request<OrgEntitlements>("PATCH", `/api/admin/orgs/${slug}/plan`, { plan }),
 
   /* ---- public marketplace ---- */
   publicResources: (query: ResourceQuery = {}) =>
