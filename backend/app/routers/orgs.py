@@ -128,6 +128,8 @@ def update_org(slug: str, body: OrgPatch, user: User = Depends(get_current_user)
         org.logo_url = body.logo_url
     if body.terminology is not None:
         org.terminology = body.terminology.model_dump()
+    if body.is_public is not None:
+        org.is_public = body.is_public
     db.commit()
     return org_out(org)
 

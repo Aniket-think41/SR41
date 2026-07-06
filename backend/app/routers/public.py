@@ -7,7 +7,19 @@ from sqlalchemy.orm import Session
 from .. import cache
 from ..database import get_db
 from ..errors import not_found, validation
-from ..models import BlogPost, ChangelogEntry, ContentPage, Feedback, Follow, Organization, Resource, User
+from ..models import (
+    BlogPost,
+    ChangelogEntry,
+    ContentPage,
+    Feedback,
+    Follow,
+    Organization,
+    OrgFollow,
+    Pod,
+    Project,
+    Resource,
+    User,
+)
 from ..schemas import PublicFeedbackIn
 from ..security import get_current_user, get_current_user_optional
 from ..serialize import (
@@ -204,6 +216,80 @@ def unfollow_publisher(username: str, user: User = Depends(get_current_user), db
     db.query(Follow).filter(Follow.publisher_id == pub.id, Follow.follower_id == user.id).delete()
     db.commit()
     return {"following": False, "followers_count": db.query(Follow).filter(Follow.publisher_id == pub.id).count()}
+
+
+def _org_public_rows(db: Session, org_id: str) -> list[Resource]:
+    """Approved public resources authored by members of this org, homed in it."""
+    project_ids = [p.id for p in db.query(Project.id).filter(Project.org_id == org_id).all()]
+    pod_ids = [
+        pod.id for pod in db.query(Pod.id).join(Project, Pod.project_id == Project.id)
+        .filter(Project.org_id == org_id).all()
+    ]
+    from sqlalchemy import and_, or_
+
+    clauses = [and_(Resource.scope_type == "ORG", Resource.scope_id == org_id)]
+    if project_ids:
+        clauses.append(and_(Resource.scope_type == "PROJECT", Resource.scope_id.in_(project_ids)))
+    if pod_ids:
+        clauses.append(and_(Resource.scope_type == "POD", Resource.scope_id.in_(pod_ids)))
+    return (
+        db.query(Resource)
+        .filter(Resource.is_public.is_(True), Resource.approval_status == "approved", or_(*clauses))
+        .all()
+    )
+
+
+@router.get("/orgs")
+def public_orgs(db: Session = Depends(get_db), limit: int = Query(default=60, ge=1, le=200)):
+    """Directory of organizations that have opted into a public profile (spec §6)."""
+    rows = (
+        db.query(Organization)
+        .filter(Organization.is_public.is_(True))
+        .order_by(Organization.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "slug": o.slug,
+            "name": o.name,
+            "logo_url": o.logo_url,
+            "description": o.description,
+            "public_resources": len(_org_public_rows(db, o.id)),
+        }
+        for o in rows
+    ]
+
+
+@router.get("/orgs/{slug}")
+def public_org(
+    slug: str,
+    user: User | None = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+):
+    """A public organization profile page: org info, its approved public
+    resources, and follow state (spec §6). 404 unless the org opted in."""
+    org = db.query(Organization).filter(Organization.slug == slug).first()
+    if not org or not org.is_public:
+        raise not_found("Organization")
+    rows = _org_public_rows(db, org.id)
+    followers_count = db.query(OrgFollow).filter(OrgFollow.org_id == org.id).count()
+    following = bool(
+        user
+        and db.query(OrgFollow.id)
+        .filter(OrgFollow.org_id == org.id, OrgFollow.follower_id == user.id)
+        .first()
+    )
+    return {
+        "slug": org.slug,
+        "name": org.name,
+        "logo_url": org.logo_url,
+        "description": org.description,
+        "created_at": org.created_at,
+        "followers_count": followers_count,
+        "following": following,
+        "resources": [resource_out(db, r, user) for r in rows],
+    }
 
 
 @router.get("/search")

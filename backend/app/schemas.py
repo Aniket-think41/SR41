@@ -61,6 +61,7 @@ class OrgPatch(BaseModel):
     description: str | None = None
     logo_url: str | None = None
     terminology: Terminology | None = None
+    is_public: bool | None = None  # opt in to a public org profile page (spec §6)
 
 
 class InviteIn(BaseModel):
