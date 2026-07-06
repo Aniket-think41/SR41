@@ -111,6 +111,8 @@ def resource_out(db: Session, r: Resource, me: User | None) -> dict:
         "visibility": r.visibility or r.scope_type,
         "author_id": r.author_id,
         "is_public": r.is_public,
+        "approval_status": r.approval_status,
+        "review_note": r.review_note,
         "source_fingerprint": r.source_fingerprint,
         "stars_count": r.stars_count,
         "installs_count": r.installs_count,

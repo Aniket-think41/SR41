@@ -197,6 +197,13 @@ class ImportIn(BaseModel):
     org_slug: str
 
 
+class ResourceReviewIn(BaseModel):
+    """Approve or reject a resource submitted for public listing (spec §3)."""
+
+    decision: str  # "approve" | "reject"
+    note: str | None = None
+
+
 class GithubPreviewIn(BaseModel):
     """Detect (without creating) the skill(s)/MCP(s)/note(s) inside a public repo."""
 
@@ -354,6 +361,12 @@ class ContentPagePatch(BaseModel):
 
 class VerifyPublisherIn(BaseModel):
     verified: bool = True
+
+
+class SetPlanIn(BaseModel):
+    """Admin plan grant (spec §2): FREE | PRO | ENTERPRISE (legacy PREMIUM accepted)."""
+
+    plan: str
 
 
 class AdminRowPatch(BaseModel):

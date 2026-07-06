@@ -62,11 +62,20 @@ def _ensure_additive_columns() -> None:
     # (table, column, DDL type with default) — keep in sync with models.py.
     additive = [
         ("users", "must_change_password", "BOOLEAN NOT NULL DEFAULT FALSE"),
+        # Personal/publisher subscription tier (spec §2). Existing users default
+        # to FREE, matching the free-publisher baseline.
+        ("users", "plan", "VARCHAR NOT NULL DEFAULT 'FREE'"),
         # Nullable, NO default: legacy rows stay NULL, which the read logic
         # interprets as the home-scope default (pod resources become pod-private,
         # project resources project-private) — matching the scoped-visibility
         # intent rather than leaving everything org-wide.
         ("resources", "visibility", "VARCHAR"),
+        # Review workflow (spec §3). Existing public resources are grandfathered in
+        # as approved so nothing disappears from the marketplace on deploy.
+        ("resources", "approval_status", "VARCHAR NOT NULL DEFAULT 'approved'"),
+        ("resources", "review_note", "VARCHAR"),
+        ("resources", "reviewed_by", "VARCHAR"),
+        ("resources", "reviewed_at", "TIMESTAMP"),
     ]
     try:
         inspector = inspect(engine)

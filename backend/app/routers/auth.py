@@ -89,6 +89,7 @@ def _me_out(user: User) -> dict:
         **user_out(user),
         "is_admin": user.is_admin,
         "must_change_password": user.must_change_password,
+        "plan": user.plan or "FREE",
     }
 
 
@@ -300,6 +301,14 @@ def device_deny(body: DeviceUserCodeIn, user: User = Depends(get_current_user), 
 @router.get("/me")
 def me(user: User = Depends(get_current_user)):
     return _me_out(user)
+
+
+@router.get("/me/entitlements")
+def my_entitlements(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Personal plan, quotas, usage, and MCP access for the current user (spec §2)."""
+    from ..entitlements import user_entitlements
+
+    return user_entitlements(db, user)
 
 
 @router.get("/me/stats")

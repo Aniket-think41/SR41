@@ -37,6 +37,10 @@ class User(Base):
     website: Mapped[str | None] = mapped_column(String, nullable=True)
     is_publisher: Mapped[bool] = mapped_column(Boolean, default=False)
     verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Personal / publisher subscription tier (spec §2). FREE | PRO | ENTERPRISE.
+    # Governs org-creation and personal marketplace quotas + MCP access. Distinct
+    # from Organization.plan — a user can be Free while belonging to a paid org.
+    plan: Mapped[str] = mapped_column(String, default="FREE")
     # Platform admin (not org admin): may manage marketing content — blog posts,
     # changelog, legal pages — and verify publishers. Set in seed; never exposed
     # on the public user payload.
@@ -59,7 +63,7 @@ class Organization(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     is_public: Mapped[bool] = mapped_column(Boolean, default=False)
     owner_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
-    plan: Mapped[str] = mapped_column(String, default="FREE")  # FREE | PREMIUM
+    plan: Mapped[str] = mapped_column(String, default="FREE")  # FREE | PRO | ENTERPRISE (legacy "PREMIUM" → ENTERPRISE)
     terminology: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # {project, pod}
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
@@ -182,6 +186,16 @@ class Resource(Base):
     visibility: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     author_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
     is_public: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    # Review workflow (spec §3). Gates PUBLIC visibility (website + org page).
+    # Private resources stay "approved" (the field is a no-op for them). When a
+    # resource is submitted for public listing it becomes "pending" until the
+    # relevant authority (platform admin for publisher content, org admin for
+    # org-owned content) approves; "rejected" carries a reason in review_note and
+    # the author can edit + resubmit. Public read paths require "approved".
+    approval_status: Mapped[str] = mapped_column(String, default="approved", index=True)  # pending | approved | rejected
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Set when a resource was pushed from a local artifact (F2). Lets us detect
     # "this already exists on the platform" across machines → link, not duplicate.
     source_fingerprint: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
@@ -190,7 +204,8 @@ class Resource(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
-    author: Mapped[User] = relationship(lazy="joined")
+    # Two FKs to users.id (author_id, reviewed_by) → pin which one `author` uses.
+    author: Mapped[User] = relationship(lazy="joined", foreign_keys=[author_id])
 
 
 class ResourceStar(Base):

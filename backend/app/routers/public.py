@@ -31,7 +31,12 @@ def _list_params(
 
 
 def _public_rows(db: Session) -> list[Resource]:
-    return db.query(Resource).filter(Resource.is_public.is_(True)).all()
+    # Only approved public resources are visible on the website (spec §3).
+    return (
+        db.query(Resource)
+        .filter(Resource.is_public.is_(True), Resource.approval_status == "approved")
+        .all()
+    )
 
 
 def _org_name_map(db: Session) -> dict[str, str]:
@@ -78,7 +83,7 @@ def public_facets(db: Session = Depends(get_db)):
     rows = (
         db.query(Resource.tags, Resource.scope_type, Resource.scope_id, User.display_name)
         .join(User, User.id == Resource.author_id, isouter=True)
-        .filter(Resource.is_public.is_(True))
+        .filter(Resource.is_public.is_(True), Resource.approval_status == "approved")
         .all()
     )
     tag_counts: dict[str, int] = {}
@@ -122,7 +127,7 @@ def public_resource(
     db: Session = Depends(get_db),
 ):
     r = db.get(Resource, resource_id)
-    if not r or not r.is_public:
+    if not r or not r.is_public or r.approval_status != "approved":
         raise not_found("Resource")
     return resource_out(db, r, user)
 
@@ -136,7 +141,15 @@ def publisher(
     pub = db.query(User).filter(User.username == username).first()
     if not pub:
         raise not_found("Publisher")
-    rows = db.query(Resource).filter(Resource.is_public.is_(True), Resource.author_id == pub.id).all()
+    rows = (
+        db.query(Resource)
+        .filter(
+            Resource.is_public.is_(True),
+            Resource.approval_status == "approved",
+            Resource.author_id == pub.id,
+        )
+        .all()
+    )
     followers_count = db.query(Follow).filter(Follow.publisher_id == pub.id).count()
     following = bool(
         user
@@ -235,3 +248,11 @@ def public_page(key: str, db: Session = Depends(get_db)):
     if not p:
         raise not_found("Page")
     return content_page_out(p)
+
+
+@router.get("/plans")
+def public_plans():
+    """Subscription tiers + limits — drives the marketing pricing page (spec §2)."""
+    from ..entitlements import plan_catalog
+
+    return plan_catalog()

@@ -17,8 +17,9 @@ from sqlalchemy.orm import Session
 
 from ..database import Base, get_db
 from ..errors import conflict, not_found, validation
-from ..models import BlogPost, ChangelogEntry, ContentPage, Feedback, User
+from ..models import BlogPost, ChangelogEntry, ContentPage, Feedback, Organization, Resource, User
 from ..permissions import require_admin
+from ..entitlements import PLANS, normalize_plan, org_entitlements, user_entitlements
 from ..schemas import (
     AdminRowPatch,
     BlogPostCreate,
@@ -27,10 +28,11 @@ from ..schemas import (
     ChangelogPatch,
     ContentPagePatch,
     FeedbackStatusIn,
+    SetPlanIn,
     VerifyPublisherIn,
 )
 from ..security import get_current_user
-from ..serialize import blog_post_out, changelog_out, content_page_out, feedback_out, user_out
+from ..serialize import blog_post_out, changelog_out, content_page_out, feedback_out, resource_out, user_out
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -354,3 +356,55 @@ def verify_publisher(
     pub.verified = body.verified
     db.commit()
     return user_out(pub)
+
+
+# ---- resource review queue (spec §3) ----
+
+
+@router.get("/resources")
+def review_queue(
+    status: str = "pending", _: User = Depends(admin_user), db: Session = Depends(get_db),
+):
+    """Platform-wide resource review queue. `status` = pending | approved | rejected."""
+    rows = (
+        db.query(Resource)
+        .filter(Resource.approval_status == status)
+        .order_by(Resource.updated_at.desc())
+        .all()
+    )
+    return [resource_out(db, r, None) for r in rows]
+
+
+# ---- plan / tier administration (spec §2) ----
+# Grant or change a plan without payment — for comps, support, and the pre-billing
+# window. Once Razorpay is live these same fields are set by the webhook handler.
+
+
+@router.patch("/users/{username}/plan")
+def set_user_plan(
+    username: str, body: SetPlanIn, _: User = Depends(admin_user), db: Session = Depends(get_db),
+):
+    u = db.query(User).filter(User.username == username).first()
+    if not u:
+        raise not_found("User")
+    plan = normalize_plan(body.plan)
+    if plan not in PLANS:
+        raise validation(f"plan must be one of {', '.join(PLANS)}")
+    u.plan = plan
+    db.commit()
+    return user_entitlements(db, u)
+
+
+@router.patch("/orgs/{slug}/plan")
+def set_org_plan(
+    slug: str, body: SetPlanIn, _: User = Depends(admin_user), db: Session = Depends(get_db),
+):
+    org = db.query(Organization).filter(Organization.slug == slug).first()
+    if not org:
+        raise not_found("Organization")
+    plan = normalize_plan(body.plan)
+    if plan not in PLANS:
+        raise validation(f"plan must be one of {', '.join(PLANS)}")
+    org.plan = plan
+    db.commit()
+    return org_entitlements(db, org)

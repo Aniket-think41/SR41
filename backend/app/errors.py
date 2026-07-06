@@ -36,6 +36,11 @@ def validation(message: str) -> ApiError:
     return ApiError(422, "VALIDATION_ERROR", message)
 
 
+def payment_required(message: str) -> ApiError:
+    """402 — the action is blocked by the entity's plan/quota (spec §2)."""
+    return ApiError(402, "PAYMENT_REQUIRED", message)
+
+
 def envelope(status: int, code: str, message: str) -> JSONResponse:
     return JSONResponse(status_code=status, content={"error": {"code": code, "message": message, "status": status}})
 
@@ -54,7 +59,7 @@ def install_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(StarletteHTTPException)
     async def http_handler(_: Request, exc: StarletteHTTPException):
-        code = {401: "UNAUTHORIZED", 403: "FORBIDDEN", 404: "NOT_FOUND", 409: "CONFLICT", 422: "VALIDATION_ERROR"}.get(
+        code = {401: "UNAUTHORIZED", 402: "PAYMENT_REQUIRED", 403: "FORBIDDEN", 404: "NOT_FOUND", 409: "CONFLICT", 422: "VALIDATION_ERROR"}.get(
             exc.status_code, "INTERNAL_ERROR"
         )
         return envelope(exc.status_code, code, str(exc.detail))

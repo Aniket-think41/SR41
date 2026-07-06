@@ -12,6 +12,7 @@ from ..config import get_settings
 from ..database import get_db
 from ..errors import conflict, forbidden, not_found, validation
 from ..features import CATALOG, feature_enabled, resolve_features
+from ..entitlements import ENTERPRISE, enforce_can_create_org, org_entitlements, plan_at_least
 from ..email import send_invite_email
 from ..models import (
     Invitation,
@@ -65,6 +66,7 @@ def create_org(body: OrgCreate, user: User = Depends(get_current_user), db: Sess
     slug = _slugify(body.slug or body.name)
     if not body.name.strip() or not slug:
         raise validation("Organization name is required")
+    enforce_can_create_org(db, user)  # plan/quota gate (spec §2)
     if db.query(Organization.id).filter(Organization.slug == slug).first():
         raise conflict(f'Slug "{slug}" is taken')
     org = Organization(name=body.name.strip(), slug=slug, description=body.description, owner_id=user.id)
@@ -398,8 +400,9 @@ def set_feature(
     flag = next((f for f in CATALOG if f["key"] == key), None)
     if not flag:
         raise not_found(f'Feature "{key}"')
-    if flag["premium"] and org.plan != "PREMIUM":
-        raise forbidden(f'"{flag["name"]}" is a premium feature — activate a license first')
+    min_plan = flag.get("min_plan", "FREE")
+    if not plan_at_least(org.plan, min_plan):
+        raise forbidden(f'"{flag["name"]}" requires the {min_plan} plan — upgrade the organization first')
     existing = db.query(OrgFeature).filter(OrgFeature.org_id == org.id, OrgFeature.key == key).first()
     if existing:
         existing.enabled = body.enabled
@@ -418,7 +421,47 @@ def activate_license(slug: str, body: LicenseIn, user: User = Depends(get_curren
     key = body.license_key.strip().upper()
     if not re.match(settings.license_key_pattern, key):
         raise validation("Invalid license key (format: T41-PREM-XXXX)")
-    org.plan = "PREMIUM"
-    db.add(License(org_id=org.id, license_key=key, plan="PREMIUM", activated_by=user.id))
+    org.plan = ENTERPRISE
+    db.add(License(org_id=org.id, license_key=key, plan=ENTERPRISE, activated_by=user.id))
     db.commit()
-    return {"plan": org.plan, "features": resolve_features(db, org)}
+    return {"plan": org.plan, "features": resolve_features(db, org), "entitlements": org_entitlements(db, org)}
+
+
+@router.get("/{slug}/entitlements")
+def org_entitlements_route(slug: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Plan, quotas, and current usage for the org settings / upgrade UI (spec §2)."""
+    org = org_by_slug(db, slug)
+    require_org_member(db, org, user)
+    return org_entitlements(db, org)
+
+
+@router.get("/{slug}/review-queue")
+def org_review_queue(
+    slug: str, status: str = "pending",
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
+):
+    """Org-owned resources awaiting the org admin's public-listing decision (§3).
+    `status` = pending | approved | rejected."""
+    org = org_by_slug(db, slug)
+    m = require_org_member(db, org, user)
+    if m.role != "ADMIN":
+        raise forbidden("Only org admins can review resources")
+    project_ids = [p.id for p in db.query(Project.id).filter(Project.org_id == org.id).all()]
+    pod_ids = [
+        pod.id for pod in db.query(Pod.id).join(Project, Pod.project_id == Project.id)
+        .filter(Project.org_id == org.id).all()
+    ]
+    from sqlalchemy import and_, or_
+
+    clauses = [and_(Resource.scope_type == "ORG", Resource.scope_id == org.id)]
+    if project_ids:
+        clauses.append(and_(Resource.scope_type == "PROJECT", Resource.scope_id.in_(project_ids)))
+    if pod_ids:
+        clauses.append(and_(Resource.scope_type == "POD", Resource.scope_id.in_(pod_ids)))
+    rows = (
+        db.query(Resource)
+        .filter(Resource.approval_status == status, or_(*clauses))
+        .order_by(Resource.updated_at.desc())
+        .all()
+    )
+    return [resource_out(db, r, user) for r in rows]

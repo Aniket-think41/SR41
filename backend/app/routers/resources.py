@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..database import get_db
-from ..errors import forbidden, not_found, validation
+from ..errors import ApiError, forbidden, not_found, validation
 from ..features import feature_enabled
 from ..models import (
     Follow,
@@ -45,11 +45,14 @@ from ..schemas import (
     ResourceCreate,
     ResourceMove,
     ResourcePatch,
+    ResourceReviewIn,
     UploadIn,
 )
 from ..security import get_current_user
 from ..serialize import log_activity, resource_out, search_rank
 from ..visibility import filter_visible, normalize_visibility
+from ..entitlements import enforce_can_add_resource
+from ..review import approve, can_review, is_publicly_visible, reject, submit_for_review
 
 router = APIRouter(prefix="/api", tags=["resources"])
 settings = get_settings()
@@ -113,6 +116,7 @@ def create_resource(body: ResourceCreate, user: User = Depends(get_current_user)
     # no scope_id and are public on creation.
     scope_id = None if body.scope_type == "PUBLIC" else body.scope_id
     _require_scope_write(db, body.scope_type, scope_id, user)
+    enforce_can_add_resource(db, user, body.scope_type, scope_id)  # plan/quota gate (spec §2)
     r = Resource(
         type=body.type,
         title=body.title.strip(),
@@ -136,10 +140,13 @@ def create_resource(body: ResourceCreate, user: User = Depends(get_current_user)
     db.add(r)
     db.flush()
     _log_resource(db, user, r, "created")
-    # A publisher's PUBLIC resource lands on the marketplace immediately → tell
-    # their followers, just like an explicit publish.
+    # A publisher's PUBLIC resource is submitted to the marketplace review queue
+    # (spec §3). It goes live — and its followers are notified — only once it's
+    # approved (auto-approved when the author is a platform admin).
     if r.scope_type == "PUBLIC":
-        _notify_followers(db, user, r)
+        submit_for_review(db, r, user)
+        if is_publicly_visible(r):
+            _notify_followers(db, user, r)
     db.commit()
     return resource_out(db, r, user)
 
@@ -203,6 +210,15 @@ def github_import(
                  "reason": "already imported", "resource_id": existing.id}
             )
             continue
+        # Stop importing (gracefully) once the owning entity hits its quota,
+        # rather than failing the whole batch (spec §2).
+        try:
+            enforce_can_add_resource(db, user, body.scope_type, body.scope_id)
+        except ApiError as exc:
+            skipped.append(
+                {"title": d.title, "fingerprint": d.fingerprint, "reason": exc.message}
+            )
+            continue
         p = d.to_create_payload(body.scope_type, body.scope_id)
         r = Resource(
             type=p["type"],
@@ -259,6 +275,9 @@ def update_resource(
         r.visibility = normalize_visibility(r.scope_type, requested_vis)
     else:
         r.visibility = normalize_visibility(r.scope_type, r.visibility)
+    # Editing a rejected-but-still-public resource resubmits it for review (§3).
+    if r.is_public and r.approval_status == "rejected":
+        submit_for_review(db, r, user)
     _log_resource(db, user, r, "updated", meta=f"v{r.version}")
     db.commit()
     return resource_out(db, r, user)
@@ -449,11 +468,14 @@ def publish(resource_id: str, user: User = Depends(get_current_user), db: Sessio
     # (an admin pushing a teammate's work), not your own.
     if r.author_id != user.id and not feature_enabled(db, scope_org(db, r), "publishing"):
         raise forbidden("Marketplace publishing is disabled for this organization")
-    was_public = r.is_public
+    was_visible = is_publicly_visible(r)
     r.is_public = True
+    # Submit to review (spec §3): org content → org admin, publisher content →
+    # platform admin. Auto-approved when the publisher is already its reviewer.
+    submit_for_review(db, r, user)
     _log_resource(db, user, r, "published", notify_scope="ORG")
-    # Newly public → notify the author's followers (only on the transition).
-    if not was_public:
+    # Notify the author's followers only on the transition to publicly visible.
+    if is_publicly_visible(r) and not was_visible:
         _notify_followers(db, db.get(User, r.author_id) or user, r)
     db.commit()
     return resource_out(db, r, user)
@@ -464,6 +486,27 @@ def unpublish(resource_id: str, user: User = Depends(get_current_user), db: Sess
     r = resource_or_404(db, resource_id)
     require_resource_write(db, r, user)
     r.is_public = False
+    db.commit()
+    return resource_out(db, r, user)
+
+
+@router.post("/resources/{resource_id}/review")
+def review_resource(
+    resource_id: str, body: ResourceReviewIn,
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
+):
+    """Approve or reject a resource submitted for public listing (spec §3).
+    Authority: platform admins for anything, org admins for their org's content."""
+    r = resource_or_404(db, resource_id)
+    if not can_review(db, r, user):
+        raise forbidden("You don't have review authority over this resource")
+    decision = (body.decision or "").strip().lower()
+    if decision == "approve":
+        approve(db, r, user)
+    elif decision == "reject":
+        reject(db, r, user, (body.note or "").strip() or None)
+    else:
+        raise validation('decision must be "approve" or "reject"')
     db.commit()
     return resource_out(db, r, user)
 
@@ -625,7 +668,7 @@ def import_resource(
     user: User = Depends(get_current_user), db: Session = Depends(get_db),
 ):
     src = db.get(Resource, resource_id)
-    if not src or not src.is_public:
+    if not src or not is_publicly_visible(src):
         raise not_found("Public resource")
     org = org_by_slug(db, body.org_slug)
     require_org_member(db, org, user)

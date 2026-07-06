@@ -35,7 +35,7 @@ def _visible_resources(db: Session, target: User, viewer: User) -> list[Resource
     """Own profile → everything; someone else's → public only (§4.2)."""
     q = db.query(Resource).filter(Resource.author_id == target.id)
     if viewer.id != target.id:
-        q = q.filter(Resource.is_public.is_(True))
+        q = q.filter(Resource.is_public.is_(True), Resource.approval_status == "approved")
     return q.all()
 
 
@@ -78,7 +78,7 @@ def user_starred(username: str, viewer: User = Depends(get_current_user), db: Se
     ids = [s.resource_id for s in db.query(ResourceStar).filter(ResourceStar.user_id == target.id).all()]
     rows = db.query(Resource).filter(Resource.id.in_(ids or [""])).all()
     if viewer.id != target.id:
-        rows = [r for r in rows if r.is_public]
+        rows = [r for r in rows if r.is_public and r.approval_status == "approved"]
     return [resource_out(db, r, viewer) for r in rows]
 
 
@@ -96,7 +96,7 @@ def user_pinned(username: str, viewer: User = Depends(get_current_user), db: Ses
     out = []
     for p in pins:
         r = db.get(Resource, p.resource_id)
-        if r and (viewer.id == target.id or r.is_public):
+        if r and (viewer.id == target.id or (r.is_public and r.approval_status == "approved")):
             out.append(resource_out(db, r, viewer))
     return out
 

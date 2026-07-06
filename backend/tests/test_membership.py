@@ -26,8 +26,24 @@ c = TestClient(app)
 _n = [0]
 
 
-def _user():
-    """Create a fresh signed-in user; return (headers, user_id, email)."""
+def _set_plan(user_id, plan):
+    """Set a user's plan directly (paid plans gate org creation — spec §2)."""
+    from app.database import SessionLocal
+    from app.models import User
+
+    db = SessionLocal()
+    try:
+        u = db.get(User, user_id)
+        u.plan = plan
+        db.commit()
+    finally:
+        db.close()
+
+
+def _user(plan="ENTERPRISE"):
+    """Create a fresh signed-in user; return (headers, user_id, email). Defaults
+    to ENTERPRISE so org-creating fixtures aren't blocked by the plan quota;
+    pass plan="FREE" to test the gate itself."""
     _n[0] += 1
     email = f"mem{_n[0]}_{os.getpid()}@example.com"
     r = c.post("/api/auth/signup", json={"email": email, "password": "password123", "display_name": f"Member {_n[0]}"})
@@ -35,7 +51,10 @@ def _user():
     h = {"Authorization": f"Bearer {r.json()['access_token']}"}
     me = c.get("/api/auth/me", headers=h)
     assert me.status_code == 200, me.text
-    return h, me.json()["id"], email
+    uid = me.json()["id"]
+    if plan != "FREE":
+        _set_plan(uid, plan)
+    return h, uid, email
 
 
 def _org(h):
@@ -330,8 +349,9 @@ def test_first_time_forced_change_then_normal_change():
 
 
 def test_publisher_can_add_public_resource_to_marketplace():
-    """A registered publisher adds a resource at PUBLIC scope (no org) — it's
-    public immediately and appears in the marketplace. Non-publishers can't."""
+    """A registered publisher adds a resource at PUBLIC scope (no org). Non-publishers
+    can't. Since spec §3 it enters the review queue (pending) rather than going live
+    instantly — the approve→visible flow is covered in test_review.py."""
     h, _, _ = _user()
 
     # not a publisher yet → PUBLIC create is forbidden
@@ -347,11 +367,11 @@ def test_publisher_can_add_public_resource_to_marketplace():
     )
     assert r.status_code < 400, r.text
     body = r.json()
-    assert body["is_public"] is True and body["scope_type"] == "PUBLIC"
-
-    # visible on the public marketplace (no auth needed)
+    assert body["scope_type"] == "PUBLIC"
+    # queued for review → NOT yet on the public marketplace
+    assert body["approval_status"] == "pending"
     market = c.get("/api/public/resources").json()
-    assert any(x["id"] == body["id"] for x in market)
+    assert not any(x["id"] == body["id"] for x in market)
 
 
 def test_pod_resource_visibility_default_and_elevation():
