@@ -48,7 +48,7 @@ from ..schemas import (
     ResourceReviewIn,
     UploadIn,
 )
-from ..security import get_current_user
+from ..security import client_source, get_current_user
 from ..serialize import log_activity, resource_out, search_rank
 from ..visibility import filter_visible, normalize_visibility
 from ..entitlements import enforce_can_add_resource
@@ -84,7 +84,7 @@ def _require_scope_write(db: Session, scope_type: str, scope_id: str | None, use
 
 def _log_resource(
     db: Session, user: User, r: Resource, verb: str, meta: str | None = None,
-    notify_scope: str | None = None,
+    notify_scope: str | None = None, source: str = "web",
 ) -> None:
     org = scope_org(db, r)
     if not org:
@@ -100,12 +100,15 @@ def _log_resource(
     log_activity(
         db, user_id=user.id, org_id=org.id, verb=verb,
         object_type="resource", object_id=r.id, object_title=r.title, meta=meta,
-        scope_type=audience, scope_id=audience_id,
+        scope_type=audience, scope_id=audience_id, source=source,
     )
 
 
 @router.post("/resources")
-def create_resource(body: ResourceCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def create_resource(
+    body: ResourceCreate, user: User = Depends(get_current_user),
+    db: Session = Depends(get_db), source: str = Depends(client_source),
+):
     if body.type not in VALID_TYPES:
         raise validation("type must be SKILL, MCP, or NOTE")
     if body.scope_type not in VALID_SCOPES:
@@ -139,7 +142,7 @@ def create_resource(body: ResourceCreate, user: User = Depends(get_current_user)
     )
     db.add(r)
     db.flush()
-    _log_resource(db, user, r, "created")
+    _log_resource(db, user, r, "created", source=source)
     # A publisher's PUBLIC resource is submitted to the marketplace review queue
     # (spec §3). It goes live — and its followers are notified — only once it's
     # approved (auto-approved when the author is a platform admin).
@@ -458,7 +461,10 @@ def _notify_followers(db: Session, publisher: User, r: Resource) -> None:
 
 
 @router.post("/resources/{resource_id}/publish")
-def publish(resource_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def publish(
+    resource_id: str, user: User = Depends(get_current_user),
+    db: Session = Depends(get_db), source: str = Depends(client_source),
+):
     r = resource_or_404(db, resource_id)
     require_resource_write(db, r, user)
     if not user.is_publisher:
@@ -473,7 +479,7 @@ def publish(resource_id: str, user: User = Depends(get_current_user), db: Sessio
     # Submit to review (spec §3): org content → org admin, publisher content →
     # platform admin. Auto-approved when the publisher is already its reviewer.
     submit_for_review(db, r, user)
-    _log_resource(db, user, r, "published", notify_scope="ORG")
+    _log_resource(db, user, r, "published", notify_scope="ORG", source=source)
     # Notify the author's followers only on the transition to publicly visible.
     if is_publicly_visible(r) and not was_visible:
         _notify_followers(db, db.get(User, r.author_id) or user, r)
@@ -512,7 +518,10 @@ def review_resource(
 
 
 @router.post("/resources/{resource_id}/star")
-def star(resource_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def star(
+    resource_id: str, user: User = Depends(get_current_user),
+    db: Session = Depends(get_db), source: str = Depends(client_source),
+):
     r = resource_or_404(db, resource_id)
     require_resource_read(db, r, user)
     exists = (
@@ -523,8 +532,28 @@ def star(resource_id: str, user: User = Depends(get_current_user), db: Session =
     if not exists:
         db.add(ResourceStar(resource_id=r.id, user_id=user.id))
         r.stars_count += 1
+        # Log to the activity timeline (previously "starred" was documented but
+        # never recorded — spec §7 fix).
+        _log_resource(db, user, r, "starred", source=source)
         db.commit()
     return resource_out(db, r, user)
+
+
+@router.post("/resources/{resource_id}/use")
+def track_use(
+    resource_id: str, user: User = Depends(get_current_user),
+    db: Session = Depends(get_db), source: str = Depends(client_source),
+):
+    """Record that a resource was used/installed (spec §7). The CLI (`use`/`pull`/
+    `install`) and MCP (`use_resource`) call this so client usage shows on the
+    activity timeline. Bumps installs_count when the client actually installs."""
+    r = resource_or_404(db, resource_id)
+    require_resource_read(db, r, user)
+    if source in ("cli", "mcp"):
+        r.installs_count += 1
+    _log_resource(db, user, r, "used", source=source)
+    db.commit()
+    return {"ok": True, "installs_count": r.installs_count}
 
 
 @router.delete("/resources/{resource_id}/star")
@@ -666,6 +695,7 @@ async def upload_binary(
 def import_resource(
     resource_id: str, body: ImportIn,
     user: User = Depends(get_current_user), db: Session = Depends(get_db),
+    source: str = Depends(client_source),
 ):
     src = db.get(Resource, resource_id)
     if not src or not is_publicly_visible(src):
@@ -696,7 +726,10 @@ def import_resource(
     log_activity(
         db, user_id=user.id, org_id=org.id, verb="created",
         object_type="resource", object_id=copy.id, object_title=copy.title,
-        meta="imported from marketplace",
+        meta="imported from marketplace", source=source,
     )
+    # Also record the install against the source resource so its author sees the
+    # adoption on their activity timeline (spec §7).
+    _log_resource(db, user, copy, "installed", meta=f"imported “{src.title}”", source=source)
     db.commit()
     return resource_out(db, copy, user)

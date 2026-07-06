@@ -175,3 +175,15 @@ def get_current_user_optional(request: Request, db: Session = Depends(get_db)) -
         return _resolve_user(db, token)
     except Exception:
         return None
+
+
+_CLIENT_SOURCES = {"web", "cli", "mcp", "api", "dashboard"}
+
+
+def client_source(request: Request) -> str:
+    """Where a request originated (spec §7), from the X-SkillShare-Client header
+    the CLI and MCP set. Defaults to "web". Normalizes "dashboard" → "web"."""
+    raw = (request.headers.get("X-SkillShare-Client") or "").strip().lower()
+    if raw == "dashboard" or raw not in _CLIENT_SOURCES:
+        return "web"
+    return raw

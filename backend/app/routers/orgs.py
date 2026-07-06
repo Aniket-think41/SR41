@@ -328,6 +328,10 @@ def published(slug: str, user: User = Depends(get_current_user), db: Session = D
 def activity(slug: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     org = org_by_slug(db, slug)
     require_org_member(db, org, user)
+    # Honour the activity-feed flag on the backend (previously it was defined but
+    # only enforced client-side, which could desync — spec §7).
+    if not feature_enabled(db, org, "activity-feed"):
+        return []
     rows = (
         db.query(Activity)
         .filter(Activity.org_id == org.id)

@@ -102,6 +102,8 @@ def _ensure_additive_columns() -> None:
         ("feedback", "author_name", "VARCHAR"),
         ("feedback", "author_email", "VARCHAR"),
         ("feedback", "public_status", "VARCHAR NOT NULL DEFAULT 'pending'"),
+        # Activity client source (spec §7): web | cli | mcp | api.
+        ("activities", "source", "VARCHAR NOT NULL DEFAULT 'web'"),
     ]
     # One-off NOT NULL relaxations (Postgres only — SQLite dev DBs are rebuilt by
     # create_all). feedback.user_id must allow NULL for anonymous website feedback.

@@ -249,11 +249,14 @@ class Activity(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("act"))
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
     org_id: Mapped[str] = mapped_column(String, ForeignKey("organizations.id"), index=True)
-    verb: Mapped[str] = mapped_column(String)  # created|updated|published|starred|joined|invited
+    verb: Mapped[str] = mapped_column(String)  # created|updated|published|starred|installed|used|joined|invited
     object_type: Mapped[str] = mapped_column(String)  # resource|project|pod|org|member
     object_id: Mapped[str] = mapped_column(String)
     object_title: Mapped[str] = mapped_column(String)
     meta: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Where the action came from (spec §7): web | cli | mcp | api. Lets the
+    # activity timeline show "via CLI"/"via MCP" and surfaces client usage.
+    source: Mapped[str] = mapped_column(String, default="web")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
     user: Mapped[User] = relationship(lazy="joined")

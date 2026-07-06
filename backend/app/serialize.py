@@ -228,6 +228,7 @@ def activity_out(a: Activity) -> dict:
         "object_id": a.object_id,
         "object_title": a.object_title,
         "meta": a.meta,
+        "source": a.source,
         "created_at": a.created_at,
         "user": user_out(a.user) if a.user else None,
     }
@@ -344,6 +345,7 @@ def log_activity(
     meta: str | None = None,
     scope_type: str = "ORG",
     scope_id: str | None = None,
+    source: str = "web",
 ) -> None:
     db.add(
         Activity(
@@ -354,6 +356,7 @@ def log_activity(
             object_id=object_id,
             object_title=object_title,
             meta=meta,
+            source=source,
         )
     )
     _fan_out_notifications(
