@@ -147,6 +147,60 @@ def _ensure_additive_columns() -> None:
 _ensure_additive_columns()
 
 
+def _backfill_plans_once() -> None:
+    """One-time grandfathering when the tier system goes live (spec §2).
+
+    Guarded by a marker in schema_migrations so it runs exactly once, even
+    though the migration step executes on every boot. Policy: don't lock out
+    anyone already using the product —
+      * organizations on the legacy PREMIUM tier  → ENTERPRISE
+      * users who own any organization             → at least PRO
+      * owners of an ENTERPRISE org                → ENTERPRISE
+      * platform admins                            → ENTERPRISE
+    New signups still start on FREE.
+    """
+    from sqlalchemy import text
+
+    log = logging.getLogger("app.migrate")
+    marker = "backfill_plans_v1"
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE TABLE IF NOT EXISTS schema_migrations "
+                "(name VARCHAR PRIMARY KEY, applied_at TIMESTAMP)"
+            ))
+            already = conn.execute(
+                text("SELECT 1 FROM schema_migrations WHERE name = :n"), {"n": marker}
+            ).first()
+            if already:
+                return
+            # PREMIUM orgs → ENTERPRISE
+            conn.execute(text("UPDATE organizations SET plan = 'ENTERPRISE' WHERE plan = 'PREMIUM'"))
+            # Org owners → PRO (grandfathered so they can keep managing/creating)
+            conn.execute(text(
+                "UPDATE users SET plan = 'PRO' "
+                "WHERE plan = 'FREE' AND id IN (SELECT owner_id FROM organizations)"
+            ))
+            # Owners of an ENTERPRISE org → ENTERPRISE
+            conn.execute(text(
+                "UPDATE users SET plan = 'ENTERPRISE' "
+                "WHERE plan != 'ENTERPRISE' AND id IN "
+                "(SELECT owner_id FROM organizations WHERE plan = 'ENTERPRISE')"
+            ))
+            # Platform admins → ENTERPRISE
+            conn.execute(text("UPDATE users SET plan = 'ENTERPRISE' WHERE is_admin = TRUE AND plan != 'ENTERPRISE'"))
+            conn.execute(
+                text("INSERT INTO schema_migrations (name, applied_at) VALUES (:n, CURRENT_TIMESTAMP)"),
+                {"n": marker},
+            )
+            log.info("Backfilled plans (%s)", marker)
+    except Exception:
+        log.exception("Plan backfill failed")
+
+
+_backfill_plans_once()
+
+
 def _bootstrap_admin() -> None:
     """On production startup, create or promote an admin user from env vars.
     This is the bootstrap path for deployments that don't run the seed script."""
