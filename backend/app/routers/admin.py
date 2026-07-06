@@ -33,7 +33,7 @@ from ..schemas import (
     VerifyPublisherIn,
 )
 from ..security import get_current_user
-from ..serialize import blog_post_out, changelog_out, content_page_out, feedback_out, resource_out, user_out
+from ..serialize import blog_post_out, changelog_out, content_page_out, feedback_out, resources_out, user_out
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -389,7 +389,7 @@ def review_queue(
         .order_by(Resource.updated_at.desc())
         .all()
     )
-    return [resource_out(db, r, None) for r in rows]
+    return resources_out(db, rows, None)
 
 
 # ---- plan / tier administration (spec §2) ----

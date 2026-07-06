@@ -50,7 +50,7 @@ from ..security import (
     rotate_refresh_token,
     verify_password,
 )
-from ..serialize import resource_out, user_out
+from ..serialize import resource_out, resources_out, user_out
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 settings = get_settings()
@@ -369,7 +369,7 @@ def my_resources(user: User = Depends(get_current_user), db: Session = Depends(g
         clauses.append(and_(Resource.scope_type == "POD", Resource.scope_id.in_(pod_ids)))
     rows = db.query(Resource).filter(or_(*clauses)).order_by(Resource.updated_at.desc()).all()
     rows = filter_visible(db, rows, user)
-    return [resource_out(db, r, user) for r in rows]
+    return resources_out(db, rows, user)
 
 
 @router.patch("/me")

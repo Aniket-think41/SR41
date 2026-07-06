@@ -77,22 +77,31 @@ def scope_name(db: Session, scope_type: str, scope_id: str | None) -> str | None
     return obj.name if obj else None
 
 
-def resource_out(db: Session, r: Resource, me: User | None) -> dict:
-    starred = False
-    pinned = False
-    if me:
+_UNSET = object()
+
+
+def resource_out(
+    db: Session, r: Resource, me: User | None,
+    *, starred: bool | None = None, pinned: bool | None = None, scope_label_name=_UNSET,
+) -> dict:
+    # `starred`/`pinned`/`scope_label_name` may be supplied pre-computed (by
+    # resources_out) to avoid a per-row query; otherwise resolve them individually.
+    if me and starred is None:
         starred = (
             db.query(ResourceStar.id)
             .filter(ResourceStar.resource_id == r.id, ResourceStar.user_id == me.id)
             .first()
             is not None
         )
+    if me and pinned is None:
         pinned = (
             db.query(ResourcePin.id)
             .filter(ResourcePin.resource_id == r.id, ResourcePin.user_id == me.id)
             .first()
             is not None
         )
+    starred = bool(starred)
+    pinned = bool(pinned)
     return {
         "id": r.id,
         "type": r.type,
@@ -107,7 +116,9 @@ def resource_out(db: Session, r: Resource, me: User | None) -> dict:
         "attachments": r.attachments or [],
         "scope_type": r.scope_type,
         "scope_id": r.scope_id,
-        "scope_name": scope_name(db, r.scope_type, r.scope_id),
+        "scope_name": (
+            scope_name(db, r.scope_type, r.scope_id) if scope_label_name is _UNSET else scope_label_name
+        ),
         "visibility": r.visibility or r.scope_type,
         "author_id": r.author_id,
         "is_public": r.is_public,
@@ -123,6 +134,52 @@ def resource_out(db: Session, r: Resource, me: User | None) -> dict:
         "starred_by_me": starred,
         "pinned_by_me": pinned,
     }
+
+
+def resources_out(db: Session, rows: list[Resource], me: User | None) -> list[dict]:
+    """Serialize a list of resources with the caller's star/pin state resolved in
+    two queries total instead of two per row (spec §8 — kills the list N+1)."""
+    if not rows:
+        return []
+    starred_ids: set[str] = set()
+    pinned_ids: set[str] = set()
+    if me:
+        ids = [r.id for r in rows]
+        starred_ids = {
+            x for (x,) in db.query(ResourceStar.resource_id)
+            .filter(ResourceStar.user_id == me.id, ResourceStar.resource_id.in_(ids)).all()
+        }
+        pinned_ids = {
+            x for (x,) in db.query(ResourcePin.resource_id)
+            .filter(ResourcePin.user_id == me.id, ResourcePin.resource_id.in_(ids)).all()
+        }
+    names = _batch_scope_names(db, rows)
+    return [
+        resource_out(
+            db, r, me,
+            starred=r.id in starred_ids, pinned=r.id in pinned_ids,
+            scope_label_name=names.get((r.scope_type, r.scope_id)),
+        )
+        for r in rows
+    ]
+
+
+def _batch_scope_names(db: Session, rows: list[Resource]) -> dict[tuple[str, str], str]:
+    """Resolve every distinct (scope_type, scope_id) name in one query per scope
+    type, instead of one per row."""
+    by_type: dict[str, set[str]] = {}
+    for r in rows:
+        if r.scope_id:
+            by_type.setdefault(r.scope_type, set()).add(r.scope_id)
+    model_map = {"ORG": Organization, "PROJECT": Project, "POD": Pod}
+    out: dict[tuple[str, str], str] = {}
+    for scope_type, ids in by_type.items():
+        model = model_map.get(scope_type)
+        if not model:
+            continue
+        for obj in db.query(model).filter(model.id.in_(ids)).all():
+            out[(scope_type, obj.id)] = obj.name
+    return out
 
 
 def project_out(db: Session, p: Project) -> dict:

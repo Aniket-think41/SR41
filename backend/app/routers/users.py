@@ -19,7 +19,7 @@ from ..models import (
     now,
 )
 from ..security import get_current_user
-from ..serialize import activity_out, org_out, resource_out, search_rank, user_out
+from ..serialize import activity_out, org_out, resource_out, resources_out, search_rank, user_out
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -69,7 +69,7 @@ def user_resources(
 ):
     target = _user_or_404(db, username)
     rows = search_rank(_visible_resources(db, target, viewer), q, type, tag, sort)
-    return [resource_out(db, r, viewer) for r in rows]
+    return resources_out(db, rows, viewer)
 
 
 @router.get("/{username}/starred")
@@ -79,7 +79,7 @@ def user_starred(username: str, viewer: User = Depends(get_current_user), db: Se
     rows = db.query(Resource).filter(Resource.id.in_(ids or [""])).all()
     if viewer.id != target.id:
         rows = [r for r in rows if r.is_public and r.approval_status == "approved"]
-    return [resource_out(db, r, viewer) for r in rows]
+    return resources_out(db, rows, viewer)
 
 
 @router.get("/{username}/pinned")

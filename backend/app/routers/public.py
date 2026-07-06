@@ -28,6 +28,7 @@ from ..serialize import (
     content_page_out,
     public_feedback_out,
     resource_out,
+    resources_out,
     search_rank,
     user_out,
 )
@@ -85,7 +86,7 @@ def public_resources(
     response.headers["Access-Control-Expose-Headers"] = "X-Total-Count"
     if limit is not None:
         rows = rows[offset : offset + limit]
-    return [resource_out(db, r, user) for r in rows]
+    return resources_out(db, rows, user)
 
 
 @router.get("/facets")
@@ -179,7 +180,7 @@ def publisher(
     )
     return {
         **user_out(pub),
-        "resources": [resource_out(db, r, user) for r in rows],
+        "resources": resources_out(db, rows, user),
         "followers_count": followers_count,
         "following": following,
     }
@@ -288,7 +289,7 @@ def public_org(
         "created_at": org.created_at,
         "followers_count": followers_count,
         "following": following,
-        "resources": [resource_out(db, r, user) for r in rows],
+        "resources": resources_out(db, rows, user),
     }
 
 
@@ -299,7 +300,7 @@ def public_search(
     db: Session = Depends(get_db),
 ):
     rows = search_rank(_public_rows(db), params["q"], params["type_"], params["tag"], params["sort"])
-    return [resource_out(db, r, user) for r in rows]
+    return resources_out(db, rows, user)
 
 
 # ---- marketing content (blog, changelog, legal pages) ----

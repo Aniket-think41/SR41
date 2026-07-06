@@ -49,7 +49,7 @@ from ..schemas import (
     UploadIn,
 )
 from ..security import client_source, get_current_user
-from ..serialize import log_activity, resource_out, search_rank
+from ..serialize import log_activity, resource_out, resources_out, search_rank
 from ..visibility import filter_visible, normalize_visibility
 from ..entitlements import enforce_can_add_resource
 from ..review import approve, can_review, is_publicly_visible, reject, submit_for_review
@@ -375,7 +375,7 @@ def org_resources(
     require_org_member(db, org, user)
     rows = filter_visible(db, _org_view_rows(db, org.id), user)
     rows = search_rank(rows, params["q"], params["type_"], params["tag"], params["sort"])
-    return [resource_out(db, r, user) for r in rows]
+    return resources_out(db, rows, user)
 
 
 @router.get("/projects/{project_id}/resources")
@@ -387,7 +387,7 @@ def project_resources(
     require_project_read(db, project, user)
     rows = filter_visible(db, _project_view_rows(db, project.id), user)
     rows = search_rank(rows, params["q"], params["type_"], params["tag"], params["sort"])
-    return [resource_out(db, r, user) for r in rows]
+    return resources_out(db, rows, user)
 
 
 @router.get("/pods/{pod_id}/resources")
@@ -421,7 +421,7 @@ def pod_resources(
 
     rows = filter_visible(db, rows, user)
     rows = search_rank(rows, params["q"], params["type_"], params["tag"], params["sort"])
-    return [resource_out(db, r, user) for r in rows]
+    return resources_out(db, rows, user)
 
 
 # ---- publish / star ----

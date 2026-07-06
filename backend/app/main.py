@@ -108,6 +108,14 @@ def _ensure_additive_columns() -> None:
     # One-off NOT NULL relaxations (Postgres only — SQLite dev DBs are rebuilt by
     # create_all). feedback.user_id must allow NULL for anonymous website feedback.
     relax_not_null = [("feedback", "user_id")]
+    # Composite indexes for hot read paths (spec §8). CREATE INDEX IF NOT EXISTS
+    # works on both SQLite and Postgres and is idempotent.
+    indexes = [
+        ("ix_resources_public_approval", "resources", "is_public, approval_status"),
+        ("ix_activities_user_created", "activities", "user_id, created_at"),
+        ("ix_activities_org_created", "activities", "org_id, created_at"),
+        ("ix_notifications_user_read", "notifications", "user_id, read_at"),
+    ]
     try:
         inspector = inspect(engine)
         existing_tables = set(inspector.get_table_names())
@@ -129,6 +137,9 @@ def _ensure_additive_columns() -> None:
                     if col is not None and not col.get("nullable", True):
                         conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} DROP NOT NULL"))
                         log.info("Relaxed NOT NULL on %s.%s", table, column)
+            for name, table, cols in indexes:
+                if table in existing_tables:
+                    conn.execute(text(f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({cols})"))
     except Exception:
         log.exception("Additive column migration failed")
 

@@ -38,6 +38,7 @@ from ..serialize import (
     pod_out,
     project_out,
     resource_out,
+    resources_out,
     user_out,
 )
 from ..models import Activity
@@ -319,7 +320,7 @@ def published(slug: str, user: User = Depends(get_current_user), db: Session = D
         .all()
     )
     rows.sort(key=lambda r: r.stars_count, reverse=True)
-    return [resource_out(db, r, user) for r in rows]
+    return resources_out(db, rows, user)
 
 
 # ---- activity & search ----
@@ -470,4 +471,4 @@ def org_review_queue(
         .order_by(Resource.updated_at.desc())
         .all()
     )
-    return [resource_out(db, r, user) for r in rows]
+    return resources_out(db, rows, user)
