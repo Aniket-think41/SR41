@@ -12,3 +12,8 @@ boto3>=1.34                  # s3 storage backend (alternative)
 python-dotenv>=1.0
 email-validator>=2.1
 python-multipart>=0.0.9
+# Optional integrations (spec §5/§8) — inert until configured with credentials.
+# The app degrades gracefully if any are missing (imports are guarded).
+razorpay>=1.4       # payments (activates with RAZORPAY_KEY_ID/SECRET)
+redis>=5.0          # caching + distributed rate limiting (activates with REDIS_URL)
+sentry-sdk>=2.0     # error monitoring (activates with SENTRY_DSN)

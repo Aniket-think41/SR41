@@ -27,6 +27,7 @@ from .ratelimit import RateLimitMiddleware
 from .routers import (
     admin,
     auth,
+    billing,
     feedback,
     local_state,
     members,
@@ -40,6 +41,27 @@ from .routers import (
 )
 
 settings = get_settings()
+
+
+def _init_sentry() -> None:
+    """Error monitoring (spec §8). No-op unless SENTRY_DSN is set and the SDK is
+    installed — adding the DSN later activates it with no code change."""
+    if not settings.sentry_dsn:
+        return
+    try:
+        import sentry_sdk
+
+        sentry_sdk.init(
+            dsn=settings.sentry_dsn,
+            traces_sample_rate=settings.sentry_traces_sample_rate,
+            environment=settings.env,
+        )
+        logging.getLogger("app.sentry").info("Sentry error monitoring enabled")
+    except Exception:  # pragma: no cover
+        logging.getLogger("app.sentry").warning("Sentry DSN set but sentry_sdk unavailable — skipping")
+
+
+_init_sentry()
 
 app = FastAPI(
     title="SkillShare API",
@@ -174,6 +196,7 @@ app.include_router(users.router)
 app.include_router(notifications.router)
 app.include_router(local_state.router)
 app.include_router(feedback.router)
+app.include_router(billing.router)
 app.include_router(admin.router)
 
 # Serve locally-stored uploads when STORAGE_BACKEND=local (no-op for S3, which

@@ -4,6 +4,7 @@ token is present so the dashboard's star states work)."""
 from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
+from .. import cache
 from ..database import get_db
 from ..errors import not_found, validation
 from ..models import BlogPost, ChangelogEntry, ContentPage, Feedback, Follow, Organization, Resource, User
@@ -107,19 +108,24 @@ def public_facets(db: Session = Depends(get_db)):
 @router.get("/stats")
 def public_stats(db: Session = Depends(get_db)):
     """Aggregate counts for the marketplace hero — so the landing page can show
-    totals without fetching the whole catalog."""
-    rows = _public_rows(db)
+    totals without fetching the whole catalog. Cached in Redis when configured
+    (spec §8); transparently falls back to a live count otherwise."""
 
-    def count(t: str) -> int:
-        return sum(1 for r in rows if r.type == t)
+    def compute() -> dict:
+        rows = _public_rows(db)
 
-    return {
-        "skills": count("SKILL"),
-        "mcp": count("MCP"),
-        "notes": count("NOTE"),
-        "total_installs": sum(r.installs_count for r in rows),
-        "total": len(rows),
-    }
+        def count(t: str) -> int:
+            return sum(1 for r in rows if r.type == t)
+
+        return {
+            "skills": count("SKILL"),
+            "mcp": count("MCP"),
+            "notes": count("NOTE"),
+            "total_installs": sum(r.installs_count for r in rows),
+            "total": len(rows),
+        }
+
+    return cache.cached("public:stats", compute, ttl=60)
 
 
 @router.get("/resources/{resource_id}")

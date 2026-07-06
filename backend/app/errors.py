@@ -41,6 +41,11 @@ def payment_required(message: str) -> ApiError:
     return ApiError(402, "PAYMENT_REQUIRED", message)
 
 
+def service_unavailable(message: str) -> ApiError:
+    """503 — a feature is scaffolded but not yet configured (e.g. payments)."""
+    return ApiError(503, "SERVICE_UNAVAILABLE", message)
+
+
 def envelope(status: int, code: str, message: str) -> JSONResponse:
     return JSONResponse(status_code=status, content={"error": {"code": code, "message": message, "status": status}})
 
@@ -59,7 +64,7 @@ def install_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(StarletteHTTPException)
     async def http_handler(_: Request, exc: StarletteHTTPException):
-        code = {401: "UNAUTHORIZED", 402: "PAYMENT_REQUIRED", 403: "FORBIDDEN", 404: "NOT_FOUND", 409: "CONFLICT", 422: "VALIDATION_ERROR"}.get(
+        code = {401: "UNAUTHORIZED", 402: "PAYMENT_REQUIRED", 403: "FORBIDDEN", 404: "NOT_FOUND", 409: "CONFLICT", 422: "VALIDATION_ERROR", 503: "SERVICE_UNAVAILABLE"}.get(
             exc.status_code, "INTERNAL_ERROR"
         )
         return envelope(exc.status_code, code, str(exc.detail))

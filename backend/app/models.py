@@ -388,6 +388,30 @@ class License(Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class Payment(Base):
+    """A subscription purchase via Razorpay (spec §5). Links a checkout to the
+    entity being upgraded (a user's personal space or an org) and the target
+    plan. `status` walks created → paid | failed; on `paid` the webhook grants
+    the plan to the target entity. Scaffolded now — rows are only created once
+    Razorpay credentials are configured."""
+
+    __tablename__ = "payments"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("pay"))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)  # who checked out
+    target_type: Mapped[str] = mapped_column(String, default="user")   # user | org
+    target_id: Mapped[str] = mapped_column(String, index=True)         # user id or org id
+    plan: Mapped[str] = mapped_column(String)                          # PRO | ENTERPRISE
+    amount: Mapped[int] = mapped_column(Integer, default=0)            # smallest currency unit (cents)
+    currency: Mapped[str] = mapped_column(String, default="USD")
+    provider: Mapped[str] = mapped_column(String, default="razorpay")
+    provider_order_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    provider_payment_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String, default="created", index=True)  # created | paid | failed
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
 class ApiToken(Base):
     """Personal Access Token (PAT) — long-lived bearer credential for the
     CLI and MCP server (BACKEND_SPEC §10). Format `skst_<random>`; only the

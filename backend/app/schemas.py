@@ -388,6 +388,14 @@ class SetPlanIn(BaseModel):
     plan: str
 
 
+class BillingCheckoutIn(BaseModel):
+    """Start a Razorpay checkout to upgrade a user or org to a paid plan (spec §5)."""
+
+    plan: str  # PRO | ENTERPRISE
+    target_type: Literal["user", "org"] = "user"
+    org_slug: str | None = None
+
+
 class AdminRowPatch(BaseModel):
     """Admin table-browser inline edit: a map of column → new value. Values are
     coerced to each column's type server-side; the primary key is never changed."""

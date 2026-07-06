@@ -76,6 +76,25 @@ class Settings(BaseSettings):
     # --- licensing (BACKEND_SPEC §3.7) ---
     license_key_pattern: str = r"^T41-PREM-[A-Z0-9]{4,}$"
 
+    # --- payments: Razorpay (spec §5) ---
+    # Scaffolded now, activates when credentials are present. Empty → payments are
+    # disabled gracefully (checkout returns a clear "not configured" error and the
+    # UI hides upgrade buttons). Adding these later turns it on with no code change.
+    razorpay_key_id: str = ""
+    razorpay_key_secret: str = ""
+    razorpay_webhook_secret: str = ""
+
+    # --- caching: Redis (spec §8) ---
+    # Reuses redis_url (above). Empty → cache is a no-op pass-through, callers fall
+    # back to hitting the DB directly. cache_default_ttl is seconds.
+    cache_enabled: bool = True
+    cache_default_ttl: int = 60
+
+    # --- error monitoring: Sentry (spec §8) ---
+    # Empty DSN → Sentry init is skipped (no-op). Set to activate.
+    sentry_dsn: str = ""
+    sentry_traces_sample_rate: float = 0.0
+
     # --- admin bootstrap (production) ---
     # Set ADMIN_EMAIL + ADMIN_PASSWORD to auto-create an admin user on startup.
     # This is the only way to get an admin in production without running the
