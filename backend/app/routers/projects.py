@@ -10,7 +10,7 @@ from ..permissions import (
     org_by_slug,
     project_or_404,
     require_org_member,
-    require_project_access,
+    require_project_admin,
 )
 from ..schemas import ProjectCreate, ProjectPatch
 from ..security import get_current_user
@@ -62,7 +62,9 @@ def update_project(
 ):
     org_by_slug(db, slug)
     project = project_or_404(db, project_id)
-    require_project_access(db, project, user)
+    # Editing project settings (incl. visibility) is a management op → project
+    # admin or org admin, not any project member (spec §4.5).
+    require_project_admin(db, project, user)
     if body.name is not None:
         project.name = body.name
     if body.description is not None:
@@ -79,7 +81,9 @@ def update_project(
 def delete_project(slug: str, project_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     org_by_slug(db, slug)
     project = project_or_404(db, project_id)
-    require_project_access(db, project, user)
+    # Deleting a project cascades to its pods + resources — restrict to a project
+    # admin or org admin (a plain member must not be able to nuke it; spec §4.5).
+    require_project_admin(db, project, user)
 
     pod_ids = [p.id for p in db.query(Pod).filter(Pod.project_id == project.id).all()]
     # cascade: pod members, pod/project-scoped resources (+ their stars), pods, members
