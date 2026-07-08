@@ -8,6 +8,8 @@ import {
   fmt,
   firstSentence,
   initialsOf,
+  resourceOwner,
+  ownerHref,
 } from "@/lib/data";
 import { addToOrg, saveResource } from "@/lib/redirects";
 import { Attachments } from "@/components/Attachments";
@@ -51,7 +53,9 @@ export default async function ResourceDetail({
   const r = await getResource(id);
   if (!r) notFound();
 
-  const pub = r.author;
+  // Org-published resources are attributed to the org; personal ones to the author.
+  const owner = resourceOwner(r);
+  const ownerLink = owner ? ownerHref(owner) : null;
   const meta = TYPE_META[r.type];
   const related = (await getResources()).filter((x) => x.type === r.type && x.id !== r.id).slice(0, 3);
   const lead = firstSentence(r.description);
@@ -129,23 +133,36 @@ export default async function ResourceDetail({
             </dl>
           </div>
 
-          {/* Publisher */}
-          {pub && (
-            <Link href={`/publishers/${pub.username}`} className="card card-hover block p-6">
-              <h2 className="kicker">Published by</h2>
-              <div className="mt-3 flex items-center gap-3">
-                <span className="flex h-11 w-11 items-center justify-center rounded-full bg-primary text-sm font-bold text-white">
-                  {initialsOf(pub.display_name)}
-                </span>
-                <div>
-                  <p className="font-display text-lg font-semibold">
-                    {pub.display_name}{pub.verified && <span className="ml-1 text-primary">✦</span>}
-                  </p>
-                  <p className="text-sm text-muted">@{pub.username}</p>
+          {/* Published by — the org for org-scoped resources, else the author */}
+          {owner && (() => {
+            const body = (
+              <>
+                <h2 className="kicker">Published by</h2>
+                <div className="mt-3 flex items-center gap-3">
+                  <span
+                    className={`flex h-11 w-11 items-center justify-center rounded-full text-sm font-bold text-white ${
+                      owner.kind === "org" ? "bg-ink" : "bg-primary"
+                    }`}
+                  >
+                    {initialsOf(owner.name)}
+                  </span>
+                  <div>
+                    <p className="font-display text-lg font-semibold">
+                      {owner.name}{owner.verified && <span className="ml-1 text-primary">✦</span>}
+                    </p>
+                    <p className="text-sm text-muted">
+                      {owner.kind === "org" ? "Organization" : owner.handle ? `@${owner.handle}` : ""}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            </Link>
-          )}
+              </>
+            );
+            return ownerLink ? (
+              <Link href={ownerLink} className="card card-hover block p-6">{body}</Link>
+            ) : (
+              <div className="card p-6">{body}</div>
+            );
+          })()}
         </aside>
       </div>
 

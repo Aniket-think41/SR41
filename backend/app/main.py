@@ -266,6 +266,12 @@ app.include_router(feedback.router)
 app.include_router(billing.router)
 app.include_router(admin.router)
 
+# Super-admin dashboard (SQLAdmin) at /admin — internal ops console, gated on
+# User.is_admin. Distinct from the /api/admin/* JSON API and the public client.
+from .admin_ui import mount_admin  # noqa: E402
+
+mount_admin(app)
+
 # Serve locally-stored uploads when STORAGE_BACKEND=local (no-op for S3, which
 # serves files from the bucket/CDN). Files land here from POST /api/uploads.
 if settings.storage_backend == "local":

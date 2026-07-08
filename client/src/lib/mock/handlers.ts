@@ -224,7 +224,9 @@ function canReview(db: Db, r: Resource, user: User): boolean {
   return isOrgAdmin(db, scopeOrgId(db, r), user.id);
 }
 function submitForReview(db: Db, r: Resource, actor: User) {
-  if (canReview(db, r, actor)) {
+  // Personal (PUBLIC-scope) content is owner-governed — no review. Org content
+  // auto-approves only for a reviewer (org/platform admin), else pends.
+  if (r.scope_type === "PUBLIC" || canReview(db, r, actor)) {
     r.approval_status = "approved";
     r.review_note = null;
   } else {
@@ -354,13 +356,45 @@ const normVisibility = (scope: string, vis?: string): Visibility => {
 
 /* ---------------- route table ---------------- */
 
+// Mock-only in-memory stores for the two-step OTP flows (signup + password
+// reset). The real backend keeps these in the DB; here a module Map is enough
+// for a single browser session.
+const _pendingSignups = new Map<string, { password: string; display_name: string; code: string }>();
+const _pendingResets = new Map<string, string>(); // user id → code
+const _mockOtp = () => String(Math.floor(100000 + Math.random() * 900000));
+
 const routes: [method: string, pattern: string, fn: Handler][] = [
   /* ---- 3.1 Auth ---- */
+  // Step 1: email a one-time code (mock returns it as dev_otp). No account yet.
   ["POST", "/api/auth/signup", (_p, body, _q, db) => {
     const email = String(body.email ?? "").toLowerCase();
     if (db.users.some((u) => u.email === email))
       throw new HttpError(409, "CONFLICT", "An account with this email already exists");
-    const username = String(body.display_name ?? email.split("@")[0])
+    const code = _mockOtp();
+    _pendingSignups.set(email, {
+      password: String(body.password ?? ""),
+      display_name: String(body.display_name ?? email.split("@")[0]),
+      code,
+    });
+    return { pending: true, email, email_sent: false, expires_in: 600, dev_otp: code };
+  }],
+
+  ["POST", "/api/auth/signup/resend", (_p, body) => {
+    const email = String(body.email ?? "").toLowerCase();
+    const p = _pendingSignups.get(email);
+    if (!p) throw new HttpError(404, "NOT_FOUND", "No pending signup for this email — start again");
+    p.code = _mockOtp();
+    return { pending: true, email, email_sent: false, expires_in: 600, dev_otp: p.code };
+  }],
+
+  // Step 2: confirm the code → create the account and sign in.
+  ["POST", "/api/auth/verify-email", (_p, body, _q, db) => {
+    const email = String(body.email ?? "").toLowerCase();
+    const p = _pendingSignups.get(email);
+    if (!p) throw new HttpError(422, "VALIDATION_ERROR", "No pending signup for this email — start again");
+    if (String(body.code ?? "").trim() !== p.code)
+      throw new HttpError(401, "UNAUTHORIZED", "That code is incorrect");
+    const username = p.display_name
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "");
@@ -368,17 +402,18 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
       id: uid("u"),
       email,
       username,
-      display_name: String(body.display_name ?? username),
+      display_name: p.display_name || username,
       avatar_url: null,
       bio: "",
       is_publisher: false,
-      // First-time accounts confirm a password on first entry (change-password gate).
-      must_change_password: true,
+      // Verified via OTP and chose their own password → no forced-reset gate.
+      must_change_password: false,
       created_at: now(),
       updated_at: now(),
     };
     db.users.push(user);
     db.session_user_id = user.id;
+    _pendingSignups.delete(email);
     saveDb();
     return { user, access_token: "mock-access-token", refresh_token: "mock-refresh-token" };
   }],
@@ -387,6 +422,27 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     const me = currentUser(db);
     me.must_change_password = false;
     me.updated_at = now();
+    saveDb();
+    return me;
+  }],
+
+  // In-dashboard password reset via OTP (signed-in user).
+  ["POST", "/api/auth/password/reset-otp", (_p, _b, _q, db) => {
+    const me = currentUser(db);
+    const code = _mockOtp();
+    _pendingResets.set(me.id, code);
+    return { pending: true, email: me.email, email_sent: false, expires_in: 600, dev_otp: code };
+  }],
+
+  ["POST", "/api/auth/password/reset-verify", (_p, body, _q, db) => {
+    const me = currentUser(db);
+    const code = _pendingResets.get(me.id);
+    if (!code) throw new HttpError(422, "VALIDATION_ERROR", "Request a reset code first");
+    if (String(body.code ?? "").trim() !== code)
+      throw new HttpError(401, "UNAUTHORIZED", "That code is incorrect");
+    me.must_change_password = false;
+    me.updated_at = now();
+    _pendingResets.delete(me.id);
     saveDb();
     return me;
   }],
@@ -401,9 +457,17 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     return { user, access_token: "mock-access-token", refresh_token: "mock-refresh-token" };
   }],
 
-  // Mock Google sign-in: no real id_token to verify, so sign in (or create) a
-  // demo account. Real backend verifies the token via POST /api/auth/google.
+  // Mock Google / Microsoft sign-in: no real id_token to verify, so sign in (or
+  // fall back to) a demo account. The real backend verifies the token.
   ["POST", "/api/auth/google", (_p, _b, _q, db) => {
+    const user = db.users.find((u) => u.id === "u-aniket") ?? db.users[0];
+    if (!user) throw new HttpError(401, "UNAUTHORIZED", "No demo account available");
+    db.session_user_id = user.id;
+    saveDb();
+    return { user, access_token: "mock-access-token", refresh_token: "mock-refresh-token" };
+  }],
+
+  ["POST", "/api/auth/microsoft", (_p, _b, _q, db) => {
     const user = db.users.find((u) => u.id === "u-aniket") ?? db.users[0];
     if (!user) throw new HttpError(401, "UNAUTHORIZED", "No demo account available");
     db.session_user_id = user.id;
@@ -1022,8 +1086,8 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     const title = String(body.title ?? "").trim();
     if (!title) throw new HttpError(422, "VALIDATION_ERROR", "Title is required");
     const scopeType = body.scope_type as ScopeType;
-    // PUBLIC = the publisher's own marketplace shelf: no org/scope_id, public on
-    // creation, and gated on being a registered publisher (mirrors the backend).
+    // PUBLIC = the publisher's own marketplace shelf: no org/scope_id, gated on
+    // being a registered publisher (mirrors the backend).
     if (scopeType === "PUBLIC" && !me.is_publisher)
       throw new HttpError(403, "FORBIDDEN", "Become a publisher first to add resources to the marketplace");
     enforceCanAddResource(db, me, scopeType, (body.scope_id as string) ?? null); // plan/quota gate (spec §2)
@@ -1044,16 +1108,15 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
       scope_id: isPublic ? null : ((body.scope_id as string) ?? null),
       visibility: normVisibility(scopeType, body.visibility as string | undefined),
       author_id: me.id,
-      is_public: isPublic,
+      // Created UNPUBLISHED — a private draft its author owns. The author
+      // publishes explicitly afterwards (mirrors the backend).
+      is_public: false,
       approval_status: "approved",
       review_note: null,
       stars_count: 0,
       created_at: now(),
       updated_at: now(),
     };
-    // A PUBLIC resource enters the marketplace review queue (spec §3) —
-    // auto-approved when the author is already its reviewer (platform admin).
-    if (isPublic) submitForReview(db, r, me);
     db.resources.push(r);
     const orgId = scopeOrgId(db, r);
     if (orgId) logActivity(db, { user_id: me.id, org_id: orgId, verb: "created", object_type: "resource", object_id: r.id, object_title: r.title });

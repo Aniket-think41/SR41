@@ -12,6 +12,8 @@ boto3>=1.34                  # s3 storage backend (alternative)
 python-dotenv>=1.0
 email-validator>=2.1
 python-multipart>=0.0.9
+sqladmin>=0.16     # super-admin dashboard mounted at /admin
+itsdangerous>=2.1  # session cookies for the /admin login
 # Optional integrations (spec §5/§8) — inert until configured with credentials.
 # The app degrades gracefully if any are missing (imports are guarded).
 razorpay>=1.4       # payments (activates with RAZORPAY_KEY_ID/SECRET)

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Resource, TYPE_META, fmt, initialsOf } from "@/lib/data";
+import { Resource, TYPE_META, fmt, initialsOf, resourceOwner } from "@/lib/data";
 import { saveResource } from "@/lib/redirects";
 
 const TYPE_STYLES: Record<string, string> = {
@@ -10,7 +10,8 @@ const TYPE_STYLES: Record<string, string> = {
 
 export function ResourceCard({ r }: { r: Resource }) {
   const meta = TYPE_META[r.type];
-  const pub = r.author;
+  // Org-published resources are attributed to the org; personal ones to the author.
+  const owner = resourceOwner(r);
 
   return (
     <article className="card card-hover group relative flex h-full flex-col p-6">
@@ -45,12 +46,17 @@ export function ResourceCard({ r }: { r: Resource }) {
 
         <div className="mt-5 flex items-center justify-between border-t border-line pt-4">
           <span className="flex items-center gap-2">
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-[0.6rem] font-bold text-white">
-              {pub ? initialsOf(pub.display_name) : "?"}
+            <span
+              className={`flex h-6 w-6 items-center justify-center rounded-full text-[0.6rem] font-bold text-white ${
+                owner?.kind === "org" ? "bg-ink" : "bg-primary"
+              }`}
+              title={owner?.kind === "org" ? "Published by an organization" : undefined}
+            >
+              {owner ? initialsOf(owner.name) : "?"}
             </span>
             <span className="text-xs font-medium text-ink">
-              {pub?.display_name}
-              {pub?.verified && <span className="ml-1 text-primary" title="Think41-verified">✦</span>}
+              {owner?.name}
+              {owner?.verified && <span className="ml-1 text-primary" title="Think41-verified">✦</span>}
             </span>
           </span>
           <span className="text-xs text-muted">↓ {fmt(r.installs_count)} · ★ {fmt(r.stars_count)}</span>

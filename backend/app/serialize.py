@@ -80,9 +80,42 @@ def scope_name(db: Session, scope_type: str, scope_id: str | None) -> str | None
 _UNSET = object()
 
 
+def _owner_out(db: Session, r: Resource, *, org=_UNSET) -> dict | None:
+    """Marketplace attribution — WHO a resource is published by.
+
+    An ORG-scoped resource belongs to its organization (it was published
+    "through the org"); everything else belongs to its individual author.
+    Mirrors public._publisher_label so the website, dashboard, and publisher
+    filter all agree. `handle` is the org slug / user username, so the client
+    can deep-link to the right public page (/orgs/{slug} vs /publishers/{u}).
+    Pass `org` (may be None) to reuse a batched lookup; omit it to resolve here.
+    """
+    if r.scope_type == "ORG" and r.scope_id:
+        o = db.get(Organization, r.scope_id) if org is _UNSET else org
+        if o:
+            return {
+                "kind": "org",
+                "name": o.name,
+                "handle": o.slug,
+                "verified": False,
+                "avatar_url": o.logo_url,
+            }
+    a = r.author
+    if a:
+        return {
+            "kind": "user",
+            "name": a.display_name,
+            "handle": a.username,
+            "verified": a.verified,
+            "avatar_url": a.avatar_url,
+        }
+    return None
+
+
 def resource_out(
     db: Session, r: Resource, me: User | None,
     *, starred: bool | None = None, pinned: bool | None = None, scope_label_name=_UNSET,
+    owner=_UNSET,
 ) -> dict:
     # `starred`/`pinned`/`scope_label_name` may be supplied pre-computed (by
     # resources_out) to avoid a per-row query; otherwise resolve them individually.
@@ -131,6 +164,8 @@ def resource_out(
         "updated_at": r.updated_at,
         "scope_label": r.scope_type,
         "author": user_out(r.author) if r.author else None,
+        # Marketplace attribution: org for org-scoped resources, else the author.
+        "owner": _owner_out(db, r) if owner is _UNSET else owner,
         "starred_by_me": starred,
         "pinned_by_me": pinned,
     }
@@ -154,11 +189,18 @@ def resources_out(db: Session, rows: list[Resource], me: User | None) -> list[di
             .filter(ResourcePin.user_id == me.id, ResourcePin.resource_id.in_(ids)).all()
         }
     names = _batch_scope_names(db, rows)
+    # Batch org lookups for owner attribution (org-scoped rows only).
+    org_ids = {r.scope_id for r in rows if r.scope_type == "ORG" and r.scope_id}
+    orgs = (
+        {o.id: o for o in db.query(Organization).filter(Organization.id.in_(org_ids)).all()}
+        if org_ids else {}
+    )
     return [
         resource_out(
             db, r, me,
             starred=r.id in starred_ids, pinned=r.id in pinned_ids,
             scope_label_name=names.get((r.scope_type, r.scope_id)),
+            owner=_owner_out(db, r, org=orgs.get(r.scope_id) if r.scope_type == "ORG" else None),
         )
         for r in rows
     ]

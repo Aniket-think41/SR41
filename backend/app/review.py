@@ -71,9 +71,18 @@ def _notify_author(db: Session, r: Resource, actor: User, verb: str, note: str |
 
 
 def submit_for_review(db: Session, r: Resource, actor: User) -> None:
-    """Queue a resource for public listing. Auto-approves when the actor is
-    already its reviewer; otherwise sets it pending."""
-    if can_review(db, r, actor):
+    """Decide the approval state when a resource is (re)published.
+
+    Personal / publisher content (PUBLIC scope) is **owner-governed**: the author
+    is the total owner of their own marketplace resource, so it goes live with no
+    external review. Organization-owned content (ORG/PROJECT/POD) still routes to
+    an org admin — it's auto-approved only when the actor is already a reviewer
+    (org admin or platform admin), otherwise it's queued as pending. Platform
+    admins retain a moderation backstop via the review endpoint (approve/reject).
+    """
+    if r.scope_type == "PUBLIC":
+        _mark(r, "approved", actor.id, None)
+    elif can_review(db, r, actor):
         _mark(r, "approved", actor.id, None)
     else:
         _mark(r, "pending", None, None)

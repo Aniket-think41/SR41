@@ -115,8 +115,8 @@ def create_resource(
         raise validation("scope_type must be ORG, PROJECT, POD, or PUBLIC")
     if not body.title.strip():
         raise validation("Title is required")
-    # PUBLIC resources are authored straight onto the marketplace, so they carry
-    # no scope_id and are public on creation.
+    # PUBLIC (publisher) resources carry no scope_id — they live on the author's
+    # personal marketplace shelf.
     scope_id = None if body.scope_type == "PUBLIC" else body.scope_id
     _require_scope_write(db, body.scope_type, scope_id, user)
     enforce_can_add_resource(db, user, body.scope_type, scope_id)  # plan/quota gate (spec §2)
@@ -137,19 +137,15 @@ def create_resource(
         # the author widens it. See app/visibility.py.
         visibility=normalize_visibility(body.scope_type, body.visibility),
         author_id=user.id,
-        is_public=body.scope_type == "PUBLIC",
+        # Everything is created UNPUBLISHED — a private draft its author owns. A
+        # publisher explicitly publishes to the marketplace afterwards (POST
+        # /resources/{id}/publish); org content is published + reviewed there too.
+        is_public=False,
         source_fingerprint=body.source_fingerprint,
     )
     db.add(r)
     db.flush()
     _log_resource(db, user, r, "created", source=source)
-    # A publisher's PUBLIC resource is submitted to the marketplace review queue
-    # (spec §3). It goes live — and its followers are notified — only once it's
-    # approved (auto-approved when the author is a platform admin).
-    if r.scope_type == "PUBLIC":
-        submit_for_review(db, r, user)
-        if is_publicly_visible(r):
-            _notify_followers(db, user, r)
     db.commit()
     return resource_out(db, r, user)
 

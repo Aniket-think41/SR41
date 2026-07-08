@@ -43,6 +43,21 @@ export interface Publisher {
   updated_at?: string;
 }
 
+/**
+ * Marketplace attribution — WHO a resource is published by. An org-scoped
+ * resource belongs to the organization it was published through; everything
+ * else to its individual author. `handle` is the org slug / user username, so
+ * it deep-links to /orgs/{slug} or /publishers/{username}. Mirrors backend
+ * serialize.py `_owner_out`.
+ */
+export interface Owner {
+  kind: "org" | "user";
+  name: string;
+  handle: string;
+  verified: boolean;
+  avatar_url: string | null;
+}
+
 /** Mirrors backend `resource_out` (serialize.py). */
 export interface Resource {
   id: string;
@@ -58,6 +73,7 @@ export interface Resource {
   attachments?: Attachment[];
   scope_type?: string;
   scope_id?: string | null;
+  scope_name?: string | null;
   author_id: string;
   is_public?: boolean;
   stars_count: number;
@@ -66,7 +82,33 @@ export interface Resource {
   updated_at: string;
   scope_label?: string;
   author?: Publisher | null;
+  owner?: Owner | null;
   starred_by_me?: boolean;
+}
+
+/** Resolve a resource's publisher (org or individual). Prefers the backend's
+ *  `owner` field; falls back to the embedded author (seed / older payloads). */
+export function resourceOwner(r: Resource): Owner | null {
+  if (r.owner) return r.owner;
+  // Org-scoped rows carry the org name in scope_name even without `owner`.
+  if (r.scope_type === "ORG" && r.scope_name)
+    return { kind: "org", name: r.scope_name, handle: "", verified: false, avatar_url: null };
+  if (r.author)
+    return {
+      kind: "user",
+      name: r.author.display_name,
+      handle: r.author.username,
+      verified: r.author.verified,
+      avatar_url: r.author.avatar_url,
+    };
+  return null;
+}
+
+/** Public page URL for an owner — the org profile or the publisher page.
+ *  Returns null when there's no handle to link to (e.g. seed org fallback). */
+export function ownerHref(o: Owner): string | null {
+  if (!o.handle) return null;
+  return o.kind === "org" ? `/orgs/${o.handle}` : `/publishers/${o.handle}`;
 }
 
 export const TYPE_META: Record<

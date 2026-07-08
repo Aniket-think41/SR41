@@ -98,8 +98,11 @@ export function ResourceForm({
   });
   const scopeOptions = useMemo<ScopeOption[]>(() => {
     const opts: ScopeOption[] = [];
-    // Publishers can author straight onto the public marketplace (no org needed).
-    if (me?.is_publisher)
+    // Publishers can author straight onto the public marketplace. A user who
+    // isn't part of any org has nowhere else to publish, so the marketplace is
+    // their only destination (see the scope selector below — it stays hidden
+    // until there's more than one choice, leaving them on "publish" only).
+    if (me?.is_publisher || !org)
       opts.push({ scope_type: "PUBLIC", scope_id: null, label: "Public — Marketplace" });
     if (org) opts.push({ scope_type: "ORG", scope_id: org.id, label: `Org — ${org.name}` });
     for (const p of projects ?? [])
@@ -175,7 +178,16 @@ export function ResourceForm({
     },
     onSuccess: async (r) => {
       await invalidate();
-      toast(editing ? `"${r.title}" updated` : `"${r.title}" added to ${scopeLabel(r.scope_type)}`);
+      // New resources start unpublished. For a personal (PUBLIC) resource that
+      // means a private draft the author publishes explicitly; scoped resources
+      // just land in their scope.
+      toast(
+        editing
+          ? `"${r.title}" updated`
+          : r.scope_type === "PUBLIC"
+            ? `"${r.title}" saved as a draft — publish it when you're ready`
+            : `"${r.title}" added to ${scopeLabel(r.scope_type)}`
+      );
       onClose();
     },
     onError: (e) => toast(errorMessage(e), "error"),
@@ -316,30 +328,35 @@ export function ResourceForm({
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            {/* Scope picker only appears when there's a real choice to make.
+                A user who isn't in any org has just one destination (the public
+                marketplace), so we hide the toggle and leave them on publish. */}
+            <div className={`grid gap-4 ${allScopeOptions.length > 1 ? "grid-cols-2" : "grid-cols-1"}`}>
               <div>
                 <label className="field-label" htmlFor="rf-version">Version</label>
                 <input id="rf-version" {...register("version")} className="field code" placeholder="1.0.0" />
                 {errors.version && <p className="field-error">{errors.version.message}</p>}
               </div>
-              <div>
-                <label className="field-label" htmlFor="rf-scope">Scope</label>
-                <select
-                  id="rf-scope"
-                  className="field"
-                  value={`${scope?.scope_type}:${scope?.scope_id ?? ""}`}
-                  onChange={(e) => {
-                    const [st, si] = e.target.value.split(":");
-                    setScope({ scope_type: st as ScopeType, scope_id: si || null });
-                  }}
-                >
-                  {allScopeOptions.map((o) => (
-                    <option key={`${o.scope_type}:${o.scope_id}`} value={`${o.scope_type}:${o.scope_id ?? ""}`}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {allScopeOptions.length > 1 && (
+                <div>
+                  <label className="field-label" htmlFor="rf-scope">Scope</label>
+                  <select
+                    id="rf-scope"
+                    className="field"
+                    value={`${scope?.scope_type}:${scope?.scope_id ?? ""}`}
+                    onChange={(e) => {
+                      const [st, si] = e.target.value.split(":");
+                      setScope({ scope_type: st as ScopeType, scope_id: si || null });
+                    }}
+                  >
+                    {allScopeOptions.map((o) => (
+                      <option key={`${o.scope_type}:${o.scope_id}`} value={`${o.scope_type}:${o.scope_id ?? ""}`}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
             {/* Audience — who can see it. Hidden for PUBLIC (marketplace) and

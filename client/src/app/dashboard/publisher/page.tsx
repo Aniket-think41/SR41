@@ -34,8 +34,9 @@ export default function PublisherHome() {
           </p>
           <h1 className="font-display mt-1 text-3xl font-semibold">My resources</h1>
           <p className="mt-1.5 max-w-2xl text-sm text-body">
-            Everything you&apos;ve authored as <span className="font-bold text-ink">@{username}</span>. Anything you
-            add here publishes to the public <Globe2 className="mb-0.5 inline h-3.5 w-3.5" /> marketplace.
+            Everything you&apos;ve authored as <span className="font-bold text-ink">@{username}</span>. New resources
+            start as private drafts you own — hit <span className="font-semibold text-ink">Publish</span> to put one on
+            the public <Globe2 className="mb-0.5 inline h-3.5 w-3.5" /> marketplace.
           </p>
         </div>
         <Link href="/dashboard/marketplace" className="btn btn-secondary btn-sm">
@@ -49,7 +50,7 @@ export default function PublisherHome() {
           fetcher={(q) => api.userResources(username, q)}
           contextScope="PUBLIC"
           addScope={{ scope_type: "PUBLIC", scope_id: null }}
-          emptyHint="Add your first skill, MCP server, or note — it goes straight to the marketplace under your name."
+          emptyHint="Add your first skill, MCP server, or note — it starts as a private draft you own; publish it to the marketplace when it's ready."
         />
       )}
     </div>
