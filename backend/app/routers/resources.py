@@ -700,6 +700,29 @@ def import_resource(
     require_org_member(db, org, user)
     if not feature_enabled(db, org, "marketplace"):
         raise forbidden("The public marketplace is disabled for this organization")
+
+    # Don't let an org import a resource it already owns — that's how duplicates
+    # of your own published resource appear. If the source is already homed in
+    # this org, there's nothing to add.
+    home = scope_org(db, src)
+    if home and home.id == org.id:
+        raise validation("This resource already belongs to your organization")
+
+    # Idempotent re-import: if this org already imported this source, return the
+    # existing copy instead of making another duplicate.
+    marker = f"marketplace:{src.id}"
+    existing = (
+        db.query(Resource)
+        .filter(
+            Resource.scope_type == "ORG",
+            Resource.scope_id == org.id,
+            Resource.source_fingerprint == marker,
+        )
+        .first()
+    )
+    if existing:
+        return resource_out(db, existing, user)
+
     copy = Resource(
         type=src.type,
         title=src.title,
@@ -715,6 +738,8 @@ def import_resource(
         scope_id=org.id,
         author_id=user.id,
         is_public=False,
+        # Link the copy back to its marketplace source so re-imports dedupe.
+        source_fingerprint=marker,
     )
     db.add(copy)
     src.installs_count += 1

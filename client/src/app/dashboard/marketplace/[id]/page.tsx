@@ -57,6 +57,10 @@ function Detail({ params }: { params: Promise<{ id: string }> }) {
     queryFn: () => api.publicResource(id),
   });
 
+  // A resource the current org already owns (e.g. one it published) shouldn't
+  // offer "Add to my org" — importing it would just duplicate the org's own copy.
+  const mineAlready = !!org && r?.scope_type === "ORG" && r?.scope_id === org.id;
+
   const starMut = useMutation({
     mutationFn: () => (r?.starred_by_me ? api.unstar(id) : api.star(id)),
     onSuccess: invalidate,
@@ -130,10 +134,16 @@ function Detail({ params }: { params: Promise<{ id: string }> }) {
           </div>
 
           <div className="mt-6 flex flex-wrap gap-2">
-            <button onClick={() => importMut.mutate()} disabled={importMut.isPending || !org} className="btn btn-primary btn-sm">
-              {importMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PackagePlus className="h-3.5 w-3.5" />}
-              Add to {org?.name ?? "my org"}
-            </button>
+            {mineAlready ? (
+              <Link href="/dashboard/org/resources" className="btn btn-secondary btn-sm">
+                <Check className="h-3.5 w-3.5 text-[var(--color-success)]" /> Already in {org?.name}
+              </Link>
+            ) : (
+              <button onClick={() => importMut.mutate()} disabled={importMut.isPending || !org} className="btn btn-primary btn-sm">
+                {importMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PackagePlus className="h-3.5 w-3.5" />}
+                Add to {org?.name ?? "my org"}
+              </button>
+            )}
             <button
               onClick={() => starMut.mutate()}
               className={`btn btn-sm ${r.starred_by_me ? "btn-primary" : "btn-secondary"}`}
