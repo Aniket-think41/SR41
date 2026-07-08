@@ -19,4 +19,8 @@ COPY . .
 # Cloud Run injects PORT (defaults to 8080). uvicorn binds it on all interfaces.
 ENV PORT=8080
 EXPOSE 8080
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]
+# --proxy-headers + trusting Cloud Run's forwarded headers makes request.url_for()
+# emit https:// URLs (TLS terminates at Cloud Run's proxy). Without this, the
+# /admin (SQLAdmin) page builds http:// asset URLs that the browser blocks as
+# mixed content, so it renders unstyled.
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --proxy-headers --forwarded-allow-ips='*'"]
