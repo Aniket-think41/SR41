@@ -8,6 +8,7 @@ import type {
   Activity,
   Attachment,
   AuthSession,
+  SignupPending,
   BillingConfig,
   BillingSubscription,
   Contributions,
@@ -123,17 +124,31 @@ const qs = (params: Record<string, string | number | undefined>) => {
 
 export const api = {
   /* ---- auth ---- */
+  // Signup is a two-step, email-verified flow: `signup` emails a one-time code
+  // and returns a pending payload (no session); `verifyEmail` confirms the code
+  // and creates the account, returning the session.
   signup: (body: { email: string; password: string; display_name: string }) =>
-    request<AuthSession>("POST", "/api/auth/signup", body),
+    request<SignupPending>("POST", "/api/auth/signup", body),
+  verifyEmail: (body: { email: string; code: string }) =>
+    request<AuthSession>("POST", "/api/auth/verify-email", body),
+  resendSignupOtp: (email: string) =>
+    request<SignupPending>("POST", "/api/auth/signup/resend", { email }),
   login: (body: { email: string; password: string }) =>
     request<AuthSession>("POST", "/api/auth/login", body),
   google: (idToken: string) => request<AuthSession>("POST", "/api/auth/google", { id_token: idToken }),
+  microsoft: (idToken: string) => request<AuthSession>("POST", "/api/auth/microsoft", { id_token: idToken }),
   logout: () => request<{ ok: true }>("POST", "/api/auth/logout"),
   me: () => request<User>("GET", "/api/auth/me"),
   /** Personal / publisher-space plan, quotas, usage (spec §2). */
   myEntitlements: () => request<UserEntitlements>("GET", "/api/auth/me/entitlements"),
   changePassword: (body: { current_password?: string; new_password: string }) =>
     request<User>("POST", "/api/auth/change-password", body),
+  // In-dashboard password reset via email OTP (for a signed-in user): request a
+  // code to your own inbox, then verify it with the new password.
+  startPasswordReset: () =>
+    request<SignupPending>("POST", "/api/auth/password/reset-otp", {}),
+  verifyPasswordReset: (body: { code: string; new_password: string }) =>
+    request<User>("POST", "/api/auth/password/reset-verify", body),
 
   /* ---- device login (CLI / MCP browser approval) ---- */
   deviceInfo: (userCode: string) =>

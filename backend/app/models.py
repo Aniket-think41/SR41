@@ -433,6 +433,42 @@ class ApiToken(Base):
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class EmailVerification(Base):
+    """A pending email-OTP signup. Holds everything needed to create the account
+    (email, chosen password hash, display name) plus a hashed one-time code, until
+    the user proves control of the inbox by entering the code. No `users` row
+    exists until verification succeeds — so an unverified email can't occupy an
+    account. Superseded records for the same email are replaced on re-request; the
+    row is deleted once consumed or expired."""
+
+    __tablename__ = "email_verifications"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("ev"))
+    email: Mapped[str] = mapped_column(String, index=True)
+    password_hash: Mapped[str] = mapped_column(String)
+    display_name: Mapped[str] = mapped_column(String)
+    code_hash: Mapped[str] = mapped_column(String)  # sha256 of the OTP — never stored in the clear
+    attempts: Mapped[int] = mapped_column(Integer, default=0)  # wrong-code guesses; locked past a cap
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class PasswordResetOtp(Base):
+    """A one-time code for an in-dashboard password reset by a signed-in user.
+    Keyed by user_id (they're already authenticated) — the code proves inbox
+    control before the password changes. Distinct from EmailVerification, which
+    gates account creation. Replaced on re-request, deleted once used/expired."""
+
+    __tablename__ = "password_reset_otps"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("pro"))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
+    code_hash: Mapped[str] = mapped_column(String)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
 class RefreshToken(Base):
     """Server-side refresh tokens — rotated on every /auth/refresh (§4.1)."""
 

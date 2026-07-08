@@ -202,6 +202,85 @@ def send_scope_add_email(
     return _send(subject=subject, to_email=to_email, html=html, text=text)
 
 
+def _otp_html(*, code: str, display_name: str, ttl_minutes: int, heading: str, intro: str) -> str:
+    """Branded HTML for a one-time verification code (signup or password reset)."""
+    spaced = " ".join(code)  # visually separated digits
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+    <tr>
+      <td align="center" style="padding:40px 20px;">
+        <table width="480" cellpadding="0" cellspacing="0" role="presentation" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
+          <tr>
+            <td style="padding:28px 32px;text-align:center;background:linear-gradient(135deg,#735ae5,#9070f0);">
+              <span style="color:#fff;font-size:20px;font-weight:700;letter-spacing:-0.02em;">Skill<span style="color:#d1ff00;">Share</span></span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px;">
+              <h2 style="margin:0 0 4px;font-size:20px;color:#1a1a1a;font-weight:600;">{heading}</h2>
+              <p style="margin:0 0 24px;color:#555;font-size:15px;line-height:1.5;">
+                Hi {display_name or "there"}, {intro}
+              </p>
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin:0 0 24px;">
+                <tr>
+                  <td align="center" style="padding:18px;background:#f6f4ff;border:1px solid #e4ddff;border-radius:8px;">
+                    <span style="font-size:32px;font-weight:700;letter-spacing:8px;color:#735ae5;font-family:monospace;">{spaced}</span>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:0;color:#999;font-size:13px;line-height:1.5;">
+                This code expires in {ttl_minutes} minutes. If you didn&#39;t request it, you can safely ignore this email.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:20px 32px;border-top:1px solid #eee;">
+              <p style="margin:0;color:#aaa;font-size:12px;line-height:1.4;">
+                Sent by <strong>SkillShare</strong> &mdash; the skill &amp; MCP registry by
+                <a href="https://think41.com" style="color:#735ae5;text-decoration:none;">Think41</a>.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
+
+
+def send_otp_email(
+    *, to_email: str, code: str, display_name: str, ttl_minutes: int, purpose: str = "signup"
+) -> bool:
+    """Email a one-time code. `purpose` is "signup" or "password_reset" and only
+    swaps the copy. Best-effort — returns False (and the caller falls back to
+    surfacing the code) when SES isn't configured."""
+    from .config import get_settings
+
+    settings = get_settings()
+    if not settings.ses_enabled or not settings.ses_sender:
+        logger.info("SES is disabled — not emailing OTP to %s (falling back to API response)", to_email)
+        return False
+    if purpose == "password_reset":
+        heading, intro = "Reset your password", "enter this code on SkillShare to reset your password:"
+        subject = "Your SkillShare password-reset code"
+    else:
+        heading, intro = "Confirm your email", "enter this code to finish creating your SkillShare account:"
+        subject = "Your SkillShare verification code"
+    html = _otp_html(code=code, display_name=display_name, ttl_minutes=ttl_minutes, heading=heading, intro=intro)
+    text = (
+        f"{heading}\n\n"
+        f"Your SkillShare code is: {code}\n"
+        f"It expires in {ttl_minutes} minutes.\n\n"
+        f"If you didn't request this, you can ignore this email.\n\n"
+        f"— SkillShare by Think41"
+    )
+    return _send(subject=subject, to_email=to_email, html=html, text=text)
+
+
 def _send(*, subject: str, to_email: str, html: str, text: str) -> bool:
     """Shared SMTP send used by the invite + scope-add emails."""
     from .config import get_settings

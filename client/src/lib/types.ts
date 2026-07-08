@@ -341,6 +341,17 @@ export interface AuthSession {
   refresh_token?: string;
 }
 
+/** Response to signup / password-reset step 1: a code was emailed (or, when
+ *  email delivery isn't configured, returned as `dev_otp` so the flow still
+ *  works). No session yet — the caller must confirm the code. */
+export interface SignupPending {
+  pending: boolean;
+  email: string;
+  email_sent: boolean;
+  expires_in: number;
+  dev_otp?: string;
+}
+
 /** Activity feed (dashboard home + profile) */
 export interface Activity {
   id: string;

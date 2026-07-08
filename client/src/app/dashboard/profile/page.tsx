@@ -26,6 +26,7 @@ import { fmt, monthYear, timeAgo, TYPE_META } from "@/lib/utils";
 import { Avatar } from "@/components/Avatar";
 import { ScopeBadge, TypeGlyph } from "@/components/badges";
 import { useToast } from "@/components/Toast";
+import { PasswordResetCard } from "@/components/dashboard/PasswordResetCard";
 
 type Tab = "overview" | "resources" | "stars";
 
@@ -344,6 +345,9 @@ export default function ProfilePage() {
             </Link>
           )}
         </div>
+
+        {/* Password reset via emailed OTP (signed-in user) */}
+        <PasswordResetCard email={profile.email} />
 
         {/* Organizations — click through to the org's page */}
         <div className="mt-5">

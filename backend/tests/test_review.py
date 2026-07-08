@@ -27,7 +27,9 @@ _n = [0]
 def _user(plan="ENTERPRISE", admin=False, publisher=False):
     _n[0] += 1
     email = f"rev{_n[0]}_{os.getpid()}@example.com"
-    r = c.post("/api/auth/signup", json={"email": email, "password": "password123", "display_name": f"Rev {_n[0]}"})
+    _s = c.post("/api/auth/signup", json={"email": email, "password": "password123", "display_name": f"Rev {_n[0]}"})
+    assert _s.status_code < 400, _s.text
+    r = c.post("/api/auth/verify-email", json={"email": email, "code": _s.json()["dev_otp"]})
     assert r.status_code < 400, r.text
     h = {"Authorization": f"Bearer {r.json()['access_token']}"}
     uid = c.get("/api/auth/me", headers=h).json()["id"]
@@ -56,7 +58,9 @@ def _org(h):
 # Publisher content → platform admin review
 # --------------------------------------------------------------------------- #
 
-def test_publisher_public_resource_is_pending_then_admin_approves():
+def test_publisher_content_is_owner_governed_no_review():
+    """A personal (PUBLIC-scope) resource is owner-governed: created UNPUBLISHED
+    with no review, and publishing it goes live immediately — no admin gate."""
     pub_h, _, _ = _user(plan="PRO", publisher=True)
     r = c.post(
         "/api/resources",
@@ -65,44 +69,60 @@ def test_publisher_public_resource_is_pending_then_admin_approves():
     )
     assert r.status_code < 400, r.text
     rid = r.json()["id"]
-    assert r.json()["approval_status"] == "pending"
-
-    # invisible on the public marketplace + direct public fetch
+    # Default: an unpublished private draft the author owns — NOT pending review.
+    assert r.json()["is_public"] is False
+    assert r.json()["approval_status"] == "approved"
     assert not any(x["id"] == rid for x in c.get("/api/public/resources").json())
     assert c.get(f"/api/public/resources/{rid}").status_code == 404
 
-    # publisher is NOT their own reviewer
-    assert c.post(f"/api/resources/{rid}/review", json={"decision": "approve"}, headers=pub_h).status_code == 403
-
-    # platform admin approves → now live
-    admin_h, _, _ = _user(admin=True)
-    ap = c.post(f"/api/resources/{rid}/review", json={"decision": "approve"}, headers=admin_h)
-    assert ap.status_code == 200, ap.text
-    assert ap.json()["approval_status"] == "approved"
+    # The author publishes → live immediately, no reviewer needed.
+    pub = c.post(f"/api/resources/{rid}/publish", headers=pub_h)
+    assert pub.status_code == 200, pub.text
+    assert pub.json()["is_public"] is True
+    assert pub.json()["approval_status"] == "approved"
     assert any(x["id"] == rid for x in c.get("/api/public/resources").json())
     assert c.get(f"/api/public/resources/{rid}").status_code == 200
 
 
-def test_admin_publisher_content_is_auto_approved():
-    admin_h, _, _ = _user(admin=True, publisher=True)
-    r = c.post(
+def test_platform_admin_can_moderate_public_content():
+    """Publisher content self-publishes, but a platform admin keeps a takedown
+    backstop (reject → unpublished)."""
+    pub_h, _, _ = _user(plan="PRO", publisher=True)
+    rid = c.post(
         "/api/resources",
-        json={"type": "NOTE", "title": "Admin Skill", "scope_type": "PUBLIC", "scope_id": None},
-        headers=admin_h,
-    )
-    assert r.json()["approval_status"] == "approved"
-    assert any(x["id"] == r.json()["id"] for x in c.get("/api/public/resources").json())
-
-
-def test_reject_notifies_and_edit_resubmits():
-    pub_h, pub_id, _ = _user(plan="PRO", publisher=True)
-    r = c.post(
-        "/api/resources",
-        json={"type": "SKILL", "title": "Rejectme", "scope_type": "PUBLIC", "scope_id": None},
+        json={"type": "NOTE", "title": "Live Note", "scope_type": "PUBLIC", "scope_id": None},
         headers=pub_h,
-    )
-    rid = r.json()["id"]
+    ).json()["id"]
+    c.post(f"/api/resources/{rid}/publish", headers=pub_h)
+    assert any(x["id"] == rid for x in c.get("/api/public/resources").json())
+
     admin_h, _, _ = _user(admin=True)
+    rj = c.post(f"/api/resources/{rid}/review", json={"decision": "reject", "note": "policy"}, headers=admin_h)
+    assert rj.status_code == 200, rj.text
+    assert rj.json()["approval_status"] == "rejected"
+    assert rj.json()["is_public"] is False
+    assert not any(x["id"] == rid for x in c.get("/api/public/resources").json())
+
+
+def test_org_content_reject_notifies_and_edit_resubmits():
+    """Org-owned content still goes through org-admin review: a member's publish
+    pends, a rejection notifies + unpublishes, and editing resubmits."""
+    admin_h, _, _ = _user(publisher=True)  # org owner/admin
+    slug = _org(admin_h)
+    org_id = c.get(f"/api/orgs/{slug}", headers=admin_h).json()["id"]
+    proj = c.post(f"/api/orgs/{slug}/projects", json={"name": "P"}, headers=admin_h).json()["id"]
+    member_h, _, _ = _user(publisher=True)
+    memail = c.get("/api/auth/me", headers=member_h).json()["email"]
+    c.post(f"/api/projects/{proj}/members", json={"email": memail, "role": "MEMBER"}, headers=admin_h)
+
+    rid = c.post(
+        "/api/resources",
+        json={"type": "NOTE", "title": "OrgDoc", "scope_type": "ORG", "scope_id": org_id},
+        headers=member_h,
+    ).json()["id"]
+    pub = c.post(f"/api/resources/{rid}/publish", headers=member_h)  # member isn't a reviewer → pending
+    assert pub.json()["approval_status"] == "pending"
+
     rj = c.post(
         f"/api/resources/{rid}/review",
         json={"decision": "reject", "note": "needs more detail"},
@@ -114,15 +134,12 @@ def test_reject_notifies_and_edit_resubmits():
     assert rj.json()["is_public"] is False
 
     # author got a rejection notification carrying the reason
-    notifs = c.get("/api/notifications", headers=pub_h).json()
+    notifs = c.get("/api/notifications", headers=member_h).json()
     assert any(n["verb"] == "rejected" and n["meta"] == "needs more detail" for n in notifs)
 
-    # editing a rejected+public resource resubmits it
-    # (republish first so is_public is True again, then edit)
-    c.post(f"/api/resources/{rid}/publish", headers=pub_h)
-    ed = c.patch(f"/api/resources/{rid}", json={"description": "now with detail"}, headers=pub_h)
-    assert ed.status_code == 200, ed.text
-    assert ed.json()["approval_status"] == "pending"
+    # republish → back into the queue (pending)
+    re = c.post(f"/api/resources/{rid}/publish", headers=member_h)
+    assert re.json()["approval_status"] == "pending"
 
 
 # --------------------------------------------------------------------------- #

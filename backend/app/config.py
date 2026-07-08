@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     # --- Google OAuth (POST /api/auth/google) ---
     google_client_id: str = ""  # empty → endpoint returns a clear 403
 
+    # --- Microsoft / Azure AD OAuth (POST /api/auth/microsoft) ---
+    # Empty client id → the endpoint returns a clear 403 and the dashboard button
+    # explains it's off. tenant is "common" (any Microsoft account) unless you
+    # restrict to a single Azure AD tenant id.
+    microsoft_client_id: str = ""
+    microsoft_tenant: str = "common"
+
     # --- dashboard origin: where the CLI/MCP device-login verification page lives ---
     frontend_url: str = "http://localhost:3001"
 
@@ -102,6 +109,16 @@ class Settings(BaseSettings):
     # admin if they already have an account.
     admin_email: str = ""
     admin_password: str = ""
+
+    # --- signup email verification (OTP) ---
+    # A one-time code is emailed on signup; the account is created only after it's
+    # verified. When SES isn't configured the code is returned in the API response
+    # (and logged) so the flow still works without email — set this False to force
+    # email-only delivery even without SES (locks out signup until SES is set up).
+    otp_length: int = 6
+    otp_ttl_minutes: int = 10
+    otp_max_attempts: int = 5
+    otp_dev_return: bool = True  # expose the code in the response when email can't send
 
     # --- seed script ---
     seed_password: str = "skillshare-demo"

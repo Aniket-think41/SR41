@@ -21,6 +21,22 @@ class SignupIn(BaseModel):
     display_name: str = Field(min_length=1, max_length=80)
 
 
+class VerifyEmailIn(BaseModel):
+    """Second step of signup: the emailed one-time code + the email it went to."""
+    email: EmailStr
+    code: str = Field(min_length=4, max_length=12)
+
+
+class ResendOtpIn(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetVerifyIn(BaseModel):
+    """In-dashboard reset: the emailed code + the new password to set."""
+    code: str = Field(min_length=4, max_length=12)
+    new_password: str = Field(min_length=8)
+
+
 class LoginIn(BaseModel):
     email: EmailStr
     password: str

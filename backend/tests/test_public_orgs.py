@@ -26,7 +26,8 @@ _n = [0]
 def _user(plan="ENTERPRISE", admin=False, publisher=False):
     _n[0] += 1
     email = f"po{_n[0]}_{os.getpid()}@example.com"
-    r = c.post("/api/auth/signup", json={"email": email, "password": "password123", "display_name": f"PO{_n[0]}"})
+    _s = c.post("/api/auth/signup", json={"email": email, "password": "password123", "display_name": f"PO{_n[0]}"})
+    r = c.post("/api/auth/verify-email", json={"email": email, "code": _s.json()["dev_otp"]})
     h = {"Authorization": f"Bearer {r.json()['access_token']}"}
     uid = c.get("/api/auth/me", headers=h).json()["id"]
     db = SessionLocal()

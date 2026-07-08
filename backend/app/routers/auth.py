@@ -1,5 +1,7 @@
 """3.1 Auth — signup, login, google, refresh, logout, me."""
 
+import hashlib
+import logging
 import re
 import secrets
 from datetime import timedelta
@@ -18,8 +20,10 @@ from ..errors import conflict, forbidden, not_found, unauthorized, validation
 from ..models import (
     ApiToken,
     DeviceAuth,
+    EmailVerification,
     Organization,
     OrgMember,
+    PasswordResetOtp,
     Pod,
     PodMember,
     Project,
@@ -36,8 +40,11 @@ from ..schemas import (
     GoogleIn,
     LoginIn,
     MePatch,
+    PasswordResetVerifyIn,
     RefreshIn,
+    ResendOtpIn,
     SignupIn,
+    VerifyEmailIn,
 )
 from ..security import (
     REFRESH_COOKIE,
@@ -54,6 +61,7 @@ from ..serialize import resource_out, resources_out, user_out
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 settings = get_settings()
+log = logging.getLogger("app.auth")
 
 
 def _slugify(s: str) -> str:
@@ -99,21 +107,133 @@ def _session_payload(db: Session, response: Response, user: User) -> dict:
     return {"user": _me_out(user), "access_token": create_access_token(user), "refresh_token": refresh}
 
 
+_OTP_ALPHABET = "0123456789"
+
+
+def _gen_otp() -> str:
+    return "".join(secrets.choice(_OTP_ALPHABET) for _ in range(max(4, settings.otp_length)))
+
+
+def _hash_code(code: str) -> str:
+    return hashlib.sha256(code.strip().encode()).hexdigest()
+
+
+def _start_verification(db: Session, *, email: str, password: str, display_name: str) -> dict:
+    """Create/replace the pending signup for `email`, email the OTP, and return the
+    client payload. When email can't be sent (SES off) the code is surfaced in the
+    response so signup still works — controlled by settings.otp_dev_return."""
+    code = _gen_otp()
+    # Replace any prior pending record for this email (re-signup / resend).
+    db.query(EmailVerification).filter(EmailVerification.email == email).delete()
+    rec = EmailVerification(
+        email=email,
+        password_hash=hash_password(password),
+        display_name=display_name,
+        code_hash=_hash_code(code),
+        expires_at=now() + timedelta(minutes=settings.otp_ttl_minutes),
+    )
+    db.add(rec)
+    db.commit()
+
+    from ..email import send_otp_email
+
+    sent = send_otp_email(
+        to_email=email, code=code, display_name=display_name, ttl_minutes=settings.otp_ttl_minutes
+    )
+    if not sent:
+        # No email delivery configured — log the code so it's recoverable in dev.
+        log.info("Signup OTP for %s: %s (email delivery off)", email, code)
+    out = {
+        "pending": True,
+        "email": email,
+        "email_sent": sent,
+        "expires_in": settings.otp_ttl_minutes * 60,
+    }
+    # Fallback so the flow is usable without SES; hidden once email works.
+    if not sent and settings.otp_dev_return:
+        out["dev_otp"] = code
+    return out
+
+
 @router.post("/signup")
-def signup(body: SignupIn, response: Response, db: Session = Depends(get_db)):
+def signup(body: SignupIn, db: Session = Depends(get_db)):
+    """Step 1 of signup: email a one-time code. The account is NOT created yet —
+    the caller must confirm the code at POST /api/auth/verify-email. This proves
+    the user controls the inbox before any `users` row exists."""
     email = body.email.lower()
     if db.query(User.id).filter(User.email == email).first():
         raise conflict("An account with this email already exists")
+    return _start_verification(
+        db, email=email, password=body.password, display_name=body.display_name
+    )
+
+
+@router.post("/signup/resend")
+def resend_otp(body: ResendOtpIn, db: Session = Depends(get_db)):
+    """Re-send the signup code for a pending verification (mints a fresh code and
+    resets the attempt counter). Reuses the password/name captured at signup."""
+    email = body.email.lower()
+    rec = db.query(EmailVerification).filter(EmailVerification.email == email).first()
+    if not rec:
+        raise not_found("No pending signup for this email — start again")
+    code = _gen_otp()
+    rec.code_hash = _hash_code(code)
+    rec.attempts = 0
+    rec.expires_at = now() + timedelta(minutes=settings.otp_ttl_minutes)
+    db.commit()
+
+    from ..email import send_otp_email
+
+    sent = send_otp_email(
+        to_email=rec.email, code=code, display_name=rec.display_name,
+        ttl_minutes=settings.otp_ttl_minutes,
+    )
+    if not sent:
+        log.info("Signup OTP (resend) for %s: %s (email delivery off)", rec.email, code)
+    out = {"pending": True, "email": rec.email, "email_sent": sent, "expires_in": settings.otp_ttl_minutes * 60}
+    if not sent and settings.otp_dev_return:
+        out["dev_otp"] = code
+    return out
+
+
+@router.post("/verify-email")
+def verify_email(body: VerifyEmailIn, response: Response, db: Session = Depends(get_db)):
+    """Step 2 of signup: confirm the emailed code, then create the account and
+    return a session. The user owns the password they chose, so they are NOT
+    forced through the change-password gate."""
+    email = body.email.lower()
+    rec = db.query(EmailVerification).filter(EmailVerification.email == email).first()
+    if not rec:
+        raise validation("No pending signup for this email — start again")
+    if rec.expires_at.replace(tzinfo=now().tzinfo) < now():
+        db.delete(rec)
+        db.commit()
+        raise validation("This code has expired — request a new one")
+    if rec.attempts >= settings.otp_max_attempts:
+        db.delete(rec)
+        db.commit()
+        raise validation("Too many incorrect attempts — start again")
+    if _hash_code(body.code) != rec.code_hash:
+        rec.attempts += 1
+        db.commit()
+        raise unauthorized("That code is incorrect")
+
+    # Someone could have grabbed the email between start and verify.
+    if db.query(User.id).filter(User.email == email).first():
+        db.delete(rec)
+        db.commit()
+        raise conflict("An account with this email already exists")
+
     user = User(
         email=email,
-        password_hash=hash_password(body.password),
-        username=_unique_username(db, body.display_name or email.split("@")[0]),
-        display_name=body.display_name,
-        # Every first-time account confirms a password of their own on first
-        # entry — the dashboard gates on must_change_password until they do.
-        must_change_password=True,
+        password_hash=rec.password_hash,  # already hashed at start
+        username=_unique_username(db, rec.display_name or email.split("@")[0]),
+        display_name=rec.display_name,
+        # They verified via OTP and set their own password → no reset gate.
+        must_change_password=False,
     )
     db.add(user)
+    db.delete(rec)
     db.commit()
     return _session_payload(db, response, user)
 
@@ -151,9 +271,61 @@ async def google(body: GoogleIn, response: Response, db: Session = Depends(get_d
             username=_unique_username(db, name),
             display_name=name,
             avatar_url=info.get("picture"),
-            # Google accounts have no password of their own; make them set one on
-            # first entry so they can also sign in with email/password later.
-            must_change_password=True,
+            # OAuth accounts sign in with Google; they can set a password anytime
+            # from the dashboard (email-verified reset) — no forced-reset gate.
+            must_change_password=False,
+        )
+        db.add(user)
+        db.commit()
+    return _session_payload(db, response, user)
+
+
+# Cache the Microsoft JWKS client per tenant so we don't refetch signing keys on
+# every sign-in (PyJWKClient caches keys internally once constructed).
+_MS_JWK_CLIENTS: dict[str, object] = {}
+
+
+@router.post("/microsoft")
+def microsoft(body: GoogleIn, response: Response, db: Session = Depends(get_db)):
+    """Microsoft / Azure AD OAuth: the dashboard signs the user in with MSAL and
+    sends the resulting id_token here; we verify it against Microsoft's JWKS and
+    upsert the user. Disabled (clear 403) until MICROSOFT_CLIENT_ID is set."""
+    import jwt
+    from jwt import PyJWKClient
+
+    if not settings.microsoft_client_id:
+        raise forbidden("Microsoft sign-in is not configured (set MICROSOFT_CLIENT_ID)")
+    tenant = settings.microsoft_tenant or "common"
+    jwks_url = f"https://login.microsoftonline.com/{tenant}/discovery/v2.0/keys"
+    client = _MS_JWK_CLIENTS.get(jwks_url)
+    if client is None:
+        client = PyJWKClient(jwks_url)
+        _MS_JWK_CLIENTS[jwks_url] = client
+    try:
+        signing_key = client.get_signing_key_from_jwt(body.id_token)
+        claims = jwt.decode(
+            body.id_token,
+            signing_key.key,
+            algorithms=["RS256"],
+            audience=settings.microsoft_client_id,
+            # "common" issues tokens whose issuer embeds the caller's tenant id, so
+            # we verify signature + audience + expiry and skip strict issuer match.
+            options={"verify_iss": False},
+        )
+    except Exception:
+        raise unauthorized("Invalid Microsoft token")
+    email = str(claims.get("email") or claims.get("preferred_username") or "").lower()
+    if not email or "@" not in email:
+        raise unauthorized("Microsoft account has no usable email")
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        name = claims.get("name") or email.split("@")[0]
+        user = User(
+            email=email,
+            password_hash="",
+            username=_unique_username(db, name),
+            display_name=name,
+            must_change_password=False,  # OAuth account; can set a password later
         )
         db.add(user)
         db.commit()
@@ -395,6 +567,66 @@ def change_password(body: ChangePasswordIn, user: User = Depends(get_current_use
             raise unauthorized("Current password is incorrect")
     user.password_hash = hash_password(body.new_password)
     user.must_change_password = False
+    db.commit()
+    return _me_out(user)
+
+
+# ---- In-dashboard password reset via email OTP ----
+# For a SIGNED-IN user who wants to reset their password with email verification
+# (e.g. they forgot their current one). Distinct from change-password (which needs
+# the current password) — here a code emailed to their own inbox is the proof.
+
+
+@router.post("/password/reset-otp")
+def start_password_reset(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Email the signed-in user a one-time code to authorize a password reset."""
+    code = _gen_otp()
+    db.query(PasswordResetOtp).filter(PasswordResetOtp.user_id == user.id).delete()
+    rec = PasswordResetOtp(
+        user_id=user.id,
+        code_hash=_hash_code(code),
+        expires_at=now() + timedelta(minutes=settings.otp_ttl_minutes),
+    )
+    db.add(rec)
+    db.commit()
+
+    from ..email import send_otp_email
+
+    sent = send_otp_email(
+        to_email=user.email, code=code, display_name=user.display_name,
+        ttl_minutes=settings.otp_ttl_minutes, purpose="password_reset",
+    )
+    if not sent:
+        log.info("Password-reset OTP for %s: %s (email delivery off)", user.email, code)
+    out = {"pending": True, "email": user.email, "email_sent": sent, "expires_in": settings.otp_ttl_minutes * 60}
+    if not sent and settings.otp_dev_return:
+        out["dev_otp"] = code
+    return out
+
+
+@router.post("/password/reset-verify")
+def verify_password_reset(
+    body: PasswordResetVerifyIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
+    """Confirm the emailed code and set the new password."""
+    rec = db.query(PasswordResetOtp).filter(PasswordResetOtp.user_id == user.id).first()
+    if not rec:
+        raise validation("Request a reset code first")
+    if rec.expires_at.replace(tzinfo=now().tzinfo) < now():
+        db.delete(rec)
+        db.commit()
+        raise validation("This code has expired — request a new one")
+    if rec.attempts >= settings.otp_max_attempts:
+        db.delete(rec)
+        db.commit()
+        raise validation("Too many incorrect attempts — request a new code")
+    if _hash_code(body.code) != rec.code_hash:
+        rec.attempts += 1
+        db.commit()
+        raise unauthorized("That code is incorrect")
+    user.password_hash = hash_password(body.new_password)
+    user.must_change_password = False
+    db.delete(rec)
     db.commit()
     return _me_out(user)
 

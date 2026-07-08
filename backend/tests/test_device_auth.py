@@ -29,11 +29,14 @@ _n = [0]
 def _user():
     """Create a fresh signed-in user; return its bearer headers."""
     _n[0] += 1
-    r = c.post("/api/auth/signup", json={
-        "email": f"dev{_n[0]}_{os.getpid()}@example.com",
+    email = f"dev{_n[0]}_{os.getpid()}@example.com"
+    _s = c.post("/api/auth/signup", json={
+        "email": email,
         "password": "password123",
         "display_name": f"Dev {_n[0]}",
     })
+    assert _s.status_code < 400, _s.text
+    r = c.post("/api/auth/verify-email", json={"email": email, "code": _s.json()["dev_otp"]})
     assert r.status_code < 400, r.text
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 

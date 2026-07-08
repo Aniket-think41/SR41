@@ -46,7 +46,9 @@ def _user(plan="ENTERPRISE"):
     pass plan="FREE" to test the gate itself."""
     _n[0] += 1
     email = f"mem{_n[0]}_{os.getpid()}@example.com"
-    r = c.post("/api/auth/signup", json={"email": email, "password": "password123", "display_name": f"Member {_n[0]}"})
+    _s = c.post("/api/auth/signup", json={"email": email, "password": "password123", "display_name": f"Member {_n[0]}"})
+    assert _s.status_code < 400, _s.text
+    r = c.post("/api/auth/verify-email", json={"email": email, "code": _s.json()["dev_otp"]})
     assert r.status_code < 400, r.text
     h = {"Authorization": f"Bearer {r.json()['access_token']}"}
     me = c.get("/api/auth/me", headers=h)
@@ -322,36 +324,41 @@ def test_invite_unregistered_user_provisions_account_with_password_change_flag()
         db.close()
 
 
-def test_first_time_forced_change_then_normal_change():
-    """Every new signup is flagged must_change_password. The first change is
-    mandatory and skips current-password verification; once cleared, later
-    changes require the correct current password."""
+def test_self_signup_owns_password_no_forced_reset():
+    """A self-signup user chose their own password (verified via OTP), so they are
+    NOT flagged must_change_password and are never shown the reset gate. Changing
+    the password therefore requires the correct current password."""
     _n[0] += 1
     email = f"pw{_n[0]}_{os.getpid()}@example.com"
-    r = c.post("/api/auth/signup", json={"email": email, "password": "oldpassword1", "display_name": "PW"})
-    assert r.json()["user"]["must_change_password"] is True
+    s = c.post("/api/auth/signup", json={"email": email, "password": "oldpassword1", "display_name": "PW"}).json()
+    r = c.post("/api/auth/verify-email", json={"email": email, "code": s["dev_otp"]})
+    assert r.status_code < 400, r.text
+    assert r.json()["user"]["must_change_password"] is False
     h = {"Authorization": f"Bearer {r.json()['access_token']}"}
 
-    # First (mandatory) change: no current password required, flag clears.
-    ok = c.post("/api/auth/change-password", json={"new_password": "newpassword1"}, headers=h)
-    assert ok.status_code < 400, ok.text
-    assert ok.json()["must_change_password"] is False
+    # No current password → rejected (this account isn't in a forced-reset state).
+    bad = c.post("/api/auth/change-password", json={"new_password": "newpassword1"}, headers=h)
+    assert bad.status_code == 401, bad.text
+
+    # Correct current password → change succeeds.
+    good = c.post(
+        "/api/auth/change-password",
+        json={"current_password": "oldpassword1", "new_password": "newpassword1"},
+        headers=h,
+    )
+    assert good.status_code < 400, good.text
+    assert good.json()["must_change_password"] is False
 
     # new password works, old one doesn't
     assert c.post("/api/auth/login", json={"email": email, "password": "newpassword1"}).status_code < 400
     assert c.post("/api/auth/login", json={"email": email, "password": "oldpassword1"}).status_code == 401
 
-    # A subsequent change now DOES require the correct current password.
-    bad = c.post("/api/auth/change-password", json={"current_password": "nope", "new_password": "third1234"}, headers=h)
-    assert bad.status_code == 401, bad.text
-    good = c.post("/api/auth/change-password", json={"current_password": "newpassword1", "new_password": "third1234"}, headers=h)
-    assert good.status_code < 400, good.text
-
 
 def test_publisher_can_add_public_resource_to_marketplace():
     """A registered publisher adds a resource at PUBLIC scope (no org). Non-publishers
-    can't. Since spec §3 it enters the review queue (pending) rather than going live
-    instantly — the approve→visible flow is covered in test_review.py."""
+    can't. Personal content is owner-governed: it's created UNPUBLISHED (a private
+    draft, no review) and only the author's explicit publish puts it on the
+    marketplace — covered end-to-end in test_review.py."""
     h, _, _ = _user()
 
     # not a publisher yet → PUBLIC create is forbidden
@@ -368,8 +375,9 @@ def test_publisher_can_add_public_resource_to_marketplace():
     assert r.status_code < 400, r.text
     body = r.json()
     assert body["scope_type"] == "PUBLIC"
-    # queued for review → NOT yet on the public marketplace
-    assert body["approval_status"] == "pending"
+    # created UNPUBLISHED (owner-governed, no review) → not on the marketplace yet
+    assert body["is_public"] is False
+    assert body["approval_status"] == "approved"
     market = c.get("/api/public/resources").json()
     assert not any(x["id"] == body["id"] for x in market)
 
