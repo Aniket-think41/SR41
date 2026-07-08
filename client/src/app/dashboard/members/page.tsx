@@ -15,12 +15,14 @@ import type { OrgRole } from "@/lib/types";
 import { timeAgo } from "@/lib/utils";
 import { Avatar } from "@/components/Avatar";
 import { useToast } from "@/components/Toast";
+import { useConfirm } from "@/components/ConfirmDelete";
 
 export default function MembersPage() {
   const { org } = useCurrentOrg();
   const { data: me } = useSession();
   const qc = useQueryClient();
   const { toast } = useToast();
+  const confirm = useConfirm();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<OrgRole>("MEMBER");
 
@@ -155,8 +157,15 @@ export default function MembersPage() {
                   <td className="text-right">
                     {m.user_id !== me?.id && (
                       <button
-                        onClick={() => {
-                          if (window.confirm(`Remove ${m.user?.display_name} from ${org?.name}?`))
+                        onClick={async () => {
+                          if (
+                            await confirm({
+                              title: `Remove ${m.user?.display_name}?`,
+                              message: `They lose access to ${org?.name} and all its projects and pods.`,
+                              requireType: null,
+                              confirmLabel: "Remove",
+                            })
+                          )
                             removeMut.mutate(m.user_id);
                         }}
                         className="btn btn-danger btn-sm"

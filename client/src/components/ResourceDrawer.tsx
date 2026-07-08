@@ -23,6 +23,7 @@ import { AttachmentsView } from "./AttachmentsView";
 import { Avatar } from "./Avatar";
 import { ScopeBadge, TypeBadge } from "./badges";
 import { useToast } from "./Toast";
+import { useConfirm } from "./ConfirmDelete";
 import { ResourceForm } from "./ResourceForm";
 
 const VISIBILITY_LABEL: Record<string, string> = {
@@ -60,6 +61,7 @@ function DetailView({ resource: initial, onClose }: { resource: Resource; onClos
   const { openEdit } = useUi();
   const invalidate = useInvalidateResources();
   const { toast } = useToast();
+  const confirm = useConfirm();
 
   const canEdit = me && r.author_id === me.id;
   const publishing = useFeature("publishing");
@@ -262,8 +264,14 @@ function DetailView({ resource: initial, onClose }: { resource: Resource; onClos
               </button>
             )}
             <button
-              onClick={() => {
-                if (window.confirm(`Delete "${r.title}"? This cannot be undone.`)) deleteMut.mutate();
+              onClick={async () => {
+                if (
+                  await confirm({
+                    title: `Delete "${r.title}"?`,
+                    message: "This permanently removes the resource. This cannot be undone.",
+                  })
+                )
+                  deleteMut.mutate();
               }}
               className="btn btn-danger btn-sm ml-auto"
               disabled={deleteMut.isPending}

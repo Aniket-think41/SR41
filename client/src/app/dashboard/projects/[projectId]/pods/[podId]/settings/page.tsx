@@ -9,6 +9,7 @@ import { errorMessage } from "@/lib/api/http";
 import { qk, useCurrentOrg, useSession } from "@/lib/hooks";
 import { MembersCard } from "@/components/dashboard/MembersCard";
 import { useToast } from "@/components/Toast";
+import { useConfirm } from "@/components/ConfirmDelete";
 
 export default function PodSettings({
   params,
@@ -19,6 +20,7 @@ export default function PodSettings({
   const router = useRouter();
   const qc = useQueryClient();
   const { toast } = useToast();
+  const confirm = useConfirm();
   const { org } = useCurrentOrg();
   const { data: me } = useSession();
 
@@ -132,8 +134,9 @@ export default function PodSettings({
         members={members ?? []}
         onAdd={(payload, role) => addMemberMut.mutate({ payload, role })}
         onChangeRole={(userId, role) => roleMut.mutate({ userId, role })}
-        onRemove={(userId) => {
-          if (window.confirm("Remove this member from the pod?")) removeMut.mutate(userId);
+        onRemove={async (userId) => {
+          if (await confirm({ title: "Remove this member?", message: "They lose access to this pod.", requireType: null, confirmLabel: "Remove" }))
+            removeMut.mutate(userId);
         }}
         adding={addMemberMut.isPending}
         canManage={canManage}
@@ -144,8 +147,14 @@ export default function PodSettings({
         <h2 className="font-display text-lg font-semibold text-[var(--color-danger)]">Danger zone</h2>
         <p className="mt-1 text-sm text-body">Deleting a pod removes its pod-scoped resources.</p>
         <button
-          onClick={() => {
-            if (window.confirm(`Delete "${pod?.name}"?`)) deleteMut.mutate();
+          onClick={async () => {
+            if (
+              await confirm({
+                title: `Delete "${pod?.name}"?`,
+                message: "This removes the pod and its pod-scoped resources. This cannot be undone.",
+              })
+            )
+              deleteMut.mutate();
           }}
           className="btn btn-danger btn-sm mt-4"
           disabled={deleteMut.isPending}

@@ -9,6 +9,7 @@ import { errorMessage } from "@/lib/api/http";
 import { qk, useCurrentOrg, useSession } from "@/lib/hooks";
 import { MembersCard } from "@/components/dashboard/MembersCard";
 import { useToast } from "@/components/Toast";
+import { useConfirm } from "@/components/ConfirmDelete";
 
 export default function ProjectSettings({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = use(params);
@@ -17,6 +18,7 @@ export default function ProjectSettings({ params }: { params: Promise<{ projectI
   const router = useRouter();
   const qc = useQueryClient();
   const { toast } = useToast();
+  const confirm = useConfirm();
 
   const { data: project } = useQuery({
     queryKey: qk.project(projectId),
@@ -129,8 +131,9 @@ export default function ProjectSettings({ params }: { params: Promise<{ projectI
         members={members ?? []}
         onAdd={(payload, role) => addMemberMut.mutate({ payload, role })}
         onChangeRole={(userId, role) => roleMut.mutate({ userId, role })}
-        onRemove={(userId) => {
-          if (window.confirm("Remove this member from the project (and its pods)?")) removeMut.mutate(userId);
+        onRemove={async (userId) => {
+          if (await confirm({ title: "Remove this member?", message: "They lose access to this project and its pods.", requireType: null, confirmLabel: "Remove" }))
+            removeMut.mutate(userId);
         }}
         adding={addMemberMut.isPending}
         canManage={canManage}
@@ -143,8 +146,14 @@ export default function ProjectSettings({ params }: { params: Promise<{ projectI
           Deleting a project removes its pods and all pod/project-scoped resources.
         </p>
         <button
-          onClick={() => {
-            if (window.confirm(`Delete "${project?.name}" and everything inside it?`)) deleteMut.mutate();
+          onClick={async () => {
+            if (
+              await confirm({
+                title: `Delete "${project?.name}"?`,
+                message: "This removes the project, its pods, and all pod/project-scoped resources. This cannot be undone.",
+              })
+            )
+              deleteMut.mutate();
           }}
           className="btn btn-danger btn-sm mt-4"
           disabled={deleteMut.isPending}
