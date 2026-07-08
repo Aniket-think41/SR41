@@ -147,6 +147,10 @@ def _summary(r: dict) -> dict:
         "scope": r.get("scope_label") or r["scope_type"],
         "visibility": r.get("visibility"),
         "author": (r.get("author") or {}).get("username"),
+        # Marketplace attribution: org for org-published resources, else the
+        # author. Lets the agent say "published by <org>" vs "by @<user>".
+        "published_by": (r.get("owner") or {}).get("name"),
+        "publisher_kind": (r.get("owner") or {}).get("kind"),
         "stars": r["stars_count"],
         "is_public": r["is_public"],
         "updated_at": str(r["updated_at"]),
