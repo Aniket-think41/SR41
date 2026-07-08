@@ -13,6 +13,7 @@ import {
 } from "@/lib/data";
 import { addToOrg, saveResource } from "@/lib/redirects";
 import { Attachments } from "@/components/Attachments";
+import { ShareButton } from "@/components/ShareButton";
 
 export const revalidate = 60;
 
@@ -122,6 +123,7 @@ export default async function ResourceDetail({
             {/* "Add to my org" — logged-in only; routes through login w/ redirect (spec §5) */}
             <Link href={addToOrg(r.id)} className="btn btn-primary w-full">Add to my org →</Link>
             <Link href={saveResource(r.id)} className="btn btn-secondary mt-3 w-full">☆ Sign in to save</Link>
+            <ShareButton id={r.id} className="mt-3 w-full" />
 
             <dl className="mt-6 space-y-3 border-t border-line pt-6">
               {[["Installs", `↓ ${fmt(r.installs_count)}`], ["Stars", `★ ${fmt(r.stars_count)}`], ["Version", r.version]].map(([k, v]) => (

@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   X, Star, Pin, PinOff, Pencil, Trash2, Globe, Copy, Download, Check, ExternalLink, Eye,
-  Clock, AlertTriangle,
+  Clock, AlertTriangle, Share2,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/api/http";
@@ -31,6 +31,10 @@ const VISIBILITY_LABEL: Record<string, string> = {
   PROJECT: "Project",
   ORG: "Org-wide",
 };
+
+// Public origin of the marketing/marketplace site, where the canonical /r/{id}
+// share link lives. Set NEXT_PUBLIC_WEB_URL in prod; falls back to the brand URL.
+const WEB_URL = (process.env.NEXT_PUBLIC_WEB_URL ?? "https://skillshare.think41.com").replace(/\/$/, "");
 
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
@@ -245,6 +249,27 @@ function DetailView({ resource: initial, onClose }: { resource: Resource; onClos
         >
           {r.pinned_by_me ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
           {r.pinned_by_me ? "Pinned" : "Pin"}
+        </button>
+
+        <button
+          onClick={async () => {
+            // One canonical link for every resource. Public → opens for anyone;
+            // private → only people with access can open it (enforced on open).
+            await navigator.clipboard.writeText(`${WEB_URL}/r/${r.id}`);
+            toast(
+              r.is_public && r.approval_status === "approved"
+                ? "Public link copied — anyone can open it"
+                : "Private link copied — only people with access can open it"
+            );
+          }}
+          className="btn btn-secondary btn-sm"
+          title={
+            r.is_public && r.approval_status === "approved"
+              ? "Copy a public link anyone can open"
+              : "Copy a private link — only people with access can open it"
+          }
+        >
+          <Share2 className="h-3.5 w-3.5" /> Share
         </button>
 
         {canEdit && (
