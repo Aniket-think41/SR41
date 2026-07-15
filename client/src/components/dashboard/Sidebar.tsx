@@ -9,7 +9,7 @@ import {
   CreditCard, ShieldCheck, MessagesSquare, Plug,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import { useFeature, useSession, useTerms } from "@/lib/hooks";
+import { useCurrentOrg, useFeature, useFeatures, useSession, useTerms } from "@/lib/hooks";
 import { useUi } from "@/lib/store";
 import { setToken } from "@/lib/api/http";
 import { Logo } from "../Logo";
@@ -25,9 +25,16 @@ type NavItem = { label: string; href: string; icon: typeof LayoutDashboard; exac
 function useNav(): NavItem[] {
   const terms = useTerms();
   const marketplace = useFeature("marketplace");
-  const integrations = useFeature("integrations");
   const { workspace } = useUi();
   const { data: user } = useSession();
+  const { org } = useCurrentOrg();
+  const { data: featuresData } = useFeatures();
+  // Integrations is admin-only and premium (PRO+). Gate STRICTLY on the loaded
+  // flag (no optimistic default) so free orgs / non-admins never see it, even
+  // for a frame while features load. `enabled` already encodes the PRO+ license.
+  const showIntegrations =
+    org?.my_role === "ADMIN" &&
+    !!featuresData?.find((f) => f.key === "integrations")?.enabled;
 
   // Platform-admin surfaces (review queue + feedback moderation), shown in
   // either workspace when the signed-in user is a platform admin (spec §3/§4).
@@ -54,7 +61,7 @@ function useNav(): NavItem[] {
     ...(marketplace.enabled
       ? [{ label: "Marketplace", href: "/dashboard/marketplace", icon: Store }]
       : []),
-    ...(integrations.enabled
+    ...(showIntegrations
       ? [{ label: "Integrations", href: "/dashboard/org/integrations", icon: Plug }]
       : []),
     { label: "Members", href: "/dashboard/members", icon: Users },

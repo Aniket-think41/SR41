@@ -485,7 +485,9 @@ def detect_from_url(
 # with actionable messages the router surfaces to the dashboard/CLI/MCP.
 
 
-def _get(path: str, token: str | None, params: dict | None = None) -> "object":
+def _get_full(path: str, token: str | None, params: dict | None = None):
+    """GET returning (json, response) so callers can read headers (e.g. the
+    X-OAuth-Scopes header that reports a classic PAT's granted scopes)."""
     import httpx
 
     with httpx.Client(timeout=15.0, headers=_auth_headers(token), follow_redirects=True) as c:
@@ -498,13 +500,24 @@ def _get(path: str, token: str | None, params: dict | None = None) -> "object":
         raise not_found("GitHub resource")
     if r.status_code >= 400:
         raise validation(f"GitHub returned {r.status_code}")
-    return r.json()
+    return r.json(), r
+
+
+def _get(path: str, token: str | None, params: dict | None = None) -> "object":
+    return _get_full(path, token, params)[0]
+
+
+def _parse_scopes(resp) -> list[str]:
+    """Classic PATs report granted scopes in the X-OAuth-Scopes header. Fine-
+    grained tokens don't (the header is empty) — callers treat [] as 'unknown'."""
+    raw = resp.headers.get("X-OAuth-Scopes", "") if resp is not None else ""
+    return [s.strip() for s in raw.split(",") if s.strip()]
 
 
 def validate_token(token: str) -> dict:
-    """Verify a PAT and return the authenticated account: {login, name, type}.
-    Raises ``validation`` if the token is bad."""
-    data = _get("/user", token)
+    """Verify a PAT and return the authenticated account + granted scopes:
+    {login, name, type, avatar_url, html_url, scopes}. Raises on a bad token."""
+    data, resp = _get_full("/user", token)
     if not isinstance(data, dict) or not data.get("login"):
         raise validation("Could not read the GitHub account for that token")
     return {
@@ -513,6 +526,7 @@ def validate_token(token: str) -> dict:
         "type": data.get("type") or "User",
         "avatar_url": data.get("avatar_url"),
         "html_url": data.get("html_url"),
+        "scopes": _parse_scopes(resp),
     }
 
 

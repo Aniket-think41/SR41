@@ -105,6 +105,15 @@ def _ensure_additive_columns() -> None:
         ("feedback", "public_status", "VARCHAR NOT NULL DEFAULT 'pending'"),
         # Activity client source (spec §7): web | cli | mcp | api.
         ("activities", "source", "VARCHAR NOT NULL DEFAULT 'web'"),
+        # Integrations: connection metadata added after org_integrations shipped
+        # (the table exists in prod without these — create_all won't ALTER it).
+        ("org_integrations", "auth_method", "VARCHAR NOT NULL DEFAULT 'classic_pat'"),
+        ("org_integrations", "account_type", "VARCHAR"),
+        ("org_integrations", "account_url", "VARCHAR"),
+        ("org_integrations", "account_avatar", "VARCHAR"),
+        ("org_integrations", "scopes", "JSON"),
+        ("org_integrations", "capabilities", "JSON"),
+        ("org_integrations", "last_synced_at", "TIMESTAMP"),
     ]
     # One-off NOT NULL relaxations (Postgres only — SQLite dev DBs are rebuilt by
     # create_all). feedback.user_id must allow NULL for anonymous website feedback.

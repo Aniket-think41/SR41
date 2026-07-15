@@ -388,19 +388,54 @@ export interface Notification {
 
 /* ---- Integrations (org Integrations section) ---- */
 
+/** A capability the connection may unlock, with whether the current credential
+ *  grants it and what to grant if not. Features gate on `enabled`. */
+export interface IntegrationCapability {
+  key: string;
+  name: string;
+  description: string;
+  recommend: string | null;
+  enabled: boolean;
+}
+
+/** A recommended permission for a connection method. */
+export interface RecommendedPermission {
+  scope: string;
+  why: string;
+  required: boolean;
+}
+
+/** A way to connect a provider (e.g. classic PAT). `available:false` → coming soon. */
+export interface IntegrationAuthMethod {
+  key: string;
+  name: string;
+  hint: string;
+  docs_url?: string;
+  available: boolean;
+  status?: string;
+  recommended: RecommendedPermission[];
+}
+
 /** A per-org connection to a provider. Never carries the secret token — only a
- *  masked hint (last 4 chars) and non-secret config. */
+ *  masked hint (last 4 chars) and non-secret metadata. */
 export interface IntegrationConnection {
   id: string;
   provider_key: string;
   status: "connected" | "error" | "disconnected";
+  auth_method: string;
   account_label: string | null;
+  account_type: string | null;
+  account_url: string | null;
+  account_avatar: string | null;
   token_hint: string | null;
+  scopes: string[];
+  capabilities: IntegrationCapability[];
   config: Record<string, unknown>;
   last_error: string | null;
   connected_by: string;
   created_at: string | null;
   updated_at: string | null;
+  last_synced_at: string | null;
 }
 
 /** A connectable integration (GitHub, …) annotated with this org's connection. */
@@ -414,6 +449,7 @@ export interface IntegrationProvider {
   docs_url: string | null;
   auth_type: "pat" | "oauth" | "app";
   status: "available" | "beta" | "coming_soon";
+  auth_methods: IntegrationAuthMethod[];
   connected: boolean;
   connection: IntegrationConnection | null;
 }

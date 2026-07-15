@@ -248,6 +248,7 @@ class IntegrationConnectIn(BaseModel):
 
     token: str = Field(min_length=10, max_length=500)
     account: str | None = Field(default=None, max_length=120)
+    auth_method: str = Field(default="classic_pat", max_length=40)
 
 
 class IntegrationConfigPatch(BaseModel):

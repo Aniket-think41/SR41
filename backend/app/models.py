@@ -425,15 +425,26 @@ class OrgIntegration(Base):
     org_id: Mapped[str] = mapped_column(String, ForeignKey("organizations.id"), index=True)
     provider_key: Mapped[str] = mapped_column(String, index=True)  # → IntegrationProvider.key
     status: Mapped[str] = mapped_column(String, default="connected")  # connected | error | disconnected
+    # How it was connected (e.g. github: classic_pat). Determines the recommended
+    # permissions and how granted scopes/capabilities are detected.
+    auth_method: Mapped[str] = mapped_column(String, default="classic_pat")
     # Fernet ciphertext of a JSON credential blob (e.g. {"token": "…"}). NEVER
     # serialized to a client; decrypted only server-side when calling the provider.
     credentials_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Non-secret display info: the connected account login, a masked token hint.
     account_label: Mapped[str | None] = mapped_column(String, nullable=True)  # e.g. GitHub org/user "acme"
+    account_type: Mapped[str | None] = mapped_column(String, nullable=True)   # User | Organization
+    account_url: Mapped[str | None] = mapped_column(String, nullable=True)    # html link to the account
+    account_avatar: Mapped[str | None] = mapped_column(String, nullable=True)
     token_hint: Mapped[str | None] = mapped_column(String, nullable=True)     # last 4 chars, for display
+    # Scopes/permissions the credential actually grants (detected on connect/sync)
+    # and the capability keys we derive from them (what features are unlocked).
+    scopes: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    capabilities: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # Non-secret settings (default sync mode, selected repos, …).
     config: Mapped[dict] = mapped_column(JSON, default=dict)
     last_error: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     connected_by: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)

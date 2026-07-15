@@ -73,6 +73,14 @@ export const FEATURES: FeatureFlag[] = [
     premium: true,
     default_enabled: true,
   },
+  {
+    key: "integrations",
+    name: "Integrations",
+    description: "Connect external tools like GitHub to discover, sync, and manage resources straight from your repositories.",
+    min_plan: "PRO",
+    premium: true,
+    default_enabled: true,
+  },
 ];
 
 export interface Db {
@@ -107,10 +115,17 @@ export interface Db {
     org_id: string;
     provider_key: string;
     status: "connected" | "error" | "disconnected";
+    auth_method: string;
     account_label: string | null;
+    account_type: string | null;
+    account_url: string | null;
+    account_avatar: string | null;
     token_hint: string | null;
+    scopes: string[];
+    capabilities: string[];
     config: Record<string, unknown>;
     last_error: string | null;
+    last_synced_at: string | null;
     connected_by: string;
     created_at: string;
     updated_at: string;

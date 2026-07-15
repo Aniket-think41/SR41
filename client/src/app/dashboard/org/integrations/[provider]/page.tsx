@@ -1,31 +1,35 @@
 "use client";
 
 /**
- * Integration config / credentials page. Reached by clicking a card on the
- * Integrations grid. Before a connection exists it shows the connect form (add
- * credentials); once connected it shows the config surface — account summary,
- * sync mode, GitHub repo browser (discover → import), and disconnect.
+ * Integration config / credentials page. Reached from the Integrations grid.
+ *
+ * Not connected → the connect flow: choose a method (Classic PAT today), see its
+ * recommended permissions, paste the token. Connected → the config surface:
+ * account metadata, granted capabilities (each feature enables/disables on the
+ * connection's detected scopes), a Sync button that re-checks the token and
+ * unlocks newly-granted permissions, sync mode, and the GitHub repo browser.
+ * Admin-only actions; a non-admin sees a read-only notice.
  */
 
-import { use, useState } from "react";
+import { use, useMemo, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Github, Plug, Check, Loader2, Search, Star, Lock, ExternalLink,
-  Trash2, KeyRound, PackagePlus,
+  Trash2, KeyRound, PackagePlus, RefreshCw, ShieldCheck, CircleSlash, Calendar,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/api/http";
 import { qk, useCurrentOrg, useIntegration } from "@/lib/hooks";
-import type { GithubRepo, IntegrationProvider } from "@/lib/types";
+import type { GithubRepo, IntegrationAuthMethod, IntegrationProvider } from "@/lib/types";
 import { useToast } from "@/components/Toast";
 import { FeatureGate } from "@/components/FeatureGate";
 
 const SYNC_MODES = [
-  { key: "manual", label: "Manual", hint: "Nothing syncs automatically — you trigger it." },
-  { key: "read_only", label: "Read only", hint: "GitHub → SkillShare. Repos flow in." },
-  { key: "write_only", label: "Write only", hint: "SkillShare → GitHub. Push changes out." },
-  { key: "bidirectional", label: "Bidirectional", hint: "Keep both sides in sync." },
+  { key: "manual", label: "Manual", hint: "Nothing syncs automatically — you trigger it.", needs: null as string | null },
+  { key: "read_only", label: "Read only", hint: "GitHub → SkillShare. Repos flow in.", needs: null },
+  { key: "write_only", label: "Write only", hint: "SkillShare → GitHub. Push changes out.", needs: "write" },
+  { key: "bidirectional", label: "Bidirectional", hint: "Keep both sides in sync.", needs: "write" },
 ] as const;
 
 function ProviderIcon({ icon, className = "" }: { icon: string; className?: string }) {
@@ -33,16 +37,25 @@ function ProviderIcon({ icon, className = "" }: { icon: string; className?: stri
   return <Icon className={className || "h-6 w-6"} />;
 }
 
-/* ------------------------------ connect form ------------------------------ */
+/* ------------------------------ connect flow ------------------------------ */
 
-function ConnectForm({ provider, slug, isAdmin }: { provider: IntegrationProvider; slug: string; isAdmin: boolean }) {
+function ConnectFlow({ provider, slug, isAdmin }: { provider: IntegrationProvider; slug: string; isAdmin: boolean }) {
   const qc = useQueryClient();
   const { toast } = useToast();
+  const methods = provider.auth_methods ?? [];
+  const available = methods.filter((m) => m.available);
+  const [methodKey, setMethodKey] = useState(available[0]?.key ?? "classic_pat");
+  const method: IntegrationAuthMethod | undefined = methods.find((m) => m.key === methodKey) ?? available[0];
   const [token, setToken] = useState("");
   const [account, setAccount] = useState("");
 
   const connect = useMutation({
-    mutationFn: () => api.connectIntegration(slug, provider.key, { token: token.trim(), account: account.trim() || undefined }),
+    mutationFn: () =>
+      api.connectIntegration(slug, provider.key, {
+        token: token.trim(),
+        account: account.trim() || undefined,
+        auth_method: methodKey,
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.integration(slug, provider.key) });
       qc.invalidateQueries({ queryKey: qk.integrationProviders(slug) });
@@ -66,65 +79,135 @@ function ConnectForm({ provider, slug, isAdmin }: { provider: IntegrationProvide
   }
 
   return (
-    <div className="card max-w-xl p-8">
-      <div className="flex items-center gap-2 text-ink">
-        <KeyRound className="h-5 w-5 text-primary" />
-        <h2 className="font-display text-lg font-semibold">Connect {provider.name}</h2>
-      </div>
-      <p className="mt-2 text-sm leading-relaxed text-body">
-        Paste a {provider.auth_type === "pat" ? "Personal Access Token" : "credential"}. It&apos;s validated,
-        then encrypted at rest — SkillShare never shows it again.
-      </p>
-
-      <div className="mt-6 space-y-4">
-        <label className="block">
-          <span className="text-xs font-semibold uppercase tracking-wide text-muted">
-            {provider.auth_type === "pat" ? "Personal Access Token" : "Token"}
-          </span>
-          <input
-            type="password"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder="ghp_…"
-            autoComplete="off"
-            className="field mt-1.5 w-full font-mono"
-          />
-        </label>
-        <label className="block">
-          <span className="text-xs font-semibold uppercase tracking-wide text-muted">
-            GitHub org / user <span className="font-normal normal-case">(optional — scopes discovery)</span>
-          </span>
-          <input
-            value={account}
-            onChange={(e) => setAccount(e.target.value)}
-            placeholder="acme"
-            className="field mt-1.5 w-full"
-          />
-        </label>
+    <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
+      {/* method chooser */}
+      <div className="space-y-3">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Choose how to connect</h2>
+        {methods.map((m) => {
+          const selected = m.key === methodKey;
+          return (
+            <button
+              key={m.key}
+              onClick={() => m.available && setMethodKey(m.key)}
+              disabled={!m.available}
+              className={`w-full rounded-2xl border p-4 text-left transition ${
+                selected ? "border-primary bg-primary-50" : "border-line hover:border-primary/40"
+              } ${!m.available ? "cursor-not-allowed opacity-60" : ""}`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-ink">{m.name}</span>
+                {!m.available ? (
+                  <span className="tag">Coming soon</span>
+                ) : selected ? (
+                  <Check className="h-4 w-4 text-primary" />
+                ) : null}
+              </div>
+              <p className="mt-1 text-xs text-muted">{m.hint}</p>
+            </button>
+          );
+        })}
       </div>
 
-      <div className="mt-6 flex items-center gap-3">
+      {/* selected method form */}
+      <div className="card p-8">
+        <div className="flex items-center gap-2 text-ink">
+          <KeyRound className="h-5 w-5 text-primary" />
+          <h2 className="font-display text-lg font-semibold">Connect with {method?.name}</h2>
+        </div>
+
+        {!!method?.recommended?.length && (
+          <div className="mt-5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted">Recommended permissions</p>
+            <ul className="mt-3 space-y-2">
+              {method.recommended.map((r) => (
+                <li key={r.scope} className="flex items-start gap-2 text-sm">
+                  <code className="mt-0.5 rounded bg-surface-2 px-1.5 py-0.5 font-mono text-xs text-ink">{r.scope}</code>
+                  <span className="text-body">
+                    {r.why}
+                    {r.required && <span className="ml-1 text-[var(--color-danger)]">· required</span>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {method.docs_url && (
+              <a href={method.docs_url} target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex items-center gap-1 text-sm text-primary hover:underline">
+                Create a token with these scopes <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            )}
+          </div>
+        )}
+
+        <div className="mt-6 space-y-4">
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted">Token</span>
+            <input
+              type="password"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder="ghp_…"
+              autoComplete="off"
+              className="field mt-1.5 w-full font-mono"
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted">
+              GitHub org / user <span className="font-normal normal-case">(optional — scopes discovery)</span>
+            </span>
+            <input value={account} onChange={(e) => setAccount(e.target.value)} placeholder="acme" className="field mt-1.5 w-full" />
+          </label>
+        </div>
+
         <button
           onClick={() => connect.mutate()}
           disabled={token.trim().length < 10 || connect.isPending}
-          className="btn btn-primary"
+          className="btn btn-primary mt-6"
         >
           {connect.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
           Connect
         </button>
-        {provider.docs_url && (
-          <a href={provider.docs_url} target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-sm">
-            How to create a token <ExternalLink className="h-3.5 w-3.5" />
-          </a>
-        )}
+        <p className="mt-3 text-xs text-muted">The token is validated against GitHub, then encrypted at rest — it&apos;s never shown again.</p>
       </div>
+    </div>
+  );
+}
+
+/* ------------------------------ capabilities ------------------------------ */
+
+function Capabilities({ provider }: { provider: IntegrationProvider }) {
+  const caps = provider.connection?.capabilities ?? [];
+  return (
+    <div className="card p-6">
+      <h3 className="font-display text-lg font-semibold text-ink">What this connection can do</h3>
+      <p className="mt-1 text-sm text-body">
+        Capabilities are detected from your token&apos;s granted scopes. Missing one? Add the scope on GitHub and press Sync.
+      </p>
+      <ul className="mt-4 space-y-2">
+        {caps.map((cap) => (
+          <li key={cap.key} className="flex items-start gap-3 rounded-xl border border-line p-3">
+            <span className={cap.enabled ? "text-[var(--color-success)]" : "text-muted"}>
+              {cap.enabled ? <Check className="h-4 w-4" /> : <CircleSlash className="h-4 w-4" />}
+            </span>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-ink">{cap.name}</span>
+                {!cap.enabled && cap.recommend && (
+                  <span className="text-xs text-muted">
+                    needs <code className="rounded bg-surface-2 px-1 font-mono text-ink">{cap.recommend}</code>
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-body">{cap.description}</p>
+            </div>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
 
 /* ------------------------------ repo browser ------------------------------ */
 
-function RepoBrowser({ slug, orgId }: { slug: string; orgId: string | undefined }) {
+function RepoBrowser({ slug, orgId, canPrivate }: { slug: string; orgId: string | undefined; canPrivate: boolean }) {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [q, setQ] = useState("");
@@ -133,7 +216,6 @@ function RepoBrowser({ slug, orgId }: { slug: string; orgId: string | undefined 
   const search = useQuery({
     queryKey: ["org", slug, "integration", "github", "search", submitted],
     queryFn: () => api.githubIntegrationSearch(slug, submitted),
-    enabled: submitted !== "" || true, // initial empty query lists recent repos
   });
 
   const importRepo = useMutation({
@@ -150,32 +232,24 @@ function RepoBrowser({ slug, orgId }: { slug: string; orgId: string | undefined 
   return (
     <div className="card p-6">
       <h3 className="font-display text-lg font-semibold text-ink">Browse repositories</h3>
-      <p className="mt-1 text-sm text-body">Search your connected repos and import detected resources into the org.</p>
+      <p className="mt-1 text-sm text-body">
+        Search your connected repos and import detected resources into the org.
+        {!canPrivate && <span className="text-muted"> Private repos need the <code className="font-mono">repo</code> scope.</span>}
+      </p>
 
-      <form
-        className="mt-4 flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setSubmitted(q.trim());
-        }}
-      >
+      <form className="mt-4 flex gap-2" onSubmit={(e) => { e.preventDefault(); setSubmitted(q.trim()); }}>
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search repositories…"
-            className="field w-full pl-9"
-          />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search repositories…" className="field w-full pl-9" />
         </div>
         <button type="submit" className="btn btn-secondary">Search</button>
       </form>
 
       <div className="mt-4 space-y-2">
         {search.isLoading ? (
-          <div className="flex items-center gap-2 py-6 text-sm text-muted">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading repositories…
-          </div>
+          <div className="flex items-center gap-2 py-6 text-sm text-muted"><Loader2 className="h-4 w-4 animate-spin" /> Loading repositories…</div>
+        ) : search.isError ? (
+          <p className="py-6 text-sm text-muted">{errorMessage(search.error)}</p>
         ) : !search.data?.length ? (
           <p className="py-6 text-sm text-muted">No repositories found.</p>
         ) : (
@@ -183,33 +257,17 @@ function RepoBrowser({ slug, orgId }: { slug: string; orgId: string | undefined 
             <div key={repo.full_name} className="flex items-center justify-between gap-3 rounded-xl border border-line p-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <a
-                    href={repo.html_url ?? "#"}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="truncate text-sm font-semibold text-ink hover:text-primary"
-                  >
+                  <a href={repo.html_url ?? "#"} target="_blank" rel="noopener noreferrer" className="truncate text-sm font-semibold text-ink hover:text-primary">
                     {repo.full_name}
                   </a>
                   {repo.private && <Lock className="h-3 w-3 shrink-0 text-muted" />}
                   {repo.language && <span className="shrink-0 text-xs text-muted">{repo.language}</span>}
-                  <span className="flex shrink-0 items-center gap-0.5 text-xs text-muted">
-                    <Star className="h-3 w-3" /> {repo.stars}
-                  </span>
+                  <span className="flex shrink-0 items-center gap-0.5 text-xs text-muted"><Star className="h-3 w-3" /> {repo.stars}</span>
                 </div>
                 {repo.description && <p className="mt-0.5 truncate text-xs text-body">{repo.description}</p>}
               </div>
-              <button
-                onClick={() => importRepo.mutate(repo)}
-                disabled={importRepo.isPending}
-                className="btn btn-secondary btn-sm shrink-0"
-                title="Detect and import resources from this repo"
-              >
-                {importRepo.isPending && importRepo.variables?.full_name === repo.full_name ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <PackagePlus className="h-3.5 w-3.5" />
-                )}
+              <button onClick={() => importRepo.mutate(repo)} disabled={importRepo.isPending} className="btn btn-secondary btn-sm shrink-0" title="Detect and import resources from this repo">
+                {importRepo.isPending && importRepo.variables?.full_name === repo.full_name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PackagePlus className="h-3.5 w-3.5" />}
                 Import
               </button>
             </div>
@@ -227,74 +285,108 @@ function ConnectedView({ provider, slug, orgId, isAdmin }: { provider: Integrati
   const { toast } = useToast();
   const conn = provider.connection!;
   const syncMode = (conn.config?.sync_mode as string) ?? "manual";
+  const capOn = useMemo(() => new Map(conn.capabilities.map((c) => [c.key, c.enabled])), [conn.capabilities]);
+  const methodName = provider.auth_methods.find((m) => m.key === conn.auth_method)?.name ?? conn.auth_method;
 
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: qk.integration(slug, provider.key) });
+    qc.invalidateQueries({ queryKey: qk.integrationProviders(slug) });
+  };
+
+  const sync = useMutation({
+    mutationFn: () => api.syncIntegration(slug, provider.key),
+    onSuccess: () => { invalidate(); toast("Synced — capabilities refreshed"); },
+    onError: (e) => toast(errorMessage(e), "error"),
+  });
   const setMode = useMutation({
     mutationFn: (mode: string) => api.updateIntegrationConfig(slug, provider.key, { sync_mode: mode }),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.integration(slug, provider.key) }),
     onError: (e) => toast(errorMessage(e), "error"),
   });
-
   const disconnect = useMutation({
     mutationFn: () => api.disconnectIntegration(slug, provider.key),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: qk.integration(slug, provider.key) });
-      qc.invalidateQueries({ queryKey: qk.integrationProviders(slug) });
-      toast(`${provider.name} disconnected`);
-    },
+    onSuccess: () => { invalidate(); toast(`${provider.name} disconnected`); },
     onError: (e) => toast(errorMessage(e), "error"),
   });
 
+  const fmtDate = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
+
   return (
     <div className="space-y-6">
-      {/* connection summary */}
+      {/* metadata + actions */}
       <div className="card p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="tag !bg-[var(--color-success)]/10 !text-[var(--color-success)] inline-flex items-center gap-1">
-                <Check className="h-3 w-3" /> Connected
-              </span>
-              {conn.account_label && <span className="text-sm font-semibold text-ink">{conn.account_label}</span>}
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-start gap-3">
+            {conn.account_avatar ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={conn.account_avatar} alt="" className="h-10 w-10 rounded-xl" />
+            ) : (
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-surface-2"><Github className="h-5 w-5" /></span>
+            )}
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="tag !bg-[var(--color-success)]/10 !text-[var(--color-success)] inline-flex items-center gap-1"><Check className="h-3 w-3" /> Connected</span>
+                {conn.account_url ? (
+                  <a href={conn.account_url} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-ink hover:text-primary">
+                    {conn.account_label} <ExternalLink className="inline h-3 w-3" />
+                  </a>
+                ) : (
+                  <span className="text-sm font-semibold text-ink">{conn.account_label}</span>
+                )}
+                {conn.account_type && <span className="text-xs text-muted">· {conn.account_type}</span>}
+              </div>
+              <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted sm:grid-cols-3">
+                <div><dt className="inline">Method: </dt><dd className="inline text-ink">{methodName}</dd></div>
+                <div><dt className="inline">Token: </dt><dd className="inline font-mono text-ink">••••{conn.token_hint}</dd></div>
+                <div><dt className="inline">Scopes: </dt><dd className="inline text-ink">{conn.scopes.length ? conn.scopes.join(", ") : "—"}</dd></div>
+                <div className="flex items-center gap-1"><Calendar className="h-3 w-3" /> Added {fmtDate(conn.created_at)}</div>
+                <div className="flex items-center gap-1"><RefreshCw className="h-3 w-3" /> Synced {fmtDate(conn.last_synced_at)}</div>
+              </dl>
             </div>
-            <p className="mt-2 text-xs text-muted">
-              Token ending <span className="font-mono text-ink">••••{conn.token_hint}</span>
-              {conn.updated_at && <> · updated {new Date(conn.updated_at).toLocaleDateString()}</>}
-            </p>
           </div>
           {isAdmin && (
-            <button
-              onClick={() => {
-                if (confirm(`Disconnect ${provider.name}? Stored credentials will be deleted.`)) disconnect.mutate();
-              }}
-              disabled={disconnect.isPending}
-              className="btn btn-secondary btn-sm !text-[var(--color-danger)]"
-            >
-              {disconnect.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-              Disconnect
-            </button>
+            <div className="flex gap-2">
+              <button onClick={() => sync.mutate()} disabled={sync.isPending} className="btn btn-secondary btn-sm" title="Re-check the token and refresh capabilities">
+                {sync.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />} Sync
+              </button>
+              <button
+                onClick={() => { if (confirm(`Disconnect ${provider.name}? Stored credentials will be deleted.`)) disconnect.mutate(); }}
+                disabled={disconnect.isPending}
+                className="btn btn-secondary btn-sm !text-[var(--color-danger)]"
+              >
+                {disconnect.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />} Disconnect
+              </button>
+            </div>
           )}
         </div>
+        {conn.status === "error" && conn.last_error && (
+          <p className="mt-3 rounded-lg bg-[var(--color-danger)]/10 px-3 py-2 text-xs text-[var(--color-danger)]">{conn.last_error}</p>
+        )}
       </div>
 
-      {/* sync mode */}
+      <Capabilities provider={provider} />
+
+      {/* sync mode — write modes gate on the `write` capability */}
       <div className="card p-6">
         <h3 className="font-display text-lg font-semibold text-ink">Sync mode</h3>
-        <p className="mt-1 text-sm text-body">Choose which direction changes flow between GitHub and SkillShare.</p>
+        <p className="mt-1 text-sm text-body">Which direction changes flow between GitHub and SkillShare.</p>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           {SYNC_MODES.map((m) => {
             const active = syncMode === m.key;
+            const locked = !!m.needs && !capOn.get(m.needs);
             return (
               <button
                 key={m.key}
-                onClick={() => isAdmin && setMode.mutate(m.key)}
-                disabled={!isAdmin || setMode.isPending}
+                onClick={() => isAdmin && !locked && setMode.mutate(m.key)}
+                disabled={!isAdmin || locked || setMode.isPending}
                 className={`rounded-xl border p-4 text-left transition ${
                   active ? "border-primary bg-primary-50" : "border-line hover:border-primary/40"
-                } ${!isAdmin ? "cursor-default" : ""}`}
+                } ${locked ? "cursor-not-allowed opacity-55" : ""}`}
+                title={locked ? "Requires the write capability (repo scope) — grant it and Sync" : undefined}
               >
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-semibold text-ink">{m.label}</span>
-                  {active && <Check className="h-4 w-4 text-primary" />}
+                  {active ? <Check className="h-4 w-4 text-primary" /> : locked ? <Lock className="h-4 w-4 text-muted" /> : null}
                 </div>
                 <p className="mt-1 text-xs text-muted">{m.hint}</p>
               </button>
@@ -303,8 +395,7 @@ function ConnectedView({ provider, slug, orgId, isAdmin }: { provider: Integrati
         </div>
       </div>
 
-      {/* repo browser (github) */}
-      {provider.key === "github" && <RepoBrowser slug={slug} orgId={orgId} />}
+      {provider.key === "github" && <RepoBrowser slug={slug} orgId={orgId} canPrivate={!!capOn.get("read_private")} />}
     </div>
   );
 }
@@ -333,7 +424,10 @@ function Config({ providerKey }: { providerKey: string }) {
               <ProviderIcon icon={provider.icon} className="h-7 w-7" />
             </span>
             <div>
-              <h1 className="font-display text-2xl font-semibold text-ink">{provider.name}</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="font-display text-2xl font-semibold text-ink">{provider.name}</h1>
+                <ShieldCheck className="h-4 w-4 text-muted" aria-label="Premium integration" />
+              </div>
               {provider.category && <p className="text-sm text-muted">{provider.category}</p>}
               <p className="mt-2 max-w-2xl text-sm leading-relaxed text-body">{provider.description}</p>
             </div>
@@ -342,7 +436,7 @@ function Config({ providerKey }: { providerKey: string }) {
           {provider.connected ? (
             <ConnectedView provider={provider} slug={org!.slug} orgId={org?.id} isAdmin={!!isAdmin} />
           ) : (
-            <ConnectForm provider={provider} slug={org!.slug} isAdmin={!!isAdmin} />
+            <ConnectFlow provider={provider} slug={org!.slug} isAdmin={!!isAdmin} />
           )}
         </>
       )}

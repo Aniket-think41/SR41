@@ -56,10 +56,15 @@ def _org(h, plan="PRO"):
 
 @pytest.fixture(autouse=True)
 def _stub_github(monkeypatch):
-    monkeypatch.setattr(
-        github, "validate_token",
-        lambda token: {"login": "acme", "name": "Acme", "type": "Organization"},
-    )
+    # Scopes derived from the token so tests can exercise capability gating:
+    # a token containing "limited" grants only read:user (no repo → no write).
+    def fake_validate(token):
+        scopes = ["read:user"] if "limited" in token else ["repo", "read:org", "read:user"]
+        return {"login": "acme", "name": "Acme", "type": "Organization",
+                "avatar_url": "https://x/a.png", "html_url": "https://github.com/acme",
+                "scopes": scopes}
+
+    monkeypatch.setattr(github, "validate_token", fake_validate)
 
 
 def test_free_org_has_no_integrations():
@@ -138,6 +143,62 @@ def test_github_search_uses_stored_token(monkeypatch):
     assert seen["token"] == FAKE_TOKEN
     assert seen["account"] == "acme"
     assert r.json()[0]["full_name"] == "acme/hit"
+
+
+def _caps(provider_body):
+    return {c["key"]: c["enabled"] for c in provider_body["connection"]["capabilities"]}
+
+
+def test_connect_detects_scopes_and_capabilities():
+    h, _ = _user()
+    slug = _org(h, plan="PRO")
+    r = c.post(f"/api/orgs/{slug}/integrations/github/connect", json={"token": FAKE_TOKEN}, headers=h)
+    body = r.json()
+    conn = body["connection"]
+    assert conn["auth_method"] == "classic_pat"
+    assert set(conn["scopes"]) == {"repo", "read:org", "read:user"}
+    assert conn["account_type"] == "Organization"
+    assert conn["account_url"] == "https://github.com/acme"
+    caps = _caps(body)
+    # repo scope → private read + write enabled; always-on read/search enabled.
+    assert caps["read_private"] and caps["write"] and caps["read_public"] and caps["search"]
+    # provider advertises the classic_pat auth method
+    assert any(m["key"] == "classic_pat" for m in body["auth_methods"])
+
+
+def test_limited_token_disables_write_then_sync_enables_it(monkeypatch):
+    h, _ = _user()
+    slug = _org(h, plan="PRO")
+    # Connect with a limited token → write capability off.
+    c.post(f"/api/orgs/{slug}/integrations/github/connect",
+           json={"token": "ghp_limited_0123456789"}, headers=h)
+    got = c.get(f"/api/orgs/{slug}/integrations/github", headers=h).json()
+    assert _caps(got)["write"] is False
+
+    # Simulate the admin broadening the SAME token's scopes on GitHub, then Sync.
+    monkeypatch.setattr(github, "validate_token", lambda token: {
+        "login": "acme", "name": "Acme", "type": "Organization",
+        "avatar_url": "", "html_url": "https://github.com/acme",
+        "scopes": ["repo", "read:org", "read:user"]})
+    synced = c.post(f"/api/orgs/{slug}/integrations/github/sync", headers=h)
+    assert synced.status_code == 200, synced.text
+    assert _caps(synced.json())["write"] is True
+    assert synced.json()["connection"]["last_synced_at"]
+
+
+def test_sync_requires_connection():
+    h, _ = _user()
+    slug = _org(h, plan="PRO")
+    r = c.post(f"/api/orgs/{slug}/integrations/github/sync", headers=h)
+    assert r.status_code == 404, r.text
+
+
+def test_unavailable_auth_method_rejected():
+    h, _ = _user()
+    slug = _org(h, plan="PRO")
+    r = c.post(f"/api/orgs/{slug}/integrations/github/connect",
+               json={"token": FAKE_TOKEN, "auth_method": "github_app"}, headers=h)
+    assert r.status_code == 422, r.text
 
 
 def test_github_search_requires_connection():

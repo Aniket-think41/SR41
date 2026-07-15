@@ -13,6 +13,8 @@ discovery/search reuses app/github.py with the stored token.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -20,8 +22,10 @@ from .. import github
 from ..database import get_db
 from ..errors import forbidden, not_found, validation
 from ..integrations import (
+    AUTH_METHODS,
     INTEGRATIONS_FLAG,
     available_providers,
+    compute_capabilities,
     connection_out,
     get_credentials,
     provider_available,
@@ -70,6 +74,32 @@ def _github_token(db: Session, org, conn: OrgIntegration) -> str:
     if not token:
         raise validation("This GitHub connection has no stored token — reconnect the integration")
     return token
+
+
+def _valid_auth_method(provider_key: str, method: str) -> str:
+    """Reject unknown / not-yet-available connection methods."""
+    methods = {m["key"]: m for m in AUTH_METHODS.get(provider_key, [])}
+    m = methods.get(method)
+    if not m:
+        raise validation(f"Unknown connection method '{method}'")
+    if not m.get("available", False):
+        raise validation(f"{m['name']} isn't available yet")
+    return method
+
+
+def _apply_github_account(conn: OrgIntegration, token: str, account_override: str | None) -> None:
+    """Validate the token against GitHub and refresh account metadata + the
+    detected scopes/capabilities on the connection. Shared by connect and sync."""
+    account = github.validate_token(token)  # raises on a bad token
+    conn.account_label = (account_override or account["login"] or "").strip() or account["login"]
+    conn.account_type = account.get("type")
+    conn.account_url = account.get("html_url")
+    conn.account_avatar = account.get("avatar_url")
+    conn.scopes = account.get("scopes", [])
+    conn.capabilities = compute_capabilities("github", conn.scopes)
+    conn.status = "connected"
+    conn.last_error = None
+    conn.last_synced_at = datetime.now(timezone.utc)
 
 
 # --------------------------------------------------------------------------- #
@@ -121,33 +151,49 @@ def connect(
     provider = _get_available_provider(db, org, provider_key)
 
     token = body.token.strip()
-    account_label: str | None = body.account
-    creds: dict = {"token": token}
-
-    if provider.key == "github":
-        account = github.validate_token(token)  # raises on a bad token
-        # If the admin named an account, keep it; else use the token's own login.
-        account_label = (body.account or account["login"]).strip()
-        creds["account"] = account_label
-    else:  # pragma: no cover - only github ships today
+    method = _valid_auth_method(provider.key, body.auth_method)
+    if provider.key != "github":  # pragma: no cover - only github ships today
         raise validation(f'Connecting "{provider.name}" is not supported yet')
 
     conn = _connection(db, org, provider_key)
     if conn is None:
         conn = OrgIntegration(org_id=org.id, provider_key=provider_key, connected_by=user.id)
         db.add(conn)
-    set_credentials(conn, creds)
-    conn.status = "connected"
-    conn.account_label = account_label
+    conn.auth_method = method
     conn.token_hint = token[-4:]
-    conn.last_error = None
     conn.connected_by = user.id
+    set_credentials(conn, {"token": token})
+    _apply_github_account(conn, token, body.account)  # validates + detects scopes/caps
     db.flush()
     log_activity(
         db, user_id=user.id, org_id=org.id, verb="connected",
         object_type="integration", object_id=conn.id, object_title=provider.name,
         meta=f"connected {provider.name}",
     )
+    db.commit()
+    return provider_out(provider, conn)
+
+
+@router.post("/{provider_key}/sync")
+def sync(slug: str, provider_key: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Re-check the stored credential and refresh account metadata + detected
+    scopes/capabilities. This is how newly-granted permissions get picked up:
+    edit the token's scopes on GitHub, then Sync to unlock the gated features —
+    no need to paste the token again."""
+    org = org_by_slug(db, slug)
+    _require_section(db, org, user, admin=True)
+    provider = _get_available_provider(db, org, provider_key)
+    conn = _connection(db, org, provider_key)
+    if conn is None:
+        raise not_found(f'{provider.name} connection')
+    token = _github_token(db, org, conn)
+    try:
+        _apply_github_account(conn, token, conn.account_label)
+    except Exception as e:  # surface the failure on the connection instead of 500-ing
+        conn.status = "error"
+        conn.last_error = str(getattr(e, "detail", None) or e)
+        db.commit()
+        raise
     db.commit()
     return provider_out(provider, conn)
 

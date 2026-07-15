@@ -302,6 +302,57 @@ const INTEGRATION_PROVIDERS = [
   },
 ];
 
+const AUTH_METHODS: Record<string, unknown[]> = {
+  github: [
+    {
+      key: "classic_pat",
+      name: "Personal Access Token (classic)",
+      hint: "The quickest way to connect. Create a token with the scopes below.",
+      docs_url: "https://github.com/settings/tokens/new",
+      available: true,
+      recommended: [
+        { scope: "repo", why: "Read private repositories and push changes back", required: false },
+        { scope: "read:org", why: "Discover your organization's repositories", required: false },
+        { scope: "read:user", why: "Identify the connected account", required: true },
+        { scope: "admin:repo_hook", why: "Receive repository events (live sync, coming soon)", required: false },
+      ],
+    },
+    {
+      key: "github_app",
+      name: "GitHub App",
+      hint: "Org-grade install with fine-grained per-repo access and webhooks.",
+      available: false,
+      status: "coming_soon",
+      recommended: [],
+    },
+  ],
+};
+
+const CAPABILITY_CATALOG: Record<string, { key: string; name: string; description: string; always?: boolean; scopes: string[]; recommend?: string }[]> = {
+  github: [
+    { key: "read_public", name: "Read public repositories", description: "Discover and read any public repository.", always: true, scopes: [] },
+    { key: "search", name: "Search repositories", description: "Search across the connected account's repositories.", always: true, scopes: [] },
+    { key: "read_org", name: "Read organization repositories", description: "List and read repositories owned by your organization.", scopes: ["read:org", "repo"], recommend: "read:org" },
+    { key: "read_private", name: "Access private repositories", description: "Read private repositories and import their resources.", scopes: ["repo"], recommend: "repo" },
+    { key: "write", name: "Push changes to GitHub", description: "Two-way / write-only sync back to repositories.", scopes: ["repo"], recommend: "repo" },
+    { key: "webhooks", name: "Receive repository events", description: "Live sync on push/release via webhooks (coming soon).", scopes: ["admin:repo_hook"], recommend: "admin:repo_hook" },
+  ],
+};
+
+function computeCaps(providerKey: string, scopes: string[]): string[] {
+  const granted = new Set(scopes);
+  return (CAPABILITY_CATALOG[providerKey] ?? [])
+    .filter((c) => c.always || c.scopes.some((s) => granted.has(s)))
+    .map((c) => c.key);
+}
+
+/** Mock scope detection: no real GitHub call, so derive scopes from the token —
+ *  a token containing "limited" grants only read:user (demoes disabled features
+ *  that Sync can later enable). */
+function fakeScopes(token: string): string[] {
+  return token.includes("limited") ? ["read:user"] : ["repo", "read:org", "read:user", "admin:repo_hook"];
+}
+
 type MockProvider = (typeof INTEGRATION_PROVIDERS)[number];
 type MockConn = Db["org_integrations"][number];
 
@@ -318,19 +369,37 @@ function orgConnection(db: Db, orgId: string, key: string): MockConn | undefined
   return db.org_integrations.find((c) => c.org_id === orgId && c.provider_key === key);
 }
 
+function capabilitiesOut(conn: MockConn) {
+  const enabled = new Set(conn.capabilities ?? []);
+  return (CAPABILITY_CATALOG[conn.provider_key] ?? []).map((c) => ({
+    key: c.key,
+    name: c.name,
+    description: c.description,
+    recommend: c.recommend ?? null,
+    enabled: enabled.has(c.key),
+  }));
+}
+
 function connectionOut(conn: MockConn | undefined) {
   if (!conn) return null;
   return {
     id: conn.id,
     provider_key: conn.provider_key,
     status: conn.status,
+    auth_method: conn.auth_method,
     account_label: conn.account_label,
+    account_type: conn.account_type,
+    account_url: conn.account_url,
+    account_avatar: conn.account_avatar,
     token_hint: conn.token_hint,
+    scopes: conn.scopes ?? [],
+    capabilities: capabilitiesOut(conn),
     config: conn.config ?? {},
     last_error: conn.last_error,
     connected_by: conn.connected_by,
     created_at: conn.created_at,
     updated_at: conn.updated_at,
+    last_synced_at: conn.last_synced_at,
   };
 }
 
@@ -345,6 +414,7 @@ function providerOut(provider: MockProvider, conn: MockConn | undefined) {
     docs_url: provider.docs_url,
     auth_type: provider.auth_type,
     status: provider.status,
+    auth_methods: AUTH_METHODS[provider.key] ?? [],
     connected: !!conn && conn.status === "connected",
     connection: connectionOut(conn),
   };
@@ -869,23 +939,52 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     const provider = requireAvailableProvider(db, org.id, p.provider);
     const token = String(body.token ?? "").trim();
     if (token.length < 10) throw new HttpError(422, "VALIDATION_ERROR", "That doesn't look like a valid token");
-    // Mock: accept any token; the account is what the admin typed, else "acme".
+    const method = String(body.auth_method ?? "classic_pat");
+    const m = (AUTH_METHODS[p.provider] as { key: string; available: boolean; name: string }[] ?? []).find((x) => x.key === method);
+    if (!m) throw new HttpError(422, "VALIDATION_ERROR", `Unknown connection method '${method}'`);
+    if (!m.available) throw new HttpError(422, "VALIDATION_ERROR", `${m.name} isn't available yet`);
     const account = String(body.account ?? "").trim() || "acme";
+    const scopes = fakeScopes(token);
     let conn = orgConnection(db, org.id, p.provider);
     if (!conn) {
       conn = {
         id: uid("oint"), org_id: org.id, provider_key: p.provider, status: "connected",
-        account_label: account, token_hint: token.slice(-4), config: {}, last_error: null,
-        connected_by: me.id, created_at: now(), updated_at: now(),
+        auth_method: method, account_label: account, account_type: "Organization",
+        account_url: `https://github.com/${account}`, account_avatar: null,
+        token_hint: token.slice(-4), scopes, capabilities: computeCaps(p.provider, scopes),
+        config: {}, last_error: null, last_synced_at: now(), connected_by: me.id,
+        created_at: now(), updated_at: now(),
       };
       db.org_integrations.push(conn);
     } else {
       conn.status = "connected";
+      conn.auth_method = method;
       conn.account_label = account;
+      conn.account_url = `https://github.com/${account}`;
       conn.token_hint = token.slice(-4);
+      conn.scopes = scopes;
+      conn.capabilities = computeCaps(p.provider, scopes);
       conn.last_error = null;
+      conn.last_synced_at = now();
       conn.updated_at = now();
     }
+    saveDb();
+    return providerOut(provider, conn);
+  }],
+
+  ["POST", "/api/orgs/:slug/integrations/:provider/sync", (p, _b, _q, db) => {
+    const { org } = requireIntegrations(db, p.slug, true);
+    const provider = requireAvailableProvider(db, org.id, p.provider);
+    const conn = orgConnection(db, org.id, p.provider);
+    if (!conn) throw notFound(`${provider.name} connection`);
+    // Mock: re-detect from the "same token" — grant full scopes on sync so the
+    // enable-on-sync flow is demonstrable (a limited connect → full after sync).
+    conn.scopes = ["repo", "read:org", "read:user", "admin:repo_hook"];
+    conn.capabilities = computeCaps(p.provider, conn.scopes);
+    conn.status = "connected";
+    conn.last_error = null;
+    conn.last_synced_at = now();
+    conn.updated_at = now();
     saveDb();
     return providerOut(provider, conn);
   }],

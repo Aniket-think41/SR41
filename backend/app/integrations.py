@@ -58,6 +58,77 @@ PROVIDER_CATALOG: list[dict] = [
 
 _CATALOG_KEYS = {p["key"] for p in PROVIDER_CATALOG}
 
+# --------------------------------------------------------------------------- #
+# Connection methods + capabilities (per provider)
+# --------------------------------------------------------------------------- #
+
+# How you can connect a provider. `available=False` → shown as "coming soon".
+# `recommended` scopes drive the connect screen's permission checklist.
+AUTH_METHODS: dict[str, list[dict]] = {
+    "github": [
+        {
+            "key": "classic_pat",
+            "name": "Personal Access Token (classic)",
+            "hint": "The quickest way to connect. Create a token with the scopes below.",
+            "docs_url": "https://github.com/settings/tokens/new",
+            "available": True,
+            "recommended": [
+                {"scope": "repo", "why": "Read private repositories and push changes back", "required": False},
+                {"scope": "read:org", "why": "Discover your organization's repositories", "required": False},
+                {"scope": "read:user", "why": "Identify the connected account", "required": True},
+                {"scope": "admin:repo_hook", "why": "Receive repository events (live sync, coming soon)", "required": False},
+            ],
+        },
+        {
+            "key": "github_app",
+            "name": "GitHub App",
+            "hint": "Org-grade install with fine-grained per-repo access and webhooks.",
+            "available": False,
+            "status": "coming_soon",
+            "recommended": [],
+        },
+    ],
+}
+
+# Capabilities a connection can unlock, and what grants them. `always` = any valid
+# token. `scopes` = classic-PAT scopes that grant it (any one suffices).
+CAPABILITY_CATALOG: dict[str, list[dict]] = {
+    "github": [
+        {"key": "read_public", "name": "Read public repositories",
+         "description": "Discover and read any public repository.",
+         "always": True, "scopes": []},
+        {"key": "search", "name": "Search repositories",
+         "description": "Search across the connected account's repositories.",
+         "always": True, "scopes": []},
+        {"key": "read_org", "name": "Read organization repositories",
+         "description": "List and read repositories owned by your organization.",
+         "always": False, "scopes": ["read:org", "repo"], "recommend": "read:org"},
+        {"key": "read_private", "name": "Access private repositories",
+         "description": "Read private repositories and import their resources.",
+         "always": False, "scopes": ["repo"], "recommend": "repo"},
+        {"key": "write", "name": "Push changes to GitHub",
+         "description": "Two-way / write-only sync back to repositories.",
+         "always": False, "scopes": ["repo"], "recommend": "repo"},
+        {"key": "webhooks", "name": "Receive repository events",
+         "description": "Live sync on push/release via webhooks (coming soon).",
+         "always": False, "scopes": ["admin:repo_hook"], "recommend": "admin:repo_hook"},
+    ],
+}
+
+
+def compute_capabilities(provider_key: str, scopes: list[str] | None) -> list[str]:
+    """Derive the enabled capability keys from granted scopes (classic PAT)."""
+    granted = set(scopes or [])
+    out = []
+    for cap in CAPABILITY_CATALOG.get(provider_key, []):
+        if cap.get("always") or (granted & set(cap.get("scopes", []))):
+            out.append(cap["key"])
+    return out
+
+
+def has_capability(conn: OrgIntegration, key: str) -> bool:
+    return bool(conn and conn.capabilities and key in conn.capabilities)
+
 
 def sync_providers(db: Session) -> None:
     """Upsert PROVIDER_CATALOG into the DB. Idempotent; safe to call on boot."""
@@ -137,9 +208,26 @@ def provider_out(provider: IntegrationProvider, conn: OrgIntegration | None = No
         "docs_url": provider.docs_url,
         "auth_type": provider.auth_type,
         "status": provider.status,
+        "auth_methods": AUTH_METHODS.get(provider.key, []),
         "connected": bool(conn and conn.status == "connected"),
         "connection": connection_out(conn) if conn else None,
     }
+
+
+def _capabilities_out(conn: OrgIntegration) -> list[dict]:
+    """Full capability list for the UI: each catalog entry + whether it's enabled
+    for this connection, so features can gate on it and show what to grant."""
+    enabled = set(conn.capabilities or [])
+    return [
+        {
+            "key": c["key"],
+            "name": c["name"],
+            "description": c["description"],
+            "recommend": c.get("recommend"),
+            "enabled": c["key"] in enabled,
+        }
+        for c in CAPABILITY_CATALOG.get(conn.provider_key, [])
+    ]
 
 
 def connection_out(conn: OrgIntegration | None) -> dict | None:
@@ -149,11 +237,18 @@ def connection_out(conn: OrgIntegration | None) -> dict | None:
         "id": conn.id,
         "provider_key": conn.provider_key,
         "status": conn.status,
+        "auth_method": conn.auth_method,
         "account_label": conn.account_label,
+        "account_type": conn.account_type,
+        "account_url": conn.account_url,
+        "account_avatar": conn.account_avatar,
         "token_hint": conn.token_hint,
+        "scopes": conn.scopes or [],
+        "capabilities": _capabilities_out(conn),
         "config": conn.config or {},
         "last_error": conn.last_error,
         "connected_by": conn.connected_by,
         "created_at": conn.created_at.isoformat() if conn.created_at else None,
         "updated_at": conn.updated_at.isoformat() if conn.updated_at else None,
+        "last_synced_at": conn.last_synced_at.isoformat() if conn.last_synced_at else None,
     }

@@ -216,8 +216,15 @@ export const api = {
   integration: (slug: string, provider: string) =>
     request<IntegrationProvider>("GET", `/api/orgs/${slug}/integrations/${provider}`),
   /** Connect a provider by supplying credentials (validated + encrypted server-side). */
-  connectIntegration: (slug: string, provider: string, body: { token: string; account?: string }) =>
-    request<IntegrationProvider>("POST", `/api/orgs/${slug}/integrations/${provider}/connect`, body),
+  connectIntegration: (
+    slug: string,
+    provider: string,
+    body: { token: string; account?: string; auth_method?: string }
+  ) => request<IntegrationProvider>("POST", `/api/orgs/${slug}/integrations/${provider}/connect`, body),
+  /** Re-check the stored credential: refresh account metadata + granted scopes/
+   *  capabilities (picks up newly-granted permissions without re-entering the token). */
+  syncIntegration: (slug: string, provider: string) =>
+    request<IntegrationProvider>("POST", `/api/orgs/${slug}/integrations/${provider}/sync`),
   /** Update a connection's non-secret settings (e.g. default sync mode). */
   updateIntegrationConfig: (slug: string, provider: string, config: Record<string, unknown>) =>
     request<IntegrationProvider>("PATCH", `/api/orgs/${slug}/integrations/${provider}`, { config }),
