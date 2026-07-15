@@ -16,7 +16,7 @@ import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Github, Plug, Check, Loader2, Search, Star, Lock, ExternalLink,
-  Trash2, KeyRound, PackagePlus, RefreshCw, ShieldCheck, CircleSlash, Calendar,
+  Trash2, KeyRound, PackagePlus, RefreshCw, ShieldCheck, CircleSlash,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/api/http";
@@ -35,6 +35,26 @@ const SYNC_MODES = [
 function ProviderIcon({ icon, className = "" }: { icon: string; className?: string }) {
   const Icon = icon === "github" ? Github : Plug;
   return <Icon className={className || "h-6 w-6"} />;
+}
+
+const shortDate = (s: string | null) =>
+  s ? new Date(s).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "—";
+const longDate = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
+
+/** One aligned metadata cell: the value is trimmed to a single line; the full
+ *  text shows in a tooltip pinned above on hover (long dates/scopes never break
+ *  the grid). */
+function MetaItem({ label, value, full, mono }: { label: string; value: string; full?: string; mono?: boolean }) {
+  const tip = full ?? value;
+  return (
+    <div className="group/meta relative min-w-0">
+      <dt className="text-[0.65rem] font-semibold uppercase tracking-wide text-muted">{label}</dt>
+      <dd className={`truncate text-ink ${mono ? "font-mono" : ""}`} title={tip}>{value}</dd>
+      <span className="pointer-events-none absolute bottom-full left-0 z-20 mb-1 hidden max-w-[16rem] whitespace-normal break-words rounded-lg bg-ink px-2 py-1 text-[0.7rem] font-normal normal-case text-white shadow-lg group-hover/meta:block">
+        {tip}
+      </span>
+    </div>
+  );
 }
 
 /* ------------------------------ connect flow ------------------------------ */
@@ -309,8 +329,6 @@ function ConnectedView({ provider, slug, orgId, isAdmin }: { provider: Integrati
     onError: (e) => toast(errorMessage(e), "error"),
   });
 
-  const fmtDate = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
-
   return (
     <div className="space-y-6">
       {/* metadata + actions */}
@@ -327,20 +345,33 @@ function ConnectedView({ provider, slug, orgId, isAdmin }: { provider: Integrati
               <div className="flex items-center gap-2">
                 <span className="tag !bg-[var(--color-success)]/10 !text-[var(--color-success)] inline-flex items-center gap-1"><Check className="h-3 w-3" /> Connected</span>
                 {conn.account_url ? (
-                  <a href={conn.account_url} target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-ink hover:text-primary">
-                    {conn.account_label} <ExternalLink className="inline h-3 w-3" />
+                  <a
+                    href={conn.account_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={conn.account_label ?? undefined}
+                    className="inline-flex max-w-[12rem] items-center gap-1 text-sm font-semibold text-ink hover:text-primary"
+                  >
+                    <span className="truncate">{conn.account_label}</span>
+                    <ExternalLink className="h-3 w-3 shrink-0" />
                   </a>
                 ) : (
-                  <span className="text-sm font-semibold text-ink">{conn.account_label}</span>
+                  <span className="max-w-[12rem] truncate text-sm font-semibold text-ink" title={conn.account_label ?? undefined}>
+                    {conn.account_label}
+                  </span>
                 )}
-                {conn.account_type && <span className="text-xs text-muted">· {conn.account_type}</span>}
+                {conn.account_type && <span className="shrink-0 text-xs text-muted">· {conn.account_type}</span>}
               </div>
-              <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted sm:grid-cols-3">
-                <div><dt className="inline">Method: </dt><dd className="inline text-ink">{methodName}</dd></div>
-                <div><dt className="inline">Token: </dt><dd className="inline font-mono text-ink">••••{conn.token_hint}</dd></div>
-                <div><dt className="inline">Scopes: </dt><dd className="inline text-ink">{conn.scopes.length ? conn.scopes.join(", ") : "—"}</dd></div>
-                <div className="flex items-center gap-1"><Calendar className="h-3 w-3" /> Added {fmtDate(conn.created_at)}</div>
-                <div className="flex items-center gap-1"><RefreshCw className="h-3 w-3" /> Synced {fmtDate(conn.last_synced_at)}</div>
+              <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 text-xs sm:grid-cols-3 lg:grid-cols-5">
+                <MetaItem label="Method" value={methodName} />
+                <MetaItem label="Token" value={`••••${conn.token_hint ?? ""}`} mono />
+                <MetaItem
+                  label="Scopes"
+                  value={conn.scopes.length ? conn.scopes.join(", ") : "—"}
+                  full={conn.scopes.length ? conn.scopes.join(", ") : undefined}
+                />
+                <MetaItem label="Added" value={shortDate(conn.created_at)} full={longDate(conn.created_at)} />
+                <MetaItem label="Last synced" value={shortDate(conn.last_synced_at)} full={longDate(conn.last_synced_at)} />
               </dl>
             </div>
           </div>
