@@ -189,7 +189,7 @@ function AuthForm({ mode }: { mode: "login" | "signup" }) {
     setBusy(true);
     setServerError("");
     try {
-      await loadScript("https://alcdn.msauth.net/browser/2.38.4/js/msal-browser.min.js", () => !!msalApi());
+      await loadScript("https://alcdn.msauth.net/browser/2.38.2/js/msal-browser.min.js", () => !!msalApi());
       const msal = msalApi();
       if (!msal) throw new Error("Microsoft sign-in failed to load");
       const pca = new msal.PublicClientApplication({
