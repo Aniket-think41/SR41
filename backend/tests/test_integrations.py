@@ -128,7 +128,7 @@ def test_github_search_uses_stored_token(monkeypatch):
 
     seen = {}
 
-    def fake_search(query, token=None, account=None, per_page=30):
+    def fake_search(query, token=None, account=None, per_page=30, page=1):
         seen["token"] = token
         seen["account"] = account
         return [{"full_name": f"{account}/hit", "name": "hit", "owner": account, "stars": 1,
@@ -224,6 +224,20 @@ def test_config_patch_and_disconnect():
     assert d.status_code == 200, d.text
     after = c.get(f"/api/orgs/{slug}/integrations/github", headers=h).json()
     assert after["connected"] is False
+
+
+def test_repo_summary_includes_health_metadata():
+    from app.github import _repo_summary
+
+    s = _repo_summary({
+        "full_name": "acme/x", "name": "x", "owner": {"login": "acme"},
+        "stargazers_count": 5, "forks_count": 3, "open_issues_count": 2,
+        "license": {"spdx_id": "MIT", "name": "MIT License"},
+        "pushed_at": "2026-07-01T00:00:00Z", "homepage": "https://x", "private": True,
+    })
+    assert s["forks"] == 3 and s["open_issues"] == 2
+    assert s["license"] == "MIT" and s["pushed_at"] == "2026-07-01T00:00:00Z"
+    assert s["homepage"] == "https://x" and s["private"] is True
 
 
 if __name__ == "__main__":

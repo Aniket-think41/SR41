@@ -929,6 +929,11 @@ def cmd_integrations(args) -> None:
         print(f"  {BOLD}{p['name']}{RESET}  {DIM}{p.get('category', '')}{RESET} — {state}{acct}")
         if p.get("tagline"):
             print(f"    {DIM}{p['tagline']}{RESET}")
+        if p.get("connected"):
+            caps = [c["name"] for c in conn.get("capabilities", []) if c.get("enabled")]
+            if conn.get("auth_method"):
+                print(f"    {DIM}method: {conn['auth_method']}{RESET}")
+            print(f"    {DIM}enabled: {', '.join(caps) if caps else 'none'}{RESET}")
 
 
 def _print_repos(rows: list[dict]) -> None:

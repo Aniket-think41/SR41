@@ -234,8 +234,11 @@ export const api = {
   githubIntegrationRepos: (slug: string, account?: string) =>
     request<GithubRepo[]>("GET", `/api/orgs/${slug}/integrations/github/repos${qs({ account })}`),
   /** Search GitHub repositories (scoped to the connected account by default). */
-  githubIntegrationSearch: (slug: string, q: string, account?: string) =>
-    request<GithubRepo[]>("GET", `/api/orgs/${slug}/integrations/github/search${qs({ q, account })}`),
+  githubIntegrationSearch: (slug: string, q: string, account?: string, page = 1) =>
+    request<GithubRepo[]>(
+      "GET",
+      `/api/orgs/${slug}/integrations/github/search${qs({ q, account, page: String(page) })}`
+    ),
 
   /* ---- projects ---- */
   projects: (slug: string) => request<Project[]>("GET", `/api/orgs/${slug}/projects`),

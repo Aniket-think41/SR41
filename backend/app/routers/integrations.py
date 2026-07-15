@@ -255,7 +255,7 @@ def github_repos(
 
 @router.get("/github/search")
 def github_search(
-    slug: str, q: str = "", account: str = "", per_page: int = 30,
+    slug: str, q: str = "", account: str = "", per_page: int = 30, page: int = 1,
     user: User = Depends(get_current_user), db: Session = Depends(get_db),
 ):
     """Search GitHub repositories, scoped to the connected account by default."""
@@ -263,4 +263,4 @@ def github_search(
     conn = _require_github(db, org, user)
     token = _github_token(db, org, conn)
     scope = account or conn.account_label
-    return github.search_repositories(q, token=token, account=scope, per_page=per_page)
+    return github.search_repositories(q, token=token, account=scope, per_page=per_page, page=page)

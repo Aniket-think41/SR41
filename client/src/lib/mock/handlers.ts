@@ -440,14 +440,15 @@ function requireAvailableProvider(db: Db, orgId: string, key: string): MockProvi
 }
 
 /** Deterministic fake repos so the GitHub search/list feel real in mock mode. */
-function mockRepos(account: string, q: string): unknown[] {
+function mockRepos(account: string, q: string, page = 1): unknown[] {
+  if (page > 1) return []; // single mock page → "Load more" terminates cleanly
   const owner = account || "acme";
   const base = [
-    { name: "awesome-mcp-server", description: "A streamable MCP server for vector search.", language: "Python", stars: 342, topics: ["mcp", "ai"], private: false },
-    { name: "skillshare-cli", description: "Command-line client and skill bundle.", language: "Python", stars: 88, topics: ["cli", "skill"], private: false },
-    { name: "terraform-gcp", description: "Reusable GCP infrastructure templates.", language: "HCL", stars: 51, topics: ["template", "gcp"], private: false },
-    { name: "backend-auth-service", description: "Internal auth microservice.", language: "Go", stars: 12, topics: ["service"], private: true },
-    { name: "prompt-library", description: "Curated prompt collection for support agents.", language: "Markdown", stars: 27, topics: ["prompts"], private: true },
+    { name: "awesome-mcp-server", description: "A streamable MCP server for vector search.", language: "Python", stars: 342, forks: 41, open_issues: 7, license: "MIT", topics: ["mcp", "ai"], private: false, archived: false, fork: false },
+    { name: "skillshare-cli", description: "Command-line client and skill bundle.", language: "Python", stars: 88, forks: 9, open_issues: 2, license: "Apache-2.0", topics: ["cli", "skill"], private: false, archived: false, fork: false },
+    { name: "terraform-gcp", description: "Reusable GCP infrastructure templates.", language: "HCL", stars: 51, forks: 15, open_issues: 0, license: "MPL-2.0", topics: ["template", "gcp"], private: false, archived: true, fork: false },
+    { name: "backend-auth-service", description: "Internal auth microservice.", language: "Go", stars: 12, forks: 1, open_issues: 5, license: null, topics: ["service"], private: true, archived: false, fork: false },
+    { name: "prompt-library", description: "Curated prompt collection for support agents.", language: "Markdown", stars: 27, forks: 3, open_issues: 1, license: "CC-BY-4.0", topics: ["prompts"], private: true, archived: false, fork: true },
   ];
   const needle = q.toLowerCase().trim();
   return base
@@ -458,13 +459,18 @@ function mockRepos(account: string, q: string): unknown[] {
       owner,
       description: r.description,
       private: r.private,
-      archived: false,
-      fork: false,
+      archived: r.archived,
+      fork: r.fork,
       language: r.language,
       stars: r.stars,
+      forks: r.forks,
+      open_issues: r.open_issues,
+      license: r.license,
+      homepage: null,
       topics: r.topics,
       html_url: `https://github.com/${owner}/${r.name}`,
       default_branch: "main",
+      pushed_at: now(),
       updated_at: now(),
     }));
 }
@@ -920,7 +926,7 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     requireAvailableProvider(db, org.id, "github");
     const conn = orgConnection(db, org.id, "github");
     if (!conn || conn.status !== "connected") throw new HttpError(422, "VALIDATION_ERROR", "Connect GitHub first");
-    return mockRepos(q.get("account") || conn.account_label || "", q.get("q") || "");
+    return mockRepos(q.get("account") || conn.account_label || "", q.get("q") || "", Number(q.get("page") || "1"));
   }],
 
   ["GET", "/api/orgs/:slug/integrations", (p, _b, _q, db) => {

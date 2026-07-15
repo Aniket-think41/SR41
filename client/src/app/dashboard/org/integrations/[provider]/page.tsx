@@ -11,12 +11,13 @@
  * Admin-only actions; a non-admin sees a read-only notice.
  */
 
-import { use, useMemo, useState } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Github, Plug, Check, Loader2, Search, Star, Lock, ExternalLink,
   Trash2, KeyRound, PackagePlus, RefreshCw, ShieldCheck, CircleSlash,
+  GitFork, CircleDot, Scale, ChevronDown, ChevronRight,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/api/http";
@@ -227,27 +228,162 @@ function Capabilities({ provider }: { provider: IntegrationProvider }) {
 
 /* ------------------------------ repo browser ------------------------------ */
 
-function RepoBrowser({ slug, orgId, canPrivate }: { slug: string; orgId: string | undefined; canPrivate: boolean }) {
+const KIND_BADGE: Record<string, string> = { skill: "Skill", mcp: "MCP", note: "Note" };
+
+function relTime(s: string | null): string {
+  if (!s) return "";
+  const days = Math.floor((Date.now() - new Date(s).getTime()) / 86400000);
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 30) return `${days}d ago`;
+  if (days < 365) return `${Math.floor(days / 30)}mo ago`;
+  return `${Math.floor(days / 365)}y ago`;
+}
+
+/** One repo row: health metadata + an expandable "select what to import" panel
+ *  (previews detected skills/MCPs/notes and imports only the checked ones). */
+function RepoRow({ repo, slug, orgId }: { repo: GithubRepo; slug: string; orgId?: string }) {
   const { toast } = useToast();
   const qc = useQueryClient();
-  const [q, setQ] = useState("");
-  const [submitted, setSubmitted] = useState("");
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  const search = useQuery({
-    queryKey: ["org", slug, "integration", "github", "search", submitted],
-    queryFn: () => api.githubIntegrationSearch(slug, submitted),
+  const preview = useQuery({
+    queryKey: ["github-preview", repo.full_name],
+    queryFn: () => api.githubPreview(repo.html_url ?? repo.full_name),
+    enabled: open,
   });
+  useEffect(() => {
+    if (preview.data) setSelected(new Set(preview.data.detected.map((d) => d.fingerprint)));
+  }, [preview.data]);
 
-  const importRepo = useMutation({
-    mutationFn: (repo: GithubRepo) =>
-      api.githubImport({ url: repo.html_url ?? repo.full_name, scope_type: "ORG", scope_id: orgId ?? null }),
+  const importSel = useMutation({
+    mutationFn: () =>
+      api.githubImport({ url: repo.html_url ?? repo.full_name, scope_type: "ORG", scope_id: orgId ?? null, select: [...selected] }),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ["org", slug, "resources"] });
       const n = res.created?.length ?? 0;
       toast(n ? `Imported ${n} resource${n === 1 ? "" : "s"}` : "Nothing new to import from that repo");
+      setOpen(false);
     },
     onError: (e) => toast(errorMessage(e), "error"),
   });
+
+  const toggle = (fp: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(fp)) next.delete(fp);
+      else next.add(fp);
+      return next;
+    });
+
+  return (
+    <div className="rounded-xl border border-line">
+      <div className="flex items-center justify-between gap-3 p-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <a href={repo.html_url ?? "#"} target="_blank" rel="noopener noreferrer" className="truncate text-sm font-semibold text-ink hover:text-primary">
+              {repo.full_name}
+            </a>
+            {repo.private && <span className="tag !bg-surface-2 inline-flex items-center gap-1 !text-muted"><Lock className="h-3 w-3" /> private</span>}
+            {repo.archived && <span className="tag !bg-surface-2 !text-muted">archived</span>}
+            {repo.fork && <span className="tag !bg-surface-2 inline-flex items-center gap-1 !text-muted"><GitFork className="h-3 w-3" /> fork</span>}
+          </div>
+          {repo.description && <p className="mt-0.5 truncate text-xs text-body">{repo.description}</p>}
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[0.7rem] text-muted">
+            {repo.language && <span>{repo.language}</span>}
+            <span className="flex items-center gap-0.5"><Star className="h-3 w-3" /> {repo.stars}</span>
+            <span className="flex items-center gap-0.5"><GitFork className="h-3 w-3" /> {repo.forks}</span>
+            <span className="flex items-center gap-0.5"><CircleDot className="h-3 w-3" /> {repo.open_issues}</span>
+            {repo.license && <span className="flex items-center gap-0.5"><Scale className="h-3 w-3" /> {repo.license}</span>}
+            {repo.pushed_at && <span>updated {relTime(repo.pushed_at)}</span>}
+          </div>
+        </div>
+        <button onClick={() => setOpen((o) => !o)} className="btn btn-secondary btn-sm shrink-0" title="Preview and select what to import">
+          {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+          Import
+        </button>
+      </div>
+
+      {open && (
+        <div className="border-t border-line p-3">
+          {preview.isLoading ? (
+            <div className="flex items-center gap-2 py-3 text-sm text-muted"><Loader2 className="h-4 w-4 animate-spin" /> Detecting resources…</div>
+          ) : preview.isError ? (
+            <p className="py-3 text-sm text-muted">{errorMessage(preview.error)}</p>
+          ) : !preview.data?.detected.length ? (
+            <p className="py-3 text-sm text-muted">No skills, MCP servers, or notes detected in this repository.</p>
+          ) : (
+            <>
+              <p className="mb-2 text-xs text-muted">Select what to import:</p>
+              <ul className="space-y-1.5">
+                {preview.data.detected.map((d) => (
+                  <li key={d.fingerprint}>
+                    <label className="flex cursor-pointer items-start gap-2 rounded-lg p-1.5 hover:bg-surface">
+                      <input type="checkbox" checked={selected.has(d.fingerprint)} onChange={() => toggle(d.fingerprint)} className="mt-0.5" />
+                      <span className="min-w-0">
+                        <span className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-ink">{d.title}</span>
+                          <span className="tag !bg-surface-2 !text-muted">{KIND_BADGE[d.kind] ?? d.kind}</span>
+                          {!!d.redaction.length && <span className="text-[0.7rem] text-muted">{d.redaction.length} secret(s) redacted</span>}
+                        </span>
+                        <span className="block truncate text-[0.7rem] text-muted">{d.source_path}</span>
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              <button onClick={() => importSel.mutate()} disabled={!selected.size || importSel.isPending} className="btn btn-primary btn-sm mt-3">
+                {importSel.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PackagePlus className="h-3.5 w-3.5" />}
+                Import {selected.size} selected
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RepoBrowser({ slug, orgId, canPrivate }: { slug: string; orgId: string | undefined; canPrivate: boolean }) {
+  const [q, setQ] = useState("");
+  const [repos, setRepos] = useState<GithubRepo[]>([]);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [more, setMore] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [ran, setRan] = useState(false);
+  const [visibility, setVisibility] = useState<"all" | "public" | "private">("all");
+  const [hideArchived, setHideArchived] = useState(true);
+  const [hideForks, setHideForks] = useState(true);
+
+  const PER_PAGE = 30;
+
+  async function load(nextPage: number, replace: boolean) {
+    setLoading(true);
+    setErr(null);
+    try {
+      const term = q.trim();
+      const rows = term
+        ? await api.githubIntegrationSearch(slug, term, undefined, nextPage)
+        : await api.githubIntegrationRepos(slug);
+      setMore(!!term && rows.length >= PER_PAGE);
+      setRepos((prev) => (replace ? rows : [...prev, ...rows]));
+      setPage(nextPage);
+    } catch (e) {
+      setErr(errorMessage(e));
+    } finally {
+      setLoading(false);
+      setRan(true);
+    }
+  }
+
+  const filtered = repos.filter(
+    (r) =>
+      (visibility === "all" || (visibility === "private" ? r.private : !r.private)) &&
+      (!hideArchived || !r.archived) &&
+      (!hideForks || !r.fork)
+  );
 
   return (
     <div className="card p-6">
@@ -257,41 +393,53 @@ function RepoBrowser({ slug, orgId, canPrivate }: { slug: string; orgId: string 
         {!canPrivate && <span className="text-muted"> Private repos need the <code className="font-mono">repo</code> scope.</span>}
       </p>
 
-      <form className="mt-4 flex gap-2" onSubmit={(e) => { e.preventDefault(); setSubmitted(q.trim()); }}>
+      <form className="mt-4 flex gap-2" onSubmit={(e) => { e.preventDefault(); load(1, true); }}>
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search repositories…" className="field w-full pl-9" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search repositories… (blank lists recent)" className="field w-full pl-9" />
         </div>
         <button type="submit" className="btn btn-secondary">Search</button>
       </form>
 
-      <div className="mt-4 space-y-2">
-        {search.isLoading ? (
-          <div className="flex items-center gap-2 py-6 text-sm text-muted"><Loader2 className="h-4 w-4 animate-spin" /> Loading repositories…</div>
-        ) : search.isError ? (
-          <p className="py-6 text-sm text-muted">{errorMessage(search.error)}</p>
-        ) : !search.data?.length ? (
-          <p className="py-6 text-sm text-muted">No repositories found.</p>
-        ) : (
-          search.data.map((repo) => (
-            <div key={repo.full_name} className="flex items-center justify-between gap-3 rounded-xl border border-line p-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <a href={repo.html_url ?? "#"} target="_blank" rel="noopener noreferrer" className="truncate text-sm font-semibold text-ink hover:text-primary">
-                    {repo.full_name}
-                  </a>
-                  {repo.private && <Lock className="h-3 w-3 shrink-0 text-muted" />}
-                  {repo.language && <span className="shrink-0 text-xs text-muted">{repo.language}</span>}
-                  <span className="flex shrink-0 items-center gap-0.5 text-xs text-muted"><Star className="h-3 w-3" /> {repo.stars}</span>
-                </div>
-                {repo.description && <p className="mt-0.5 truncate text-xs text-body">{repo.description}</p>}
-              </div>
-              <button onClick={() => importRepo.mutate(repo)} disabled={importRepo.isPending} className="btn btn-secondary btn-sm shrink-0" title="Detect and import resources from this repo">
-                {importRepo.isPending && importRepo.variables?.full_name === repo.full_name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PackagePlus className="h-3.5 w-3.5" />}
-                Import
+      {/* filters */}
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+        <div className="inline-flex overflow-hidden rounded-lg border border-line">
+          {(["all", "public", "private"] as const).map((v) => {
+            const disabled = v === "private" && !canPrivate;
+            return (
+              <button
+                key={v}
+                onClick={() => !disabled && setVisibility(v)}
+                disabled={disabled}
+                title={disabled ? "Requires the read_private capability (repo scope)" : undefined}
+                className={`px-3 py-1 capitalize ${visibility === v ? "bg-primary text-white" : "text-body hover:bg-surface"} ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
+              >
+                {v}
               </button>
-            </div>
-          ))
+            );
+          })}
+        </div>
+        <label className="flex items-center gap-1.5 text-muted"><input type="checkbox" checked={hideArchived} onChange={(e) => setHideArchived(e.target.checked)} /> Hide archived</label>
+        <label className="flex items-center gap-1.5 text-muted"><input type="checkbox" checked={hideForks} onChange={(e) => setHideForks(e.target.checked)} /> Hide forks</label>
+      </div>
+
+      <div className="mt-4 space-y-2">
+        {loading && !repos.length ? (
+          <div className="flex items-center gap-2 py-6 text-sm text-muted"><Loader2 className="h-4 w-4 animate-spin" /> Loading repositories…</div>
+        ) : err ? (
+          <p className="py-6 text-sm text-muted">{err}</p>
+        ) : !ran ? (
+          <p className="py-6 text-sm text-muted">Search, or leave the box blank and press Search to list recent repositories.</p>
+        ) : !filtered.length ? (
+          <p className="py-6 text-sm text-muted">No repositories match.{repos.length ? " Adjust the filters above." : ""}</p>
+        ) : (
+          filtered.map((repo) => <RepoRow key={repo.full_name} repo={repo} slug={slug} orgId={orgId} />)
+        )}
+
+        {more && (
+          <button onClick={() => load(page + 1, false)} disabled={loading} className="btn btn-secondary btn-sm mt-2 w-full">
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null} Load more
+          </button>
         )}
       </div>
     </div>

@@ -465,8 +465,13 @@ export interface GithubRepo {
   fork: boolean;
   language: string | null;
   stars: number;
+  forks: number;
+  open_issues: number;
+  license: string | null;
+  homepage: string | null;
   topics: string[];
   html_url: string | null;
   default_branch: string;
+  pushed_at: string | null;
   updated_at: string | null;
 }

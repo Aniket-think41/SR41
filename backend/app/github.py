@@ -532,6 +532,10 @@ def validate_token(token: str) -> dict:
 
 def _repo_summary(r: dict) -> dict:
     owner = (r.get("owner") or {}).get("login") if isinstance(r.get("owner"), dict) else None
+    lic = r.get("license")
+    license_name = None
+    if isinstance(lic, dict):
+        license_name = lic.get("spdx_id") or lic.get("name")
     return {
         "full_name": r.get("full_name"),
         "name": r.get("name"),
@@ -542,9 +546,14 @@ def _repo_summary(r: dict) -> dict:
         "fork": bool(r.get("fork")),
         "language": r.get("language"),
         "stars": r.get("stargazers_count") or 0,
+        "forks": r.get("forks_count") or 0,
+        "open_issues": r.get("open_issues_count") or 0,
+        "license": license_name,
+        "homepage": r.get("homepage") or None,
         "topics": r.get("topics") or [],
         "html_url": r.get("html_url"),
         "default_branch": r.get("default_branch") or "main",
+        "pushed_at": r.get("pushed_at"),
         "updated_at": r.get("updated_at"),
     }
 
@@ -565,15 +574,17 @@ def list_repositories(token: str, account: str | None = None, per_page: int = 50
     return [_repo_summary(r) for r in rows]
 
 
-def search_repositories(query: str, token: str | None = None, account: str | None = None, per_page: int = 30) -> list[dict]:
+def search_repositories(query: str, token: str | None = None, account: str | None = None,
+                        per_page: int = 30, page: int = 1) -> list[dict]:
     """Search repositories via the GitHub search API. Scopes to ``account`` when
-    given (``user:acme`` / ``org:acme`` qualifier)."""
+    given (``user:acme`` / ``org:acme`` qualifier). ``page`` drives pagination."""
     per_page = max(1, min(per_page, 100))
+    page = max(1, page)
     q = (query or "").strip()
     if account and "user:" not in q and "org:" not in q:
         q = f"{q} user:{account}".strip()
     if not q:
         raise validation("A search query is required")
-    data = _get("/search/repositories", token, {"q": q, "per_page": per_page, "sort": "stars"})
+    data = _get("/search/repositories", token, {"q": q, "per_page": per_page, "page": page, "sort": "stars"})
     items = data.get("items", []) if isinstance(data, dict) else []
     return [_repo_summary(r) for r in items]
