@@ -10,6 +10,7 @@ const columns = [
     links: [
       { label: "Marketplace", href: "/" },
       { label: "How it works", href: "/how-it-works" },
+      { label: "GitHub integration", href: "/github-integration" },
       { label: "Why SkillShare", href: "/home" },
       { label: "Pricing", href: "/pricing" },
     ],

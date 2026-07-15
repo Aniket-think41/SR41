@@ -83,6 +83,13 @@ class Settings(BaseSettings):
     # --- licensing (BACKEND_SPEC §3.7) ---
     license_key_pattern: str = r"^T41-PREM-[A-Z0-9]{4,}$"
 
+    # --- integrations: at-rest credential encryption (app/crypto.py) ---
+    # url-safe base64 Fernet key. Empty → a stable key is derived from jwt_secret
+    # (fine for dev). Set an explicit key in prod so rotating jwt_secret doesn't
+    # strand encrypted GitHub tokens. Generate one with:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    integration_secret_key: str = ""
+
     # --- payments: Razorpay (spec §5) ---
     # Scaffolded now, activates when credentials are present. Empty → payments are
     # disabled gracefully (checkout returns a clear "not configured" error and the

@@ -82,22 +82,35 @@ class Fetcher(Protocol):
     def raw(self, ref: str, path: str) -> str | None: ...
 
 
-class HttpFetcher:
-    """Default fetcher backed by the public (unauthenticated) GitHub API + raw CDN."""
+def _auth_headers(token: str | None = None) -> dict:
+    headers = {
+        "User-Agent": "skillshare-registry",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
 
-    def __init__(self, owner: str, repo: str):
+
+class HttpFetcher:
+    """Fetcher backed by the GitHub API + raw CDN.
+
+    Unauthenticated by default (public repos, anonymous rate limits). Pass a
+    ``token`` (an org's connected GitHub PAT) to raise the rate limit and reach
+    private repositories — this is what the Integrations feature uses."""
+
+    def __init__(self, owner: str, repo: str, token: str | None = None):
         self.owner = owner
         self.repo = repo
+        self.token = token
 
     def _client(self):
         import httpx  # already a backend dependency (requirements.txt)
 
         return httpx.Client(
             timeout=15.0,
-            headers={
-                "User-Agent": "skillshare-registry",
-                "Accept": "application/vnd.github+json",
-            },
+            headers=_auth_headers(self.token),
             follow_redirects=True,
         )
 
@@ -129,6 +142,20 @@ class HttpFetcher:
         return [n["path"] for n in data.get("tree", []) if n.get("type") == "blob"]
 
     def raw(self, ref: str, path: str) -> str | None:
+        # With a token we go through the authenticated contents API (works for
+        # private repos too, which the raw CDN won't serve); otherwise the raw
+        # CDN is the cheapest path for public content.
+        if self.token:
+            import httpx
+
+            url = f"{GITHUB_API}/repos/{self.owner}/{self.repo}/contents/{path}"
+            with httpx.Client(
+                timeout=15.0,
+                headers={**_auth_headers(self.token), "Accept": "application/vnd.github.raw"},
+                follow_redirects=True,
+            ) as c:
+                r = c.get(url, params={"ref": ref})
+            return r.text if r.status_code == 200 else None
         with self._client() as c:
             r = c.get(f"{GITHUB_RAW}/{self.owner}/{self.repo}/{ref}/{path}")
         return r.text if r.status_code == 200 else None
@@ -436,12 +463,103 @@ def detect(ref: GitHubRef, fetcher: Fetcher) -> tuple[list[DetectedResource], di
     return found, meta
 
 
-def detect_from_url(url: str, fetcher_factory: Callable[[GitHubRef], Fetcher] | None = None):
+def detect_from_url(
+    url: str,
+    fetcher_factory: Callable[[GitHubRef], Fetcher] | None = None,
+    token: str | None = None,
+):
     """Convenience: parse the URL, build a fetcher, run detection.
 
     ``fetcher_factory`` is injectable for tests; defaults to the real HttpFetcher.
+    ``token`` (an org's connected GitHub PAT) enables private-repo access.
     """
     ref = parse_github_url(url)
-    factory = fetcher_factory or (lambda r: HttpFetcher(r.owner, r.repo))
+    factory = fetcher_factory or (lambda r: HttpFetcher(r.owner, r.repo, token=token))
     found, meta = detect(ref, factory(ref))
     return ref, found, meta
+
+
+# ----------------------------- authenticated account API -----------------------------
+# Used by the org GitHub integration (a stored, encrypted PAT). Kept here so all
+# GitHub REST access lives in one module. These raise `validation`/`not_found`
+# with actionable messages the router surfaces to the dashboard/CLI/MCP.
+
+
+def _get(path: str, token: str | None, params: dict | None = None) -> "object":
+    import httpx
+
+    with httpx.Client(timeout=15.0, headers=_auth_headers(token), follow_redirects=True) as c:
+        r = c.get(f"{GITHUB_API}{path}", params=params or {})
+    if r.status_code == 401:
+        raise validation("GitHub rejected the token (401) — check it hasn't expired or been revoked")
+    if r.status_code == 403:
+        raise validation("GitHub API access denied or rate limited (403)")
+    if r.status_code == 404:
+        raise not_found("GitHub resource")
+    if r.status_code >= 400:
+        raise validation(f"GitHub returned {r.status_code}")
+    return r.json()
+
+
+def validate_token(token: str) -> dict:
+    """Verify a PAT and return the authenticated account: {login, name, type}.
+    Raises ``validation`` if the token is bad."""
+    data = _get("/user", token)
+    if not isinstance(data, dict) or not data.get("login"):
+        raise validation("Could not read the GitHub account for that token")
+    return {
+        "login": data.get("login"),
+        "name": data.get("name") or data.get("login"),
+        "type": data.get("type") or "User",
+        "avatar_url": data.get("avatar_url"),
+        "html_url": data.get("html_url"),
+    }
+
+
+def _repo_summary(r: dict) -> dict:
+    owner = (r.get("owner") or {}).get("login") if isinstance(r.get("owner"), dict) else None
+    return {
+        "full_name": r.get("full_name"),
+        "name": r.get("name"),
+        "owner": owner,
+        "description": r.get("description") or "",
+        "private": bool(r.get("private")),
+        "archived": bool(r.get("archived")),
+        "fork": bool(r.get("fork")),
+        "language": r.get("language"),
+        "stars": r.get("stargazers_count") or 0,
+        "topics": r.get("topics") or [],
+        "html_url": r.get("html_url"),
+        "default_branch": r.get("default_branch") or "main",
+        "updated_at": r.get("updated_at"),
+    }
+
+
+def list_repositories(token: str, account: str | None = None, per_page: int = 50) -> list[dict]:
+    """List repositories the token can see. When ``account`` is given, list that
+    org/user's repos; otherwise the authenticated user's repos (most recent first)."""
+    per_page = max(1, min(per_page, 100))
+    if account:
+        # Try org endpoint first, fall back to user endpoint.
+        try:
+            data = _get(f"/orgs/{account}/repos", token, {"per_page": per_page, "sort": "updated"})
+        except Exception:
+            data = _get(f"/users/{account}/repos", token, {"per_page": per_page, "sort": "updated"})
+    else:
+        data = _get("/user/repos", token, {"per_page": per_page, "sort": "updated", "affiliation": "owner,organization_member"})
+    rows = data if isinstance(data, list) else []
+    return [_repo_summary(r) for r in rows]
+
+
+def search_repositories(query: str, token: str | None = None, account: str | None = None, per_page: int = 30) -> list[dict]:
+    """Search repositories via the GitHub search API. Scopes to ``account`` when
+    given (``user:acme`` / ``org:acme`` qualifier)."""
+    per_page = max(1, min(per_page, 100))
+    q = (query or "").strip()
+    if account and "user:" not in q and "org:" not in q:
+        q = f"{q} user:{account}".strip()
+    if not q:
+        raise validation("A search query is required")
+    data = _get("/search/repositories", token, {"q": q, "per_page": per_page, "sort": "stars"})
+    items = data.get("items", []) if isinstance(data, dict) else []
+    return [_repo_summary(r) for r in items]

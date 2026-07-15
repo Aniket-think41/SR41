@@ -100,6 +100,21 @@ export interface Db {
   payments: Payment[];
   /** per-org feature overrides (absent key → catalog default) */
   org_features: { id: string; org_id: string; key: string; enabled: boolean }[];
+  /** per-org integration connections (Integrations section). No secret token in
+   *  mock — only a masked hint + config, mirroring the client-safe wire shape. */
+  org_integrations: {
+    id: string;
+    org_id: string;
+    provider_key: string;
+    status: "connected" | "error" | "disconnected";
+    account_label: string | null;
+    token_hint: string | null;
+    config: Record<string, unknown>;
+    last_error: string | null;
+    connected_by: string;
+    created_at: string;
+    updated_at: string;
+  }[];
   /** CLI/MCP device-login sessions awaiting approval on /activate */
   device_auths: {
     id: string;
@@ -937,6 +952,7 @@ export function seed(): Db {
     feedback: structuredClone(seedFeedback),
     payments: [],
     org_features: [],
+    org_integrations: [],
     device_auths: [],
     // Mock mode only: start signed in as the demo user so the dashboard shows
     // data without a login round-trip. (When NEXT_PUBLIC_API_URL points at a

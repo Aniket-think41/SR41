@@ -14,6 +14,8 @@ import type {
   Contributions,
   Feedback,
   FeedbackInput,
+  GithubRepo,
+  IntegrationProvider,
   Invitation,
   Notification,
   OrgEntitlements,
@@ -205,6 +207,28 @@ export const api = {
    *  decision (spec §3). status = pending | approved | rejected. */
   orgReviewQueue: (slug: string, status: ApprovalFilter = "pending") =>
     request<Resource[]>("GET", `/api/orgs/${slug}/review-queue${qs({ status })}`),
+
+  /* ---- integrations (premium; org Integrations section) ---- */
+  /** Integration cards available to this org, each with its connection state. */
+  integrationProviders: (slug: string) =>
+    request<IntegrationProvider[]>("GET", `/api/orgs/${slug}/integrations/providers`),
+  /** One provider + this org's connection (config page). */
+  integration: (slug: string, provider: string) =>
+    request<IntegrationProvider>("GET", `/api/orgs/${slug}/integrations/${provider}`),
+  /** Connect a provider by supplying credentials (validated + encrypted server-side). */
+  connectIntegration: (slug: string, provider: string, body: { token: string; account?: string }) =>
+    request<IntegrationProvider>("POST", `/api/orgs/${slug}/integrations/${provider}/connect`, body),
+  /** Update a connection's non-secret settings (e.g. default sync mode). */
+  updateIntegrationConfig: (slug: string, provider: string, config: Record<string, unknown>) =>
+    request<IntegrationProvider>("PATCH", `/api/orgs/${slug}/integrations/${provider}`, { config }),
+  disconnectIntegration: (slug: string, provider: string) =>
+    request<{ ok: true }>("DELETE", `/api/orgs/${slug}/integrations/${provider}`),
+  /** List repositories visible to the connected GitHub account. */
+  githubIntegrationRepos: (slug: string, account?: string) =>
+    request<GithubRepo[]>("GET", `/api/orgs/${slug}/integrations/github/repos${qs({ account })}`),
+  /** Search GitHub repositories (scoped to the connected account by default). */
+  githubIntegrationSearch: (slug: string, q: string, account?: string) =>
+    request<GithubRepo[]>("GET", `/api/orgs/${slug}/integrations/github/search${qs({ q, account })}`),
 
   /* ---- projects ---- */
   projects: (slug: string) => request<Project[]>("GET", `/api/orgs/${slug}/projects`),

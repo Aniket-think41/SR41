@@ -905,6 +905,62 @@ def _primary_org_slug() -> str:
     return (admin or orgs[0]).get("slug", "")
 
 
+# ---- integrations (premium; org GitHub integration) ----
+
+def _org_for(args) -> str:
+    """Resolve the org for an integrations command: --org, else your primary org."""
+    slug = getattr(args, "org", None) or _primary_org_slug()
+    if not slug:
+        die("no org — pass --org <slug> (integrations require a Pro/Enterprise org)")
+    return slug
+
+
+def cmd_integrations(args) -> None:
+    """List the integrations available to an org and their connection status."""
+    slug = _org_for(args)
+    rows = request("GET", f"/api/orgs/{slug}/integrations/providers") or []
+    if not rows:
+        print(f"{DIM}no integrations available for {slug} (needs a Pro/Enterprise plan){RESET}")
+        return
+    for p in rows:
+        conn = p.get("connection") or {}
+        state = f"{BOLD}✓ connected{RESET}" if p.get("connected") else f"{DIM}not connected{RESET}"
+        acct = f" {DIM}({conn['account_label']}){RESET}" if conn.get("account_label") else ""
+        print(f"  {BOLD}{p['name']}{RESET}  {DIM}{p.get('category', '')}{RESET} — {state}{acct}")
+        if p.get("tagline"):
+            print(f"    {DIM}{p['tagline']}{RESET}")
+
+
+def _print_repos(rows: list[dict]) -> None:
+    if not rows:
+        print(f"{DIM}no repositories found{RESET}")
+        return
+    for r in rows:
+        vis = "🔒" if r.get("private") else "  "
+        lang = f" {DIM}{r['language']}{RESET}" if r.get("language") else ""
+        print(f"{vis} {BOLD}{r['full_name']}{RESET}  {DIM}★ {r.get('stars', 0)}{RESET}{lang}")
+        if r.get("description"):
+            print(f"    {r['description'][:100]}")
+
+
+def cmd_github_search(args) -> None:
+    """Search the org's connected GitHub for repositories."""
+    slug = _org_for(args)
+    params = {"q": args.query}
+    if args.account:
+        params["account"] = args.account
+    _print_repos(request("GET", f"/api/orgs/{slug}/integrations/github/search", params=params) or [])
+
+
+def cmd_github_repos(args) -> None:
+    """List repositories the org's connected GitHub account can see."""
+    slug = _org_for(args)
+    params = {}
+    if args.account:
+        params["account"] = args.account
+    _print_repos(request("GET", f"/api/orgs/{slug}/integrations/github/repos", params=params) or [])
+
+
 def cmd_watch(args) -> None:
     """Poll the inbox + local artifacts and pop a themed desktop card for each
     new item. Runs in the foreground; use --once for a cron/systemd timer."""
@@ -1378,6 +1434,21 @@ def main() -> None:
     sp.add_argument("--dry-run", action="store_true", help="just show what was detected; import nothing")
     sp.add_argument("--yes", action="store_true", help="import everything detected without prompting")
     sp.set_defaults(fn=cmd_github)
+
+    sp = sub.add_parser("integrations", help="list integrations available to an org and their status")
+    sp.add_argument("--org", help="org slug (default: your primary org)")
+    sp.set_defaults(fn=cmd_integrations)
+
+    sp = sub.add_parser("github-search", help="search your org's connected GitHub repositories")
+    sp.add_argument("query", help="search text")
+    sp.add_argument("--org", help="org slug (default: your primary org)")
+    sp.add_argument("--account", help="GitHub org/user to scope the search to")
+    sp.set_defaults(fn=cmd_github_search)
+
+    sp = sub.add_parser("github-repos", help="list repositories from your org's connected GitHub")
+    sp.add_argument("--org", help="org slug (default: your primary org)")
+    sp.add_argument("--account", help="GitHub org/user to scope to")
+    sp.set_defaults(fn=cmd_github_repos)
 
     sp = sub.add_parser("status", help="one-line status for an AI tool's status bar (install gap + local to-push)")
     _scan_flags(sp)

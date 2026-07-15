@@ -379,6 +379,66 @@ class OrgFeature(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
+class IntegrationProvider(Base):
+    """Registry of connectable third-party integrations (GitHub, and later
+    Slack, GitLab, …). This is the "table for the integration like GitHub and
+    its description" — it backs the card grid in the org Integrations section.
+
+    The source of truth is a code catalog (app/integrations.py::PROVIDER_CATALOG)
+    upserted into this table on boot, so the registry survives on prod without a
+    reseed while staying editable in code. Per-provider visibility is layered on
+    top of the org's ``integrations`` feature: ``min_plan`` sets the tier gate and
+    optional ``feature_flag`` names an extra OrgFeature key so different premium
+    orgs can see different apps (GitHub uses none → every premium org sees it)."""
+
+    __tablename__ = "integration_providers"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("intp"))
+    key: Mapped[str] = mapped_column(String, unique=True, index=True)  # "github"
+    name: Mapped[str] = mapped_column(String)                          # "GitHub"
+    tagline: Mapped[str] = mapped_column(String, default="")           # one-line card subtitle
+    description: Mapped[str] = mapped_column(Text, default="")         # long copy for the config page
+    category: Mapped[str] = mapped_column(String, default="")          # "Source Control"
+    icon: Mapped[str] = mapped_column(String, default="")              # frontend icon slug, e.g. "github"
+    docs_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    auth_type: Mapped[str] = mapped_column(String, default="pat")      # pat | oauth | app
+    min_plan: Mapped[str] = mapped_column(String, default="PRO")       # tier gate (on top of the integrations flag)
+    # Optional extra gate: an OrgFeature key that must be enabled for this
+    # provider to appear. NULL → visible to any org that has integrations.
+    feature_flag: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="available")   # available | beta | coming_soon
+    sort_order: Mapped[int] = mapped_column(Integer, default=100)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)       # global kill switch
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class OrgIntegration(Base):
+    """A per-org connection to an IntegrationProvider. Holds the encrypted
+    credentials (Fernet, app/crypto.py) — never returned to a client — plus
+    non-secret account/config data that is safe to display. One connection per
+    (org, provider); managing it requires org admin."""
+
+    __tablename__ = "org_integrations"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("oint"))
+    org_id: Mapped[str] = mapped_column(String, ForeignKey("organizations.id"), index=True)
+    provider_key: Mapped[str] = mapped_column(String, index=True)  # → IntegrationProvider.key
+    status: Mapped[str] = mapped_column(String, default="connected")  # connected | error | disconnected
+    # Fernet ciphertext of a JSON credential blob (e.g. {"token": "…"}). NEVER
+    # serialized to a client; decrypted only server-side when calling the provider.
+    credentials_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Non-secret display info: the connected account login, a masked token hint.
+    account_label: Mapped[str | None] = mapped_column(String, nullable=True)  # e.g. GitHub org/user "acme"
+    token_hint: Mapped[str | None] = mapped_column(String, nullable=True)     # last 4 chars, for display
+    # Non-secret settings (default sync mode, selected repos, …).
+    config: Mapped[dict] = mapped_column(JSON, default=dict)
+    last_error: Mapped[str | None] = mapped_column(String, nullable=True)
+    connected_by: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
 class License(Base):
     __tablename__ = "licenses"
 

@@ -89,7 +89,15 @@ mcp = FastMCP(
         "skill/MCP that lives on GitHub), call import_from_github(url, "
         "dry_run=True) to detect what's inside (SKILL.md skills, server.json / "
         ".mcp.json MCP servers, or a README note), show them the detected items, "
-        "then call it again with a scope (org_slug or pod_id) to import."
+        "then call it again with a scope (org_slug or pod_id) to import.\n\n"
+        "GITHUB INTEGRATION (premium) — an org on a Pro/Enterprise plan can connect "
+        "its GitHub in the dashboard Integrations section. Once connected, use "
+        "search_github(query) / list_github_repos() to search or list the org's "
+        "repositories (private ones included) via its stored credentials, and "
+        "list_org_integrations() to see what's connected. When the user wants "
+        "resources from a repo you found this way, pass its html_url to "
+        "import_from_github. If a call says GitHub isn't connected, point them to "
+        "the dashboard Integrations page to connect it first."
     ),
 )
 
@@ -1219,6 +1227,59 @@ def import_from_github(
         "skipped": result.get("skipped", []),
         "repo": result.get("repo", {}),
     }
+
+
+def _primary_org_slug() -> str:
+    try:
+        orgs = _request("GET", "/api/orgs") or []
+    except SkillShareError:
+        return ""
+    if not orgs:
+        return ""
+    admin = next((o for o in orgs if str(o.get("role", "")).upper() == "ADMIN"), None)
+    return (admin or orgs[0]).get("slug", "")
+
+
+def _org_slug(org_slug: str) -> str:
+    slug = org_slug or _primary_org_slug()
+    if not slug:
+        raise SkillShareError("No org — pass org_slug (integrations require a Pro/Enterprise org).")
+    return slug
+
+
+@mcp.tool()
+def list_org_integrations(org_slug: str = "") -> list[dict]:
+    """List the integrations available to an organization and whether each is
+    connected (GitHub, …). Premium feature (a Pro/Enterprise org). Omit org_slug
+    to use your primary org."""
+    return _request("GET", f"/api/orgs/{_org_slug(org_slug)}/integrations/providers")
+
+
+@mcp.tool()
+def search_github(query: str, org_slug: str = "", account: str = "") -> list[dict]:
+    """Search the organization's CONNECTED GitHub for repositories, using the
+    org's stored GitHub credentials (so private repos are included).
+
+    Returns repo summaries: {full_name, description, private, stars, language,
+    topics, html_url}. GitHub must be connected first in the dashboard
+    Integrations section. Omit org_slug to use your primary org; `account` scopes
+    the search to a GitHub org/user. To turn a result into SkillShare resources,
+    pass its html_url to import_from_github."""
+    params = {"q": query}
+    if account:
+        params["account"] = account
+    return _request("GET", f"/api/orgs/{_org_slug(org_slug)}/integrations/github/search", params=params)
+
+
+@mcp.tool()
+def list_github_repos(org_slug: str = "", account: str = "") -> list[dict]:
+    """List repositories the org's connected GitHub account can see (most recent
+    first). Omit org_slug to use your primary org; `account` lists a specific
+    GitHub org/user's repos. Pair with import_from_github to create resources."""
+    params = {}
+    if account:
+        params["account"] = account
+    return _request("GET", f"/api/orgs/{_org_slug(org_slug)}/integrations/github/repos", params=params)
 
 
 @mcp.tool()

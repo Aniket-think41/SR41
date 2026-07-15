@@ -57,6 +57,13 @@ CATALOG: list[dict] = [
         "min_plan": PRO,
         "default_enabled": True,
     },
+    {
+        "key": "integrations",
+        "name": "Integrations",
+        "description": "Connect external tools like GitHub to discover, sync, and manage resources straight from your repositories.",
+        "min_plan": PRO,
+        "default_enabled": True,
+    },
 ]
 
 

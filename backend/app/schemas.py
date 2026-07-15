@@ -237,6 +237,26 @@ class GithubImportIn(BaseModel):
     select: list[str] = []
 
 
+# ---- Integrations (org Integrations section) ----
+
+
+class IntegrationConnectIn(BaseModel):
+    """Connect a provider by supplying credentials. For GitHub (auth_type=pat)
+    this is a fine-grained/classic Personal Access Token; ``account`` optionally
+    pins the org/user login the connection is scoped to. The token is validated
+    against the provider, then encrypted at rest — it is never returned."""
+
+    token: str = Field(min_length=10, max_length=500)
+    account: str | None = Field(default=None, max_length=120)
+
+
+class IntegrationConfigPatch(BaseModel):
+    """Update the non-secret settings of a connection (e.g. default sync mode,
+    selected repositories). Never carries credentials."""
+
+    config: dict
+
+
 # ---- Device-authorization login (CLI / MCP browser login) ----
 
 

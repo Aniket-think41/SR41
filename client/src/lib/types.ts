@@ -385,3 +385,52 @@ export interface Notification {
   deep_link?: string | null;
   install_command?: string | null;
 }
+
+/* ---- Integrations (org Integrations section) ---- */
+
+/** A per-org connection to a provider. Never carries the secret token — only a
+ *  masked hint (last 4 chars) and non-secret config. */
+export interface IntegrationConnection {
+  id: string;
+  provider_key: string;
+  status: "connected" | "error" | "disconnected";
+  account_label: string | null;
+  token_hint: string | null;
+  config: Record<string, unknown>;
+  last_error: string | null;
+  connected_by: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+/** A connectable integration (GitHub, …) annotated with this org's connection. */
+export interface IntegrationProvider {
+  key: string;
+  name: string;
+  tagline: string;
+  description: string;
+  category: string;
+  icon: string;
+  docs_url: string | null;
+  auth_type: "pat" | "oauth" | "app";
+  status: "available" | "beta" | "coming_soon";
+  connected: boolean;
+  connection: IntegrationConnection | null;
+}
+
+/** A repository summary returned by the GitHub integration search/list. */
+export interface GithubRepo {
+  full_name: string;
+  name: string;
+  owner: string | null;
+  description: string;
+  private: boolean;
+  archived: boolean;
+  fork: boolean;
+  language: string | null;
+  stars: number;
+  topics: string[];
+  html_url: string | null;
+  default_branch: string;
+  updated_at: string | null;
+}

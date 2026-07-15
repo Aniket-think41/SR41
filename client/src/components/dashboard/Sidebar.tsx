@@ -6,7 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   LayoutDashboard, FolderKanban, Library, Users, Settings,
   Store, LogOut, PanelLeftClose, PanelLeftOpen, UserCircle,
-  CreditCard, ShieldCheck, MessagesSquare,
+  CreditCard, ShieldCheck, MessagesSquare, Plug,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useFeature, useSession, useTerms } from "@/lib/hooks";
@@ -25,6 +25,7 @@ type NavItem = { label: string; href: string; icon: typeof LayoutDashboard; exac
 function useNav(): NavItem[] {
   const terms = useTerms();
   const marketplace = useFeature("marketplace");
+  const integrations = useFeature("integrations");
   const { workspace } = useUi();
   const { data: user } = useSession();
 
@@ -52,6 +53,9 @@ function useNav(): NavItem[] {
     { label: "Org Resources", href: "/dashboard/org/resources", icon: Library },
     ...(marketplace.enabled
       ? [{ label: "Marketplace", href: "/dashboard/marketplace", icon: Store }]
+      : []),
+    ...(integrations.enabled
+      ? [{ label: "Integrations", href: "/dashboard/org/integrations", icon: Plug }]
       : []),
     { label: "Members", href: "/dashboard/members", icon: Users },
     { label: "Settings", href: "/dashboard/org/settings", icon: Settings },

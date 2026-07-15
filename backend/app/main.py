@@ -29,6 +29,7 @@ from .routers import (
     auth,
     billing,
     feedback,
+    integrations,
     local_state,
     members,
     notifications,
@@ -201,6 +202,26 @@ def _backfill_plans_once() -> None:
 _backfill_plans_once()
 
 
+def _sync_integration_providers_once() -> None:
+    """Upsert the integration provider registry (GitHub, …) from the code
+    catalog into the DB on boot, so the Integrations cards exist on prod without
+    a reseed. Idempotent."""
+    log = logging.getLogger("app.integrations")
+    from .database import SessionLocal
+    from .integrations import sync_providers
+
+    db = SessionLocal()
+    try:
+        sync_providers(db)
+    except Exception:
+        log.exception("Integration provider sync failed")
+    finally:
+        db.close()
+
+
+_sync_integration_providers_once()
+
+
 def _bootstrap_admin() -> None:
     """On production startup, create or promote an admin user from env vars.
     This is the bootstrap path for deployments that don't run the seed script."""
@@ -264,6 +285,7 @@ app.include_router(notifications.router)
 app.include_router(local_state.router)
 app.include_router(feedback.router)
 app.include_router(billing.router)
+app.include_router(integrations.router)
 app.include_router(admin.router)
 
 # Super-admin dashboard (SQLAdmin) at /admin — internal ops console, gated on

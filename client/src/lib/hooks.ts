@@ -19,6 +19,8 @@ export const qk = {
   orgEntitlements: (slug: string) => ["org", slug, "entitlements"] as const,
   orgReviewQueue: (slug: string, status: ApprovalFilter) => ["org", slug, "review-queue", status] as const,
   features: (slug: string) => ["org", slug, "features"] as const,
+  integrationProviders: (slug: string) => ["org", slug, "integrations"] as const,
+  integration: (slug: string, key: string) => ["org", slug, "integration", key] as const,
   orgMembers: (slug: string) => ["org", slug, "members"] as const,
   invitations: (slug: string) => ["org", slug, "invitations"] as const,
   orgActivity: (slug: string) => ["org", slug, "activity"] as const,
@@ -121,6 +123,29 @@ export function useFeatures() {
     queryKey: qk.features(org?.slug ?? ""),
     queryFn: () => api.orgFeatures(org!.slug),
     enabled: !!org,
+    staleTime: 30_000,
+  });
+}
+
+/** Integration cards available to the current org (Integrations section). */
+export function useIntegrationProviders() {
+  const { org } = useCurrentOrg();
+  const { enabled } = useFeature("integrations");
+  return useQuery({
+    queryKey: qk.integrationProviders(org?.slug ?? ""),
+    queryFn: () => api.integrationProviders(org!.slug),
+    enabled: !!org && enabled,
+    staleTime: 30_000,
+  });
+}
+
+/** One provider + this org's connection state (config page). */
+export function useIntegration(providerKey: string) {
+  const { org } = useCurrentOrg();
+  return useQuery({
+    queryKey: qk.integration(org?.slug ?? "", providerKey),
+    queryFn: () => api.integration(org!.slug, providerKey),
+    enabled: !!org && !!providerKey,
     staleTime: 30_000,
   });
 }

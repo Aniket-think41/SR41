@@ -279,6 +279,126 @@ function featureEnabled(db: Db, orgId: string | null, key: string): boolean {
   return resolveFeatures(db, orgId).find((f) => f.key === key)?.enabled ?? true;
 }
 
+/* ---- integrations registry (mirrors backend/app/integrations.py) ---- */
+
+const INTEGRATION_PROVIDERS = [
+  {
+    key: "github",
+    name: "GitHub",
+    tagline: "Turn your repositories into a living catalog of skills, MCP servers, and notes.",
+    description:
+      "Connect your organization's GitHub and SkillShare discovers resources from your repositories " +
+      "automatically, keeps them in sync, and lets your team manage everything from Git. Import public " +
+      "repos, keep private ones in sync, attach repos to resources, and search them straight from the CLI and MCP.",
+    category: "Source Control",
+    icon: "github",
+    docs_url: "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens",
+    auth_type: "pat" as const,
+    min_plan: "PRO",
+    feature_flag: null as string | null,
+    status: "available" as const,
+    sort_order: 10,
+    enabled: true,
+  },
+];
+
+type MockProvider = (typeof INTEGRATION_PROVIDERS)[number];
+type MockConn = Db["org_integrations"][number];
+
+function providerAvailable(db: Db, orgId: string, provider: MockProvider): boolean {
+  const org = db.organizations.find((o) => o.id === orgId);
+  if (!provider.enabled || !org) return false;
+  if (!featureEnabled(db, orgId, "integrations")) return false;
+  if (!planAtLeast(org.plan, provider.min_plan)) return false;
+  if (provider.feature_flag && !featureEnabled(db, orgId, provider.feature_flag)) return false;
+  return true;
+}
+
+function orgConnection(db: Db, orgId: string, key: string): MockConn | undefined {
+  return db.org_integrations.find((c) => c.org_id === orgId && c.provider_key === key);
+}
+
+function connectionOut(conn: MockConn | undefined) {
+  if (!conn) return null;
+  return {
+    id: conn.id,
+    provider_key: conn.provider_key,
+    status: conn.status,
+    account_label: conn.account_label,
+    token_hint: conn.token_hint,
+    config: conn.config ?? {},
+    last_error: conn.last_error,
+    connected_by: conn.connected_by,
+    created_at: conn.created_at,
+    updated_at: conn.updated_at,
+  };
+}
+
+function providerOut(provider: MockProvider, conn: MockConn | undefined) {
+  return {
+    key: provider.key,
+    name: provider.name,
+    tagline: provider.tagline,
+    description: provider.description,
+    category: provider.category,
+    icon: provider.icon,
+    docs_url: provider.docs_url,
+    auth_type: provider.auth_type,
+    status: provider.status,
+    connected: !!conn && conn.status === "connected",
+    connection: connectionOut(conn),
+  };
+}
+
+/** Guard: org member (or admin) + the integrations feature must be on. */
+function requireIntegrations(db: Db, slug: string, admin: boolean) {
+  const org = orgBySlug(db, slug);
+  const me = currentUser(db);
+  const m = db.org_members.find((x) => x.org_id === org.id && x.user_id === me.id);
+  if (!m) throw new HttpError(403, "FORBIDDEN", "You are not a member of this organization");
+  if (admin && m.role !== "ADMIN")
+    throw new HttpError(403, "FORBIDDEN", "Only org admins can do this");
+  if (!featureEnabled(db, org.id, "integrations"))
+    throw new HttpError(403, "FORBIDDEN", "Integrations are a premium feature — upgrade this organization to Pro");
+  return { org, me };
+}
+
+function requireAvailableProvider(db: Db, orgId: string, key: string): MockProvider {
+  const provider = INTEGRATION_PROVIDERS.find((p) => p.key === key);
+  if (!provider || !providerAvailable(db, orgId, provider)) throw notFound(`Integration "${key}"`);
+  return provider;
+}
+
+/** Deterministic fake repos so the GitHub search/list feel real in mock mode. */
+function mockRepos(account: string, q: string): unknown[] {
+  const owner = account || "acme";
+  const base = [
+    { name: "awesome-mcp-server", description: "A streamable MCP server for vector search.", language: "Python", stars: 342, topics: ["mcp", "ai"], private: false },
+    { name: "skillshare-cli", description: "Command-line client and skill bundle.", language: "Python", stars: 88, topics: ["cli", "skill"], private: false },
+    { name: "terraform-gcp", description: "Reusable GCP infrastructure templates.", language: "HCL", stars: 51, topics: ["template", "gcp"], private: false },
+    { name: "backend-auth-service", description: "Internal auth microservice.", language: "Go", stars: 12, topics: ["service"], private: true },
+    { name: "prompt-library", description: "Curated prompt collection for support agents.", language: "Markdown", stars: 27, topics: ["prompts"], private: true },
+  ];
+  const needle = q.toLowerCase().trim();
+  return base
+    .filter((r) => !needle || r.name.includes(needle) || r.description.toLowerCase().includes(needle) || r.topics.some((t) => t.includes(needle)))
+    .map((r) => ({
+      full_name: `${owner}/${r.name}`,
+      name: r.name,
+      owner,
+      description: r.description,
+      private: r.private,
+      archived: false,
+      fork: false,
+      language: r.language,
+      stars: r.stars,
+      topics: r.topics,
+      html_url: `https://github.com/${owner}/${r.name}`,
+      default_branch: "main",
+      updated_at: now(),
+    }));
+}
+
 /* ---- membership: normalize / provision / cascade (mirrors permissions.py) ---- */
 
 const ADMIN_ALIASES = ["ADMIN", "OWNER", "LEAD"];
@@ -704,6 +824,89 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     org.plan = "PREMIUM";
     saveDb();
     return { plan: org.plan, features: resolveFeatures(db, org.id), entitlements: orgEntitlements(db, org) };
+  }],
+
+  /* ---- integrations (org Integrations section) ----
+   * Route order matters: literal /providers and /github/* before the dynamic
+   * /:provider_key so they aren't captured as a provider key. */
+  ["GET", "/api/orgs/:slug/integrations/providers", (p, _b, _q, db) => {
+    const { org } = requireIntegrations(db, p.slug, false);
+    return INTEGRATION_PROVIDERS
+      .filter((prov) => providerAvailable(db, org.id, prov))
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((prov) => providerOut(prov, orgConnection(db, org.id, prov.key)));
+  }],
+
+  ["GET", "/api/orgs/:slug/integrations/github/repos", (p, _b, q, db) => {
+    const { org } = requireIntegrations(db, p.slug, false);
+    requireAvailableProvider(db, org.id, "github");
+    const conn = orgConnection(db, org.id, "github");
+    if (!conn || conn.status !== "connected") throw new HttpError(422, "VALIDATION_ERROR", "Connect GitHub first");
+    return mockRepos(q.get("account") || conn.account_label || "", "");
+  }],
+
+  ["GET", "/api/orgs/:slug/integrations/github/search", (p, _b, q, db) => {
+    const { org } = requireIntegrations(db, p.slug, false);
+    requireAvailableProvider(db, org.id, "github");
+    const conn = orgConnection(db, org.id, "github");
+    if (!conn || conn.status !== "connected") throw new HttpError(422, "VALIDATION_ERROR", "Connect GitHub first");
+    return mockRepos(q.get("account") || conn.account_label || "", q.get("q") || "");
+  }],
+
+  ["GET", "/api/orgs/:slug/integrations", (p, _b, _q, db) => {
+    const { org } = requireIntegrations(db, p.slug, false);
+    return db.org_integrations.filter((c) => c.org_id === org.id).map((c) => connectionOut(c));
+  }],
+
+  ["GET", "/api/orgs/:slug/integrations/:provider", (p, _b, _q, db) => {
+    const { org } = requireIntegrations(db, p.slug, false);
+    const provider = requireAvailableProvider(db, org.id, p.provider);
+    return providerOut(provider, orgConnection(db, org.id, p.provider));
+  }],
+
+  ["POST", "/api/orgs/:slug/integrations/:provider/connect", (p, body, _q, db) => {
+    const { org, me } = requireIntegrations(db, p.slug, true);
+    const provider = requireAvailableProvider(db, org.id, p.provider);
+    const token = String(body.token ?? "").trim();
+    if (token.length < 10) throw new HttpError(422, "VALIDATION_ERROR", "That doesn't look like a valid token");
+    // Mock: accept any token; the account is what the admin typed, else "acme".
+    const account = String(body.account ?? "").trim() || "acme";
+    let conn = orgConnection(db, org.id, p.provider);
+    if (!conn) {
+      conn = {
+        id: uid("oint"), org_id: org.id, provider_key: p.provider, status: "connected",
+        account_label: account, token_hint: token.slice(-4), config: {}, last_error: null,
+        connected_by: me.id, created_at: now(), updated_at: now(),
+      };
+      db.org_integrations.push(conn);
+    } else {
+      conn.status = "connected";
+      conn.account_label = account;
+      conn.token_hint = token.slice(-4);
+      conn.last_error = null;
+      conn.updated_at = now();
+    }
+    saveDb();
+    return providerOut(provider, conn);
+  }],
+
+  ["PATCH", "/api/orgs/:slug/integrations/:provider", (p, body, _q, db) => {
+    const { org } = requireIntegrations(db, p.slug, true);
+    const provider = requireAvailableProvider(db, org.id, p.provider);
+    const conn = orgConnection(db, org.id, p.provider);
+    if (!conn) throw notFound(`${provider.name} connection`);
+    conn.config = { ...(conn.config ?? {}), ...((body.config as Record<string, unknown>) ?? {}) };
+    conn.updated_at = now();
+    saveDb();
+    return providerOut(provider, conn);
+  }],
+
+  ["DELETE", "/api/orgs/:slug/integrations/:provider", (p, _b, _q, db) => {
+    const { org } = requireIntegrations(db, p.slug, true);
+    const idx = db.org_integrations.findIndex((c) => c.org_id === org.id && c.provider_key === p.provider);
+    if (idx >= 0) db.org_integrations.splice(idx, 1);
+    saveDb();
+    return { ok: true };
   }],
 
   ["GET", "/api/orgs/:slug/members", (p, _b, _q, db) => {
