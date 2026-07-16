@@ -383,7 +383,7 @@ function VisibilityMoveControl({ resource: r }: { resource: Resource }) {
               value={r.visibility ?? r.scope_type}
               onChange={(e) => visMut.mutate(e.target.value)}
               disabled={visMut.isPending}
-              className="rounded-full border border-line bg-white px-3 py-1 text-xs font-bold text-ink"
+              className="rounded-full border border-line bg-card px-3 py-1 text-xs font-bold text-ink"
             >
               {visOptions.map((v) => (
                 <option key={v} value={v}>{VISIBILITY_LABEL[v]}</option>
@@ -462,7 +462,7 @@ export function ResourceDrawer() {
       aria-modal
     >
       <div
-        className="drawer-panel absolute inset-y-0 right-0 flex w-full max-w-xl flex-col bg-white shadow-[-24px_0_64px_-24px_rgba(10,8,64,0.4)]"
+        className="drawer-panel absolute inset-y-0 right-0 flex w-full max-w-xl flex-col bg-card shadow-[-24px_0_64px_-24px_rgba(10,8,64,0.4)]"
         onClick={(e) => e.stopPropagation()}
       >
         {drawer.mode === "detail" && drawer.resource ? (

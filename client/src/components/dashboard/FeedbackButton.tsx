@@ -67,7 +67,7 @@ export function FeedbackButton() {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="hidden items-center gap-2 rounded-full border border-line bg-white px-3.5 py-1.5 text-sm font-semibold text-muted transition hover:border-primary hover:text-primary sm:flex"
+        className="hidden items-center gap-2 rounded-full border border-line bg-card px-3.5 py-1.5 text-sm font-semibold text-muted transition hover:border-primary hover:text-primary sm:flex"
       >
         <MessageSquarePlus className="h-3.5 w-3.5" />
         Feedback
@@ -75,11 +75,11 @@ export function FeedbackButton() {
 
       {open && typeof document !== "undefined" && createPortal(
         <div
-          className="fixed inset-0 z-[80] flex items-start justify-center bg-ink/30 px-4 pt-[12vh] backdrop-blur-sm"
+          className="fixed inset-0 z-[80] flex items-start justify-center bg-black/50 px-4 pt-[12vh] backdrop-blur-sm"
           onMouseDown={() => setOpen(false)}
         >
           <div
-            className="pop w-[min(30rem,100%)] overflow-hidden rounded-3xl border border-line bg-white shadow-[0_32px_80px_-24px_rgba(10,8,64,0.45)]"
+            className="pop w-[min(30rem,100%)] overflow-hidden rounded-3xl border border-line bg-card shadow-[0_32px_80px_-24px_rgba(10,8,64,0.45)]"
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between border-b border-line px-6 py-5">
@@ -152,7 +152,7 @@ export function FeedbackButton() {
                   rows={4}
                   autoFocus
                   placeholder="Share an idea, report a bug, or tell us what you love…"
-                  className="w-full resize-none rounded-2xl border border-line bg-surface px-4 py-3 text-sm text-ink outline-none transition placeholder:text-muted focus:border-primary focus:bg-white"
+                  className="w-full resize-none rounded-2xl border border-line bg-surface px-4 py-3 text-sm text-ink outline-none transition placeholder:text-muted focus:border-primary focus:bg-card"
                 />
               </div>
             </div>

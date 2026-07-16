@@ -56,7 +56,7 @@ function MetaItem({ label, value, full, mono }: { label: string; value: string; 
     <div className="group/meta relative min-w-0">
       <dt className="text-[0.65rem] font-semibold uppercase tracking-wide text-muted">{label}</dt>
       <dd className={`truncate text-ink ${mono ? "font-mono" : ""}`} title={tip}>{value}</dd>
-      <span className="pointer-events-none absolute bottom-full left-0 z-20 mb-1 hidden max-w-[16rem] whitespace-normal break-words rounded-lg bg-ink px-2 py-1 text-[0.7rem] font-normal normal-case text-white shadow-lg group-hover/meta:block">
+      <span className="pointer-events-none absolute bottom-full left-0 z-20 mb-1 hidden max-w-[16rem] whitespace-normal break-words rounded-lg bg-ink px-2 py-1 text-[0.7rem] font-normal normal-case text-[var(--color-bg)] shadow-lg group-hover/meta:block">
         {tip}
       </span>
     </div>

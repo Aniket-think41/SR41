@@ -43,9 +43,9 @@ export default function HowItWorks() {
             <div className="grid md:grid-cols-4">
               {[
                 { k: "Org", d: "Root scope. The skills everyone shares.", c: "bg-primary text-white", t: "text-white", b: "text-white/75" },
-                { k: "Project", d: "Groups related pods.", c: "bg-white", t: "", b: "text-body" },
-                { k: "Pod", d: "A team. Inherits all of the above.", c: "bg-white", t: "", b: "text-body" },
-                { k: "Resources", d: "Skills · MCP · notes, in scope.", c: "bg-white", t: "", b: "text-body" },
+                { k: "Project", d: "Groups related pods.", c: "bg-card", t: "", b: "text-body" },
+                { k: "Pod", d: "A team. Inherits all of the above.", c: "bg-card", t: "", b: "text-body" },
+                { k: "Resources", d: "Skills · MCP · notes, in scope.", c: "bg-card", t: "", b: "text-body" },
               ].map((col, i) => (
                 <div
                   key={col.k}

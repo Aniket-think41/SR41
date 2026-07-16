@@ -61,7 +61,7 @@ export function ResourceCard({
             e.stopPropagation();
             onToggleStar(r);
           }}
-          className={`absolute right-4 top-4 z-10 flex h-8 w-8 items-center justify-center rounded-full border bg-white transition ${
+          className={`absolute right-4 top-4 z-10 flex h-8 w-8 items-center justify-center rounded-full border bg-card transition ${
             r.starred_by_me
               ? "border-primary text-primary"
               : "border-line text-muted opacity-0 hover:border-primary hover:text-primary group-hover:opacity-100"

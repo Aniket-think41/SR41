@@ -55,7 +55,7 @@ export default function JoinPage() {
   }, [slug, token, router]);
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-white px-4">
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-card px-4">
       <div className="w-full max-w-md text-center">
         <Logo className="mx-auto h-12 w-12" />
         <h1 className="mt-4 font-display text-2xl font-semibold">Accepting invitation</h1>

@@ -25,7 +25,7 @@ export function Nav() {
   return (
     <header
       className={`sticky top-0 z-50 transition-all duration-300 ${
-        scrolled ? "bg-white/85 shadow-[0_4px_24px_-12px_rgba(20,20,19,0.18)] backdrop-blur-xl" : "bg-white"
+        scrolled ? "bg-card/85 shadow-[0_4px_24px_-12px_rgba(20,20,19,0.18)] backdrop-blur-xl" : "bg-card"
       }`}
     >
       <div className="shell flex h-20 items-center justify-between">

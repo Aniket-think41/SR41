@@ -296,7 +296,7 @@ export function ResourceForm({
               onClick={() => setGithubMode(true)}
               className="card flex w-full items-start gap-4 p-5 text-left transition hover:!border-primary/40"
             >
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-ink text-lg text-white" aria-hidden>
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary text-lg text-white" aria-hidden>
                 <Github className="h-5 w-5" />
               </span>
               <span>

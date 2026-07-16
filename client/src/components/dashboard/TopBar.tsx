@@ -77,7 +77,7 @@ export function TopBar() {
 
   return (
     <header
-      className={`fixed right-0 top-0 z-30 flex h-[var(--topbar-h)] items-center justify-between gap-4 border-b border-line bg-white/85 px-4 backdrop-blur-xl transition-[left] duration-300 md:px-6 left-0 ${
+      className={`fixed right-0 top-0 z-30 flex h-[var(--topbar-h)] items-center justify-between gap-4 border-b border-line bg-card/85 px-4 backdrop-blur-xl transition-[left] duration-300 md:px-6 left-0 ${
         sidebarCollapsed ? "md:left-[var(--sidebar-w-collapsed)]" : "md:left-[var(--sidebar-w)]"
       }`}
     >

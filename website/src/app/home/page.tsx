@@ -53,7 +53,7 @@ export default async function WhySkillShare() {
         <div className="blob right-0 top-20 h-[22rem] w-[22rem]" style={{ background: "rgba(209,255,0,0.25)" }} />
         <div className="shell relative grid gap-14 py-16 md:grid-cols-[1.05fr_0.95fr] md:items-center md:py-24">
           <div>
-            <div className="reveal inline-flex items-center gap-2 rounded-full border border-line bg-white px-3.5 py-1.5 shadow-sm">
+            <div className="reveal inline-flex items-center gap-2 rounded-full border border-line bg-card px-3.5 py-1.5 shadow-sm">
               <span className="h-2 w-2 rounded-full bg-primary" />
               <span className="text-xs font-bold uppercase tracking-wider text-body">Skill & MCP registry · by Think41</span>
             </div>

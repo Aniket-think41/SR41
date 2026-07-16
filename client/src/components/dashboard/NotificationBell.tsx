@@ -72,7 +72,7 @@ export function NotificationBell() {
       </button>
 
       {open && (
-        <div className="drawer-panel absolute right-0 top-11 z-50 w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-line bg-white shadow-[0_24px_64px_-24px_rgba(10,8,64,0.4)]">
+        <div className="drawer-panel absolute right-0 top-11 z-50 w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-line bg-card shadow-[0_24px_64px_-24px_rgba(10,8,64,0.4)]">
           <div className="flex items-center justify-between border-b border-line px-4 py-3">
             <h3 className="font-display text-sm font-bold">Notifications</h3>
             {count > 0 && (

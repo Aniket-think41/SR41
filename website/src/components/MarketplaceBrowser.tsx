@@ -135,7 +135,7 @@ export function MarketplaceBrowser({
               className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
                 filter === f.key
                   ? "bg-primary text-white shadow-[0_8px_20px_-8px_rgba(115,90,229,0.6)]"
-                  : "bg-white text-body hover:text-primary"
+                  : "bg-card text-body hover:text-primary"
               }`}
             >
               {f.label}
@@ -144,7 +144,7 @@ export function MarketplaceBrowser({
         </div>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <label className="flex items-center gap-2 rounded-full border border-line bg-white px-4 py-2">
+          <label className="flex items-center gap-2 rounded-full border border-line bg-card px-4 py-2">
             <span aria-hidden className="text-muted">⌕</span>
             <input
               value={q}
@@ -156,7 +156,7 @@ export function MarketplaceBrowser({
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value as Sort)}
-            className="rounded-full border border-line bg-white px-4 py-2.5 text-sm font-medium text-ink"
+            className="rounded-full border border-line bg-card px-4 py-2.5 text-sm font-medium text-ink"
           >
             {SORTS.map((s) => (
               <option key={s.key} value={s.key}>{s.label}</option>

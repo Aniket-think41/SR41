@@ -83,7 +83,7 @@ export default function OrgSettingsPage() {
                   onClick={() => logoInput.current?.click()}
                   disabled={logoMut.isPending}
                   title="Upload a logo"
-                  className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full bg-ink text-white shadow ring-2 ring-white transition hover:bg-primary disabled:opacity-60"
+                  className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full bg-primary text-white shadow ring-2 ring-card transition hover:bg-primary disabled:opacity-60"
                 >
                   {logoMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
                 </button>

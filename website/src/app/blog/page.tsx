@@ -117,7 +117,7 @@ export default async function Blog() {
             ))}
           </div>
 
-          <div className="mt-12 flex flex-col items-start gap-4 rounded-[24px] border border-dashed border-line bg-white p-8 sm:flex-row sm:items-center sm:justify-between">
+          <div className="mt-12 flex flex-col items-start gap-4 rounded-[24px] border border-dashed border-line bg-card p-8 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h3 className="font-display text-2xl font-semibold">More writing soon.</h3>
               <p className="mt-1 text-body">Subscribe by getting started — updates land in your dashboard.</p>

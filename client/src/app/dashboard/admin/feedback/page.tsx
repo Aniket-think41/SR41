@@ -82,7 +82,7 @@ export default function AdminFeedbackPage() {
       {isLoading ? (
         <p className="text-sm text-muted">Loading…</p>
       ) : list.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-line bg-white/60 p-14 text-center">
+        <div className="rounded-2xl border border-dashed border-line bg-card/60 p-14 text-center">
           <p className="font-display text-xl font-semibold">No feedback yet.</p>
         </div>
       ) : (

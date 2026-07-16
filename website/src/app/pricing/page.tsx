@@ -112,7 +112,7 @@ export default async function Pricing() {
                 key={p.key}
                 className={`flex flex-col rounded-[24px] p-8 ${
                   meta.featured
-                    ? "border-2 border-primary bg-white shadow-[0_30px_60px_-30px_rgba(115,90,229,0.5)] md:-mt-4 md:pb-12"
+                    ? "border-2 border-primary bg-card shadow-[0_30px_60px_-30px_rgba(115,90,229,0.5)] md:-mt-4 md:pb-12"
                     : "card"
                 }`}
               >

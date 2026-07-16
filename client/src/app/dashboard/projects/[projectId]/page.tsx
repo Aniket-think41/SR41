@@ -119,7 +119,7 @@ export default function ProjectDetail({ params }: { params: Promise<{ projectId:
               </Link>
             ))}
             {pods?.length === 0 && !creating && (
-              <div className="col-span-full rounded-2xl border border-dashed border-line bg-white/60 p-12 text-center">
+              <div className="col-span-full rounded-2xl border border-dashed border-line bg-card/60 p-12 text-center">
                 <p className="font-display text-lg font-semibold">No {terms.pods.toLowerCase()} yet.</p>
                 <p className="mt-1 text-sm text-body">{terms.pods} hold the people and the resources they share.</p>
               </div>

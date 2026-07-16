@@ -118,7 +118,7 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed?: boolean }) {
           return (
             <button
               onClick={() => go(other)}
-              className="mx-auto flex h-9 w-9 items-center justify-center rounded-xl border border-line bg-surface text-primary transition hover:bg-white"
+              className="mx-auto flex h-9 w-9 items-center justify-center rounded-xl border border-line bg-surface text-primary transition hover:bg-card"
               title={
                 other === "org"
                   ? orgLocked
@@ -141,7 +141,7 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed?: boolean }) {
             disabled={becomePublisher.isPending}
             title={orgLocked ? reason ?? "Upgrade to create an organization" : undefined}
             className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-bold transition ${
-              workspace === "org" ? "bg-white text-primary shadow-sm" : "text-muted hover:text-ink"
+              workspace === "org" ? "bg-card text-primary shadow-sm" : "text-muted hover:text-ink"
             }`}
           >
             {orgLocked ? <Lock className="h-3.5 w-3.5" /> : <Building2 className="h-3.5 w-3.5" />}
@@ -153,7 +153,7 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed?: boolean }) {
             onClick={() => go("publisher")}
             disabled={becomePublisher.isPending}
             className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-bold transition ${
-              workspace === "publisher" ? "bg-white text-primary shadow-sm" : "text-muted hover:text-ink"
+              workspace === "publisher" ? "bg-card text-primary shadow-sm" : "text-muted hover:text-ink"
             }`}
           >
             <Rocket className="h-3.5 w-3.5" />

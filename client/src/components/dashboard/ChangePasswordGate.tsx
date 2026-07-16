@@ -42,7 +42,7 @@ export function ChangePasswordGate({ user }: { user: User }) {
   };
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-white px-4 py-12">
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-card px-4 py-12">
       <div className="blob -left-32 top-0 h-[28rem] w-[28rem]" style={{ background: "var(--color-primary-50)" }} />
       <div className="blob -right-20 bottom-0 h-[24rem] w-[24rem]" style={{ background: "rgba(209,255,0,0.25)" }} />
 

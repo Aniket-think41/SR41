@@ -88,7 +88,7 @@ export function GithubImport({
 
         <label className="field-label" htmlFor="gh-url">Repository URL</label>
         <div className="flex gap-2">
-          <span className="flex flex-1 items-center gap-2 rounded-xl border border-line bg-white px-3">
+          <span className="flex flex-1 items-center gap-2 rounded-xl border border-line bg-card px-3">
             <Github className="h-4 w-4 shrink-0 text-muted" />
             <input
               id="gh-url"

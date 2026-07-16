@@ -107,7 +107,7 @@ export default function MyResourcesPage() {
         ))}
 
         {me?.is_publisher && published.length === 0 && (
-          <div className="rounded-2xl border border-dashed border-line bg-white/60 p-14 text-center">
+          <div className="rounded-2xl border border-dashed border-line bg-card/60 p-14 text-center">
             <p className="font-display text-xl font-semibold">Nothing published yet.</p>
             <p className="mt-1 text-sm text-body">
               Open any resource you authored and hit <span className="font-bold text-ink">Publish</span> to list it here.

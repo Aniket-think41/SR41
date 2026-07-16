@@ -69,7 +69,7 @@ export function CommandPalette() {
       aria-label="Search"
     >
       <div
-        className="pop w-full max-w-xl overflow-hidden rounded-3xl border border-line bg-white shadow-[0_40px_80px_-20px_rgba(10,8,64,0.45)]"
+        className="pop w-full max-w-xl overflow-hidden rounded-3xl border border-line bg-card shadow-[0_40px_80px_-20px_rgba(10,8,64,0.45)]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-3 border-b border-line px-5 py-4">

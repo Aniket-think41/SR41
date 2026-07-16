@@ -75,7 +75,7 @@ export function ResourceBrowser({
   return (
     <div>
       {/* Controls */}
-      <div className="flex flex-col gap-3 rounded-2xl border border-line bg-white p-3 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-3 rounded-2xl border border-line bg-card p-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-wrap items-center gap-2">
           {withScopeTabs && (
             <>
@@ -85,7 +85,7 @@ export function ResourceBrowser({
                     key={s.key}
                     onClick={() => setScope(s.key)}
                     className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition ${
-                      scope === s.key ? "bg-white text-primary shadow-sm" : "text-muted hover:text-ink"
+                      scope === s.key ? "bg-card text-primary shadow-sm" : "text-muted hover:text-ink"
                     }`}
                   >
                     {s.label}
@@ -106,7 +106,7 @@ export function ResourceBrowser({
           ))}
         </div>
 
-        <label className="flex items-center gap-2 rounded-full border border-line bg-white px-4 py-2">
+        <label className="flex items-center gap-2 rounded-full border border-line bg-card px-4 py-2">
           <Search className="h-3.5 w-3.5 text-muted" />
           <input
             value={q}
@@ -142,7 +142,7 @@ export function ResourceBrowser({
           ))}
         </div>
       ) : (
-        <div className="mt-3 rounded-2xl border border-dashed border-line bg-white/60 p-16 text-center">
+        <div className="mt-3 rounded-2xl border border-dashed border-line bg-card/60 p-16 text-center">
           <Inbox className="mx-auto h-8 w-8 text-muted/50" />
           <p className="font-display mt-3 text-xl font-semibold">
             {q || type !== "ALL" ? "Nothing matches." : "No resources yet."}

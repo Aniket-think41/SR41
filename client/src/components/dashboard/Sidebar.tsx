@@ -87,7 +87,7 @@ export function Sidebar() {
 
   return (
     <aside
-      className={`fixed inset-y-0 left-0 z-40 hidden flex-col border-r border-line bg-white transition-[width] duration-300 md:flex ${
+      className={`fixed inset-y-0 left-0 z-40 hidden flex-col border-r border-line bg-card transition-[width] duration-300 md:flex ${
         collapsed ? "w-[var(--sidebar-w-collapsed)]" : "w-[var(--sidebar-w)]"
       }`}
     >
@@ -166,7 +166,7 @@ export function MobileNav() {
   const pathname = usePathname();
   const items = useNav().slice(0, 5);
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-line bg-white/95 backdrop-blur-md md:hidden">
+    <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-line bg-card/95 backdrop-blur-md md:hidden">
       {items.map(({ label, href, icon: Icon, exact }) => {
         const active = exact ? pathname === href : pathname.startsWith(href);
         return (

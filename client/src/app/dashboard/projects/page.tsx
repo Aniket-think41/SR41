@@ -116,7 +116,7 @@ export default function ProjectsPage() {
             </Link>
           ))}
           {projects?.length === 0 && !creating && (
-            <div className="col-span-full rounded-2xl border border-dashed border-line bg-white/60 p-16 text-center">
+            <div className="col-span-full rounded-2xl border border-dashed border-line bg-card/60 p-16 text-center">
               <p className="font-display text-xl font-semibold">No {terms.projects.toLowerCase()} yet.</p>
               <p className="mt-1 text-sm text-body">Create the first one — {terms.pods.toLowerCase()} and resources live inside.</p>
             </div>

@@ -89,7 +89,7 @@ export function MembersCard({
                 <select
                   value={asAdminMember(m.role)}
                   onChange={(e) => onChangeRole(m.user_id, e.target.value)}
-                  className="rounded-full border border-line bg-white px-3 py-1 text-xs font-bold"
+                  className="rounded-full border border-line bg-card px-3 py-1 text-xs font-bold"
                 >
                   <option value="ADMIN">ADMIN</option>
                   <option value="MEMBER">MEMBER</option>

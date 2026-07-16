@@ -28,7 +28,7 @@ export function HeroSearch() {
           e.preventDefault();
           run(q);
         }}
-        className="flex items-center gap-2 rounded-full border border-line bg-white p-1.5 pl-5 shadow-[0_12px_40px_-16px_rgba(115,90,229,0.45)]"
+        className="flex items-center gap-2 rounded-full border border-line bg-card p-1.5 pl-5 shadow-[0_12px_40px_-16px_rgba(115,90,229,0.45)]"
       >
         <span aria-hidden className="text-lg text-muted">⌕</span>
         <input
@@ -51,7 +51,7 @@ export function HeroSearch() {
               setQ(s);
               run(s);
             }}
-            className="rounded-full border border-line bg-white px-3 py-1 font-medium text-body transition hover:border-primary hover:text-primary"
+            className="rounded-full border border-line bg-card px-3 py-1 font-medium text-body transition hover:border-primary hover:text-primary"
           >
             {s}
           </button>

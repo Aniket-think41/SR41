@@ -107,7 +107,7 @@ function MarketplaceBrowser() {
             Browse public skills, MCP servers, and notes — add any of them to your org.
           </p>
         </div>
-        <label className="flex items-center gap-2 rounded-full border border-line bg-white px-4 py-2">
+        <label className="flex items-center gap-2 rounded-full border border-line bg-card px-4 py-2">
           <Search className="h-3.5 w-3.5 text-muted" />
           <input
             value={q}
@@ -191,7 +191,7 @@ function MarketplaceBrowser() {
             ))}
           </div>
           {!isLoading && total === 0 && (
-            <div className="rounded-2xl border border-dashed border-line bg-white/60 p-16 text-center">
+            <div className="rounded-2xl border border-dashed border-line bg-card/60 p-16 text-center">
               <p className="font-display text-xl font-semibold">Nothing matches.</p>
               <p className="mt-1 text-sm text-body">Try a different filter or search term.</p>
             </div>

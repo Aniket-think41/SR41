@@ -3,7 +3,7 @@
  * inherited resource flowing down. Soft rounded cards, à la Shiprocket.
  */
 const chip =
-  "rounded-xl border border-line bg-white px-3.5 py-2.5 text-sm font-medium text-ink shadow-[0_2px_8px_rgba(20,20,19,0.04)] flex items-center gap-2";
+  "rounded-xl border border-line bg-card px-3.5 py-2.5 text-sm font-medium text-ink shadow-[0_2px_8px_rgba(20,20,19,0.04)] flex items-center gap-2";
 
 export function HeroDiagram() {
   return (

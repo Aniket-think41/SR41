@@ -335,7 +335,7 @@ function AuthForm({ mode }: { mode: "login" | "signup" }) {
 
 function BusyOverlay({ label }: { label: string }) {
   return (
-    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-2xl bg-white/85 backdrop-blur-sm">
+    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-2xl bg-card/85 backdrop-blur-sm">
       <Loader2 className="h-6 w-6 animate-spin text-primary" />
       <p className="text-sm font-semibold text-muted">{label}</p>
     </div>
@@ -344,7 +344,7 @@ function BusyOverlay({ label }: { label: string }) {
 
 export function AuthShell({ mode }: { mode: "login" | "signup" }) {
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-white px-4 py-12">
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-card px-4 py-12">
       <div className="blob -left-32 top-0 h-[28rem] w-[28rem]" style={{ background: "var(--color-primary-50)" }} />
       <div className="blob -right-20 bottom-0 h-[24rem] w-[24rem]" style={{ background: "rgba(209,255,0,0.25)" }} />
 

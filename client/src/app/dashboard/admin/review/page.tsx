@@ -80,7 +80,7 @@ export default function AdminReviewPage() {
             key={t}
             onClick={() => setStatus(t)}
             className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-bold capitalize transition ${
-              status === t ? "bg-white text-primary shadow-sm" : "text-muted hover:text-ink"
+              status === t ? "bg-card text-primary shadow-sm" : "text-muted hover:text-ink"
             }`}
           >
             {t}
@@ -91,7 +91,7 @@ export default function AdminReviewPage() {
       {isLoading ? (
         <p className="text-sm text-muted">Loading…</p>
       ) : items.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-line bg-white/60 p-14 text-center">
+        <div className="rounded-2xl border border-dashed border-line bg-card/60 p-14 text-center">
           <p className="font-display text-xl font-semibold">Nothing {status}.</p>
         </div>
       ) : (

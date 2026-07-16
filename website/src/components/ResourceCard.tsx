@@ -4,8 +4,8 @@ import { saveResource } from "@/lib/redirects";
 
 const TYPE_STYLES: Record<string, string> = {
   SKILL: "bg-primary-50 text-primary",
-  MCP: "bg-[#e7f0ff] text-mcp",
-  NOTE: "bg-[#fdece5] text-note",
+  MCP: "bg-mcp/10 text-mcp",
+  NOTE: "bg-note/10 text-note",
 };
 
 export function ResourceCard({ r }: { r: Resource }) {
@@ -18,7 +18,7 @@ export function ResourceCard({ r }: { r: Resource }) {
       {/* Star → "Sign in to save" (logged-out path per spec §5) */}
       <Link
         href={saveResource(r.id)}
-        className="absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-line bg-white text-muted opacity-0 transition hover:border-primary hover:text-primary group-hover:opacity-100"
+        className="absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-line bg-card text-muted opacity-0 transition hover:border-primary hover:text-primary group-hover:opacity-100"
         title="Sign in to save"
         aria-label="Sign in to save"
       >

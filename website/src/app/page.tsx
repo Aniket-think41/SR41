@@ -41,7 +41,7 @@ export default async function Home() {
         <div className="blob right-0 -top-10 h-80 w-80" style={{ background: "rgba(209,255,0,0.20)" }} />
         <div className="blob -left-24 top-0 h-80 w-80" style={{ background: "var(--color-primary-50)" }} />
         <div className="shell relative py-16 text-center md:py-20">
-          <div className="reveal mx-auto inline-flex items-center gap-2 rounded-full border border-line bg-white px-3.5 py-1.5 shadow-sm">
+          <div className="reveal mx-auto inline-flex items-center gap-2 rounded-full border border-line bg-card px-3.5 py-1.5 shadow-sm">
             <span className="h-2 w-2 rounded-full bg-primary" />
             <span className="text-xs font-bold uppercase tracking-wider text-body">The open skill &amp; MCP registry · by Think41</span>
           </div>
@@ -65,7 +65,7 @@ export default async function Home() {
               <Link
                 key={c.label}
                 href={c.href}
-                className="group inline-flex items-center gap-2 rounded-full border border-line bg-white px-4 py-2 text-sm transition hover:border-primary/40 hover:shadow-sm"
+                className="group inline-flex items-center gap-2 rounded-full border border-line bg-card px-4 py-2 text-sm transition hover:border-primary/40 hover:shadow-sm"
               >
                 <span aria-hidden className={c.color}>{c.glyph}</span>
                 <span className="font-display font-semibold text-ink">{c.n}</span>

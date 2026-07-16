@@ -242,13 +242,13 @@ export default function ProfilePage() {
             name={profile.display_name}
             src={profile.avatar_url}
             size="xl"
-            className="ring-4 ring-white shadow-lg"
+            className="ring-4 ring-card shadow-lg"
           />
           <button
             onClick={() => avatarInput.current?.click()}
             disabled={avatarMut.isPending}
             title="Upload a new photo"
-            className="absolute bottom-1 right-1 flex h-9 w-9 items-center justify-center rounded-full bg-ink text-white shadow-lg ring-2 ring-white transition hover:bg-primary disabled:opacity-60"
+            className="absolute bottom-1 right-1 flex h-9 w-9 items-center justify-center rounded-full bg-primary text-white shadow-lg ring-2 ring-card transition hover:bg-primary disabled:opacity-60"
           >
             {avatarMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
           </button>
@@ -335,7 +335,7 @@ export default function ProfilePage() {
               className={`relative h-6 w-11 shrink-0 rounded-full transition ${profile.is_publisher ? "bg-primary" : "bg-line"}`}
             >
               <span
-                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-[left] ${profile.is_publisher ? "left-[22px]" : "left-0.5"}`}
+                className={`absolute top-0.5 h-5 w-5 rounded-full bg-card shadow transition-[left] ${profile.is_publisher ? "left-[22px]" : "left-0.5"}`}
               />
             </button>
           </div>

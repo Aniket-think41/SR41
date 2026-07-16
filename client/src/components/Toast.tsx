@@ -32,7 +32,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         {items.map((t) => (
           <div
             key={t.id}
-            className="pop pointer-events-auto flex items-start gap-3 rounded-2xl border border-line bg-white p-4 shadow-[0_18px_40px_-16px_rgba(20,20,19,0.3)]"
+            className="pop pointer-events-auto flex items-start gap-3 rounded-2xl border border-line bg-card p-4 shadow-[0_18px_40px_-16px_rgba(20,20,19,0.3)]"
             role="status"
           >
             {t.kind === "success" ? (

@@ -83,7 +83,7 @@ export function AttachmentsView({ items }: { items?: Attachment[] }) {
               rel="noreferrer"
               className="flex items-start gap-3 rounded-2xl border border-line bg-surface p-3 transition hover:border-primary"
             >
-              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white text-muted">
+              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-card text-muted">
                 <Icon className="h-4 w-4" />
               </span>
               <span className="min-w-0">

@@ -65,7 +65,7 @@ export function OrgSwitcher({ collapsed }: { collapsed: boolean }) {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((v) => !v)}
-        className={`flex w-full items-center gap-2.5 rounded-2xl border border-line bg-white p-2 text-left transition hover:border-primary/50 ${collapsed ? "justify-center" : ""}`}
+        className={`flex w-full items-center gap-2.5 rounded-2xl border border-line bg-card p-2 text-left transition hover:border-primary/50 ${collapsed ? "justify-center" : ""}`}
         aria-haspopup="listbox"
         aria-expanded={open}
       >
@@ -89,7 +89,7 @@ export function OrgSwitcher({ collapsed }: { collapsed: boolean }) {
       </button>
 
       {open && (
-        <div className="pop absolute left-0 top-full z-50 mt-2 w-64 rounded-2xl border border-line bg-white p-2 shadow-[0_24px_48px_-16px_rgba(20,20,19,0.25)]">
+        <div className="pop absolute left-0 top-full z-50 mt-2 w-64 rounded-2xl border border-line bg-card p-2 shadow-[0_24px_48px_-16px_rgba(20,20,19,0.25)]">
           <p className="px-3 pb-1 pt-2 text-[0.65rem] font-bold uppercase tracking-wider text-muted">
             Your organizations
           </p>

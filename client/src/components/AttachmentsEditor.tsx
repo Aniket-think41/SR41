@@ -75,7 +75,7 @@ export function AttachmentsEditor({
             key={kind}
             type="button"
             onClick={() => add(kind)}
-            className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white px-3 py-1.5 text-xs font-semibold text-body transition hover:border-primary hover:text-primary"
+            className="inline-flex items-center gap-1.5 rounded-full border border-line bg-card px-3 py-1.5 text-xs font-semibold text-body transition hover:border-primary hover:text-primary"
           >
             <Icon className="h-3.5 w-3.5" /> Add {label}
           </button>
@@ -95,7 +95,7 @@ export function AttachmentsEditor({
                       <GripVertical className="h-3.5 w-3.5" />
                     </button>
                   </span>
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-xs font-bold capitalize text-ink">
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-xs font-bold capitalize text-ink">
                     <Icon className="h-3.5 w-3.5" /> {a.kind}
                   </span>
                   {(a.kind === "link" || a.kind === "file") && a.url.trim() && (
@@ -111,7 +111,7 @@ export function AttachmentsEditor({
                   />
                   {a.kind !== "link" && (
                     <label
-                      className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-full border border-line bg-white px-2.5 py-1.5 text-xs font-semibold text-body transition hover:border-primary hover:text-primary"
+                      className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-full border border-line bg-card px-2.5 py-1.5 text-xs font-semibold text-body transition hover:border-primary hover:text-primary"
                       title={`Upload ${a.kind}`}
                     >
                       {uploading === i ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
@@ -129,7 +129,7 @@ export function AttachmentsEditor({
                       />
                     </label>
                   )}
-                  <button type="button" onClick={() => remove(i)} className="rounded-full p-1.5 text-muted transition hover:bg-white hover:text-note" aria-label="Remove">
+                  <button type="button" onClick={() => remove(i)} className="rounded-full p-1.5 text-muted transition hover:bg-card hover:text-note" aria-label="Remove">
                     <X className="h-4 w-4" />
                   </button>
                 </div>

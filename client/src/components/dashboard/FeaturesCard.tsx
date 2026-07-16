@@ -33,7 +33,7 @@ function Toggle({
       } ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
     >
       <span
-        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-[left] ${
+        className={`absolute top-0.5 h-5 w-5 rounded-full bg-card shadow transition-[left] ${
           checked ? "left-[22px]" : "left-0.5"
         }`}
       />

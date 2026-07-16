@@ -79,7 +79,7 @@ export function FeedbackForm() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Ada Rao"
-            className="rounded-xl border border-line bg-white px-4 py-2.5 text-sm outline-none focus:border-primary"
+            className="rounded-xl border border-line bg-card px-4 py-2.5 text-sm outline-none focus:border-primary"
           />
         </label>
         <label className="flex flex-col gap-1.5">
@@ -89,7 +89,7 @@ export function FeedbackForm() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@company.com"
-            className="rounded-xl border border-line bg-white px-4 py-2.5 text-sm outline-none focus:border-primary"
+            className="rounded-xl border border-line bg-card px-4 py-2.5 text-sm outline-none focus:border-primary"
           />
         </label>
       </div>
@@ -122,7 +122,7 @@ export function FeedbackForm() {
           <select
             value={category}
             onChange={(e) => setCategory(e.target.value)}
-            className="rounded-xl border border-line bg-white px-4 py-2.5 text-sm font-medium text-ink outline-none focus:border-primary"
+            className="rounded-xl border border-line bg-card px-4 py-2.5 text-sm font-medium text-ink outline-none focus:border-primary"
           >
             {CATEGORIES.map((c) => (
               <option key={c.key} value={c.key}>{c.label}</option>
@@ -139,7 +139,7 @@ export function FeedbackForm() {
           rows={4}
           required
           placeholder="What's working well? What could be better?"
-          className="rounded-xl border border-line bg-white px-4 py-3 text-sm outline-none focus:border-primary"
+          className="rounded-xl border border-line bg-card px-4 py-3 text-sm outline-none focus:border-primary"
         />
       </label>
 
