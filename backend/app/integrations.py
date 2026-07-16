@@ -145,7 +145,7 @@ CAPABILITY_CATALOG: dict[str, list[dict]] = {
          "description": "Two-way / write-only sync back to repositories.",
          "always": False, "scopes": ["repo"], "recommend": "repo"},
         {"key": "webhooks", "name": "Receive repository events",
-         "description": "Live sync on push/release via webhooks (coming soon).",
+         "description": "Live sync on push/release via webhooks. GitHub App installs get this automatically; a classic PAT needs the admin:repo_hook scope.",
          "always": False, "scopes": ["admin:repo_hook"], "recommend": "admin:repo_hook"},
     ],
 }

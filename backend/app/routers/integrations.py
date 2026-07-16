@@ -128,6 +128,22 @@ def _apply_github_account(conn: OrgIntegration, token: str, account_override: st
     conn.last_synced_at = datetime.now(timezone.utc)
 
 
+def _ensure_repo_webhook(conn: OrgIntegration, token: str, full_name: str) -> None:
+    """Best-effort: register a push/release webhook on a repo so live sync works.
+    Skipped for GitHub App connections (the App delivers events org-wide via its
+    own webhook) and when the connection lacks the webhooks capability or no
+    webhook secret is configured."""
+    if conn.auth_method == "github_app" or not has_capability(conn, "webhooks"):
+        return
+    from ..config import get_settings as _gs
+
+    s = _gs()
+    if not s.github_webhook_secret:
+        return
+    url = f"{s.integration_base_url.rstrip('/')}/api/integrations/github/webhook"
+    github.register_webhook(token, full_name, url, s.github_webhook_secret)
+
+
 # --------------------------------------------------------------------------- #
 # Listing (read)
 # --------------------------------------------------------------------------- #
@@ -226,7 +242,7 @@ def sync(slug: str, provider_key: str, user: User = Depends(get_current_user), d
             conn.account_type = acct.get("type")
             conn.account_url = acct.get("html_url")
             conn.account_avatar = acct.get("avatar_url")
-            conn.capabilities = _cc2("github", ["repo", "read:org"])
+            conn.capabilities = _cc2("github", ["repo", "read:org", "admin:repo_hook"])
             conn.status = "connected"
             conn.last_error = None
             conn.last_synced_at = datetime.now(timezone.utc)
@@ -398,6 +414,7 @@ def _do_publish(db: Session, org, conn: OrgIntegration, token: str, resource: Re
         last_sha = github.put_file(token, repo["full_name"], full_path, content,
                                    f"skillshare: publish {resource.title}", branch)
     github.set_topics(token, repo["full_name"], resource.tags or [])
+    _ensure_repo_webhook(conn, token, repo["full_name"])
 
     link = _upsert_link(db, org, resource, repo, path, managed, user)
     link.direction = "write"
@@ -527,6 +544,7 @@ def github_link(
     repo = github.get_repo(token, body.repo_full_name)
     if not repo:
         raise not_found(f'Repository "{body.repo_full_name}"')
+    _ensure_repo_webhook(conn, token, repo["full_name"])
     link = _upsert_link(db, org, resource, repo, body.path, managed=False, user=user)
     link.direction = "both"
     db.commit()
@@ -760,7 +778,7 @@ def _store_flow_connection(db: Session, org, user: User, token: str, method: str
         conn.account_url = acct.get("html_url")
         conn.account_avatar = acct.get("avatar_url")
         conn.scopes = []
-        conn.capabilities = _cc("github", ["repo", "read:org"])
+        conn.capabilities = _cc("github", ["repo", "read:org", "admin:repo_hook"])
         conn.status = "connected"
         conn.last_error = None
         conn.last_synced_at = datetime.now(timezone.utc)
