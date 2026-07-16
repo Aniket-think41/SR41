@@ -282,6 +282,22 @@ class GithubResourceRefIn(BaseModel):
     resource_id: str = Field(min_length=1, max_length=64)
 
 
+class GithubBulkImportIn(BaseModel):
+    """Import detected resources from several repos into a scope at once."""
+
+    repos: list[str] = Field(default_factory=list, max_length=100)  # owner/repo names
+    scope_type: str = "ORG"  # ORG | PROJECT | POD
+    scope_id: str | None = None
+
+
+class GithubPublishScopeIn(BaseModel):
+    """Publish every resource in a scope to GitHub (bulk). Each resource gets its
+    own managed repo whose visibility mirrors it."""
+
+    scope_type: str = "ORG"  # ORG | PROJECT | POD
+    scope_id: str | None = None
+
+
 # ---- Device-authorization login (CLI / MCP browser login) ----
 
 

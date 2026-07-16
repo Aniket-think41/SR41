@@ -1327,6 +1327,44 @@ def pull_from_github(resource_id: str, org_slug: str = "") -> dict:
 
 
 @mcp.tool()
+def scan_github_account(org_slug: str = "", account: str = "", max_repos: int = 30) -> dict:
+    """Scan the org's connected GitHub account: list its repositories and detect
+    the skills/MCP servers/notes in each (dry run — nothing is created). Returns
+    {scanned, ai_enabled, results:[{repo, detected[]}]}. Follow with
+    bulk_import_github to import the ones you want."""
+    params = {"max_repos": max_repos}
+    if account:
+        params["account"] = account
+    return _request("POST", f"/api/orgs/{_org_slug(org_slug)}/integrations/github/scan", params=params)
+
+
+@mcp.tool()
+def bulk_import_github(repos: list[str], org_slug: str = "", scope_type: str = "ORG", scope_id: str = "") -> dict:
+    """Import detected resources from several repos at once into a scope
+    (ORG / PROJECT / POD). `repos` is a list of owner/repo names."""
+    body = {"repos": repos, "scope_type": scope_type}
+    if scope_id:
+        body["scope_id"] = scope_id
+    return _request("POST", f"/api/orgs/{_org_slug(org_slug)}/integrations/github/bulk-import", json=body)
+
+
+@mcp.tool()
+def publish_scope_to_github(org_slug: str = "", scope_type: str = "ORG", scope_id: str = "") -> dict:
+    """Publish EVERY resource in a scope to GitHub at once — one managed repo per
+    resource, visibility mirrored (public→public, private→private)."""
+    body = {"scope_type": scope_type}
+    if scope_id:
+        body["scope_id"] = scope_id
+    return _request("POST", f"/api/orgs/{_org_slug(org_slug)}/integrations/github/publish-scope", json=body)
+
+
+@mcp.tool()
+def sync_all_github(org_slug: str = "") -> dict:
+    """Re-push every linked resource in the org to its GitHub repo (bulk write sync)."""
+    return _request("POST", f"/api/orgs/{_org_slug(org_slug)}/integrations/github/sync-all", json={})
+
+
+@mcp.tool()
 def dismiss_artifact(fingerprint: str, kind: str = "skill", source: str = "", name: str = "") -> dict:
     """Remember NOT to recommend a local artifact again (the user declined to
     push it). Synced server-side so the decision carries across machines."""

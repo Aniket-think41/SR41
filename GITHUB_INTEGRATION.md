@@ -121,9 +121,26 @@ CLI `github-publish/links/push/pull`; MCP `publish_to_github`,
 `list_github_links`, `push_to_github`, `pull_from_github`. Tests in
 `tests/test_integrations.py`.
 
-**Still deferred (build-list items 5b, 8):** automatic mode-driven sync worker
-(today push/pull are on-demand), scope-level bulk publish (publish a whole
-org/team/pod at once), live webhooks. Below is the original plan for reference.
+**Phase 4 (2026-07-16) shipped the rest, config-gated where it needs your creds:**
+- **Full-account scan** (`github/scan`) + **bulk import** (`github/bulk-import`) +
+  **team/pod import scope**; **scope-level bulk publish** (`github/publish-scope`);
+  **sync-all** (`github/sync-all`). CLI `github-scan/publish-all/sync-all`; MCP
+  `scan_github_account`, `bulk_import_github`, `publish_scope_to_github`,
+  `sync_all_github`. Dashboard "Publish all / Sync all".
+- **Live webhooks** (`POST /api/integrations/github/webhook`, HMAC-verified) —
+  push/release → pull linked resources. Active once `GITHUB_WEBHOOK_SECRET` set.
+- **Scheduled sync** (`POST /api/cron/integrations/sync`, `X-Cron-Secret`) for a
+  Cloud Scheduler job. Active once `CRON_SECRET` set.
+- **OAuth App + GitHub App connect** — browser "Connect with GitHub" flow
+  (`github/oauth/start` + `/api/integrations/github/oauth/callback`), App
+  installation-token minting. Methods auto-activate when their creds are set;
+  otherwise render "coming soon".
+- **AI metadata** (`app/ai.py`, Anthropic) — optional scan enrichment; inert
+  until `ANTHROPIC_API_KEY` set.
+
+Everything is in the codebase and degrades gracefully (Razorpay/Sentry pattern).
+The ONLY thing left is supplying the external credentials (GitHub App / OAuth
+App / Anthropic key) — no more code needed to light them up.
 
 **Rules**
 - A resource, or a whole scope (org / team(project) / pod), can be published to a

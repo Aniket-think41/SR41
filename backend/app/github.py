@@ -672,3 +672,89 @@ def set_topics(token: str, full_name: str, topics: list[str]) -> None:
         _write("PUT", f"/repos/{full_name}/topics", token, {"names": clean})
     except Exception:
         pass  # topics are best-effort — never fail a publish over them
+
+
+def list_all_repos(token: str, account: str | None = None, max_pages: int = 5, per_page: int = 100) -> list[dict]:
+    """Paginate through all repositories the token can see (bounded by max_pages
+    to stay within rate limits). Used by the full-account scan."""
+    per_page = max(1, min(per_page, 100))
+    out: list[dict] = []
+    for page in range(1, max_pages + 1):
+        if account:
+            try:
+                rows = _get(f"/orgs/{account}/repos", token, {"per_page": per_page, "page": page, "sort": "updated"})
+            except Exception:
+                rows = _get(f"/users/{account}/repos", token, {"per_page": per_page, "page": page, "sort": "updated"})
+        else:
+            rows = _get("/user/repos", token, {"per_page": per_page, "page": page, "sort": "updated",
+                                               "affiliation": "owner,organization_member"})
+        rows = rows if isinstance(rows, list) else []
+        out.extend(_repo_summary(r) for r in rows)
+        if len(rows) < per_page:
+            break
+    return out
+
+
+# ----------------------------- OAuth App / GitHub App / webhooks -----------------------------
+# All optional (config-gated). These let an org connect via a hosted app instead
+# of pasting a PAT, and receive live webhook events.
+
+
+def oauth_exchange_code(client_id: str, client_secret: str, code: str, redirect_uri: str | None = None) -> dict:
+    """Exchange an OAuth authorization code for an access token + granted scopes."""
+    import httpx
+
+    body = {"client_id": client_id, "client_secret": client_secret, "code": code}
+    if redirect_uri:
+        body["redirect_uri"] = redirect_uri
+    with httpx.Client(timeout=15.0, headers={"Accept": "application/json"}, follow_redirects=True) as c:
+        r = c.post("https://github.com/login/oauth/access_token", json=body)
+    if r.status_code >= 400:
+        raise validation(f"GitHub OAuth exchange failed ({r.status_code})")
+    data = r.json()
+    if data.get("error") or not data.get("access_token"):
+        raise validation(data.get("error_description") or "GitHub OAuth exchange failed")
+    return {"access_token": data["access_token"], "scopes": [s for s in (data.get("scope") or "").split(",") if s]}
+
+
+def app_jwt(app_id: str, private_key_pem: str) -> str:
+    """Sign a short-lived JWT as the GitHub App (RS256), for App API calls."""
+    import time
+
+    import jwt  # PyJWT (backend dep)
+
+    nowt = int(time.time())
+    return jwt.encode({"iat": nowt - 60, "exp": nowt + 540, "iss": app_id}, private_key_pem, algorithm="RS256")
+
+
+def installation_token(app_id: str, private_key_pem: str, installation_id: str) -> dict:
+    """Mint a short-lived installation access token for a GitHub App install."""
+    jwt_tok = app_jwt(app_id, private_key_pem)
+    data = _write("POST", f"/app/installations/{installation_id}/access_tokens", jwt_tok, {})
+    if not data.get("token"):
+        raise validation("Could not mint a GitHub App installation token")
+    return {"token": data["token"], "expires_at": data.get("expires_at")}
+
+
+def verify_webhook_signature(secret: str, body: bytes, signature_header: str | None) -> bool:
+    """Verify GitHub's X-Hub-Signature-256 HMAC over the raw body."""
+    import hmac
+
+    if not secret or not signature_header or not signature_header.startswith("sha256="):
+        return False
+    digest = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(f"sha256={digest}", signature_header)
+
+
+def register_webhook(token: str, full_name: str, url: str, secret: str, events: list[str] | None = None) -> dict | None:
+    """Create a push/release webhook on a repo (best-effort; needs admin:repo_hook)."""
+    body = {
+        "name": "web",
+        "active": True,
+        "events": events or ["push", "release"],
+        "config": {"url": url, "content_type": "json", "secret": secret, "insecure_ssl": "0"},
+    }
+    try:
+        return _write("POST", f"/repos/{full_name}/hooks", token, body)
+    except Exception:
+        return None

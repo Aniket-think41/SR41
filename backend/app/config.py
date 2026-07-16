@@ -90,6 +90,38 @@ class Settings(BaseSettings):
     #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     integration_secret_key: str = ""
 
+    # Public origin of THIS backend — used to build GitHub OAuth callback and
+    # webhook URLs. Defaults to the Cloud Run URL.
+    integration_base_url: str = "https://skillshare-backend-1081098542602.us-central1.run.app"
+
+    # --- GitHub App (multi-org install; per-repo access + webhooks) ---
+    # All inert until set: the "GitHub App" connect method stays "coming soon"
+    # and app-token minting is skipped. Register a GitHub App, then provide:
+    github_app_id: str = ""              # numeric App ID
+    github_app_slug: str = ""            # for the install URL (github.com/apps/<slug>)
+    github_app_private_key: str = ""     # PEM (the App's private key)
+    github_app_client_id: str = ""
+    github_app_client_secret: str = ""
+
+    # --- GitHub OAuth App (alternative "Sign in with GitHub" connect) ---
+    github_oauth_client_id: str = ""
+    github_oauth_client_secret: str = ""
+
+    # --- GitHub webhooks (live GitHub→SkillShare sync) ---
+    # HMAC secret shared with GitHub; the receiver rejects unsigned/forged
+    # payloads. Empty → the webhook endpoint returns 503 (disabled).
+    github_webhook_secret: str = ""
+
+    # --- AI metadata generation (Anthropic; app/ai.py) ---
+    # Empty → metadata generation is skipped (callers fall back to raw values).
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-haiku-4-5-20251001"
+
+    # --- cron / scheduled sync ---
+    # Shared secret an external scheduler (Cloud Scheduler) sends as
+    # X-Cron-Secret to POST /api/cron/integrations/sync. Empty → endpoint 403s.
+    cron_secret: str = ""
+
     # --- payments: Razorpay (spec §5) ---
     # Scaffolded now, activates when credentials are present. Empty → payments are
     # disabled gracefully (checkout returns a clear "not configured" error and the
@@ -133,6 +165,20 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def github_app_private_key_pem(self) -> str:
+        """The App private key as PEM. Accepts either a raw PEM or a base64-
+        encoded PEM (base64 avoids newline pain in Cloud Run env vars)."""
+        k = (self.github_app_private_key or "").strip()
+        if not k or "BEGIN" in k:
+            return k
+        import base64
+
+        try:
+            return base64.b64decode(k).decode("utf-8")
+        except Exception:
+            return k
 
     @property
     def jwt_signing_key(self) -> str:

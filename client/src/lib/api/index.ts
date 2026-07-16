@@ -258,6 +258,16 @@ export const api = {
     request<ResourceRepoLink>("POST", `/api/orgs/${slug}/integrations/github/link`, body),
   githubUnlink: (slug: string, linkId: string) =>
     request<{ ok: true }>("DELETE", `/api/orgs/${slug}/integrations/github/links/${linkId}`),
+  /* ---- browser connect (OAuth / App) + bulk ---- */
+  /** Begin an OAuth/App browser connect flow → returns the GitHub URL to open. */
+  githubOAuthStart: (slug: string, method: "oauth" | "github_app" = "oauth") =>
+    request<{ authorize_url: string }>("POST", `/api/orgs/${slug}/integrations/github/oauth/start${qs({ method })}`),
+  /** Publish every resource in a scope at once (bulk). */
+  githubPublishScope: (slug: string, body: { scope_type?: string; scope_id?: string } = {}) =>
+    request<{ count: number }>("POST", `/api/orgs/${slug}/integrations/github/publish-scope`, body),
+  /** Re-push every linked resource in the org to its repo. */
+  githubSyncAll: (slug: string) =>
+    request<{ pushed: number }>("POST", `/api/orgs/${slug}/integrations/github/sync-all`),
 
   /* ---- projects ---- */
   projects: (slug: string) => request<Project[]>("GET", `/api/orgs/${slug}/projects`),

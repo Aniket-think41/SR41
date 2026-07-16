@@ -295,6 +295,8 @@ app.include_router(local_state.router)
 app.include_router(feedback.router)
 app.include_router(billing.router)
 app.include_router(integrations.router)
+app.include_router(integrations.public_router)
+app.include_router(integrations.cron_router)
 app.include_router(admin.router)
 
 # Super-admin dashboard (SQLAdmin) at /admin — internal ops console, gated on

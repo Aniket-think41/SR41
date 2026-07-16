@@ -1010,6 +1010,39 @@ def cmd_github_pull(args) -> None:
     print(f"{BOLD}✓ pulled{RESET} {r.get('title')} [{r.get('id')}]")
 
 
+def cmd_github_scan(args) -> None:
+    """Scan the connected account's repos and show detected resources per repo."""
+    slug = _org_for(args)
+    params = {"max_repos": args.max}
+    if args.account:
+        params["account"] = args.account
+    res = request("POST", f"/api/orgs/{slug}/integrations/github/scan", params=params)
+    print(f"{DIM}scanned {res.get('scanned', 0)} repos (AI {'on' if res.get('ai_enabled') else 'off'}){RESET}")
+    for item in res.get("results", []):
+        repo = item.get("repo", {})
+        det = item.get("detected", [])
+        print(f"  {BOLD}{repo.get('full_name')}{RESET} {DIM}· {len(det)} detected{RESET}")
+        for d in det:
+            print(f"    {KIND_GLYPH.get(d['kind'], '·')} {d['title']} {DIM}[{d['fingerprint']}]{RESET}")
+
+
+def cmd_github_publish_all(args) -> None:
+    """Publish every resource in the org (or a scope) to GitHub."""
+    slug = _org_for(args)
+    body = {"scope_type": args.scope_type}
+    if args.scope_id:
+        body["scope_id"] = args.scope_id
+    res = request("POST", f"/api/orgs/{slug}/integrations/github/publish-scope", body=body)
+    print(f"{BOLD}✓ published {res.get('count', 0)} resource(s){RESET}")
+
+
+def cmd_github_sync_all(args) -> None:
+    """Re-push every linked resource in the org to its GitHub repo."""
+    slug = _org_for(args)
+    res = request("POST", f"/api/orgs/{slug}/integrations/github/sync-all", body={})
+    print(f"{BOLD}✓ pushed {res.get('pushed', 0)} link(s){RESET}")
+
+
 def cmd_watch(args) -> None:
     """Poll the inbox + local artifacts and pop a themed desktop card for each
     new item. Runs in the foreground; use --once for a cron/systemd timer."""
@@ -1519,6 +1552,22 @@ def main() -> None:
     sp.add_argument("resource_id")
     sp.add_argument("--org", help="org slug (default: your primary org)")
     sp.set_defaults(fn=cmd_github_pull)
+
+    sp = sub.add_parser("github-scan", help="scan all connected repos and show detected resources")
+    sp.add_argument("--org", help="org slug (default: your primary org)")
+    sp.add_argument("--account", help="GitHub org/user to scope to")
+    sp.add_argument("--max", type=int, default=30, help="max repos to scan (default 30)")
+    sp.set_defaults(fn=cmd_github_scan)
+
+    sp = sub.add_parser("github-publish-all", help="publish every resource in the org (or a scope) to GitHub")
+    sp.add_argument("--org", help="org slug (default: your primary org)")
+    sp.add_argument("--scope-type", dest="scope_type", default="ORG", choices=["ORG", "PROJECT", "POD"])
+    sp.add_argument("--scope-id", dest="scope_id", help="project/pod id when scope-type isn't ORG")
+    sp.set_defaults(fn=cmd_github_publish_all)
+
+    sp = sub.add_parser("github-sync-all", help="re-push every linked resource in the org to GitHub")
+    sp.add_argument("--org", help="org slug (default: your primary org)")
+    sp.set_defaults(fn=cmd_github_sync_all)
 
     sp = sub.add_parser("status", help="one-line status for an AI tool's status bar (install gap + local to-push)")
     _scan_flags(sp)

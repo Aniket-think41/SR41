@@ -193,11 +193,11 @@ def test_sync_requires_connection():
     assert r.status_code == 404, r.text
 
 
-def test_unavailable_auth_method_rejected():
+def test_unknown_auth_method_rejected():
     h, _ = _user()
     slug = _org(h, plan="PRO")
     r = c.post(f"/api/orgs/{slug}/integrations/github/connect",
-               json={"token": FAKE_TOKEN, "auth_method": "github_app"}, headers=h)
+               json={"token": FAKE_TOKEN, "auth_method": "carrier-pigeon"}, headers=h)
     assert r.status_code == 422, r.text
 
 
@@ -314,6 +314,89 @@ def test_pull_updates_resource(monkeypatch):
     r = c.post(f"/api/orgs/{slug}/integrations/github/pull", json={"resource_id": rid}, headers=h)
     assert r.status_code == 200, r.text
     assert r.json()["description"] == "pulled desc"
+
+
+def test_scan_lists_and_detects(monkeypatch):
+    from app.github import DetectedResource
+    h, _ = _user()
+    slug = _org(h, plan="PRO")
+    c.post(f"/api/orgs/{slug}/integrations/github/connect", json={"token": FAKE_TOKEN}, headers=h)
+    monkeypatch.setattr(github, "list_all_repos", lambda token, account=None, **k: [
+        {"full_name": "acme/r1", "name": "r1", "description": ""},
+        {"full_name": "acme/r2", "name": "r2", "description": ""},
+    ])
+    monkeypatch.setattr(github, "detect_from_url", lambda url, token=None: (
+        None, [DetectedResource(kind="skill", title="S", fingerprint="fp1")], {}))
+    r = c.post(f"/api/orgs/{slug}/integrations/github/scan", headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["scanned"] == 2 and r.json()["results"][0]["detected"]
+
+
+def test_bulk_import_creates_resources(monkeypatch):
+    from app.github import DetectedResource
+    h, _ = _user()
+    slug = _org(h, plan="PRO")
+    c.post(f"/api/orgs/{slug}/integrations/github/connect", json={"token": FAKE_TOKEN}, headers=h)
+    monkeypatch.setattr(github, "detect_from_url", lambda url, token=None: (
+        None, [DetectedResource(kind="note", title="N", content_md="x", fingerprint="fpN")], {}))
+    r = c.post(f"/api/orgs/{slug}/integrations/github/bulk-import",
+               json={"repos": ["acme/r1"], "scope_type": "ORG"}, headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["count"] >= 1
+
+
+def test_publish_scope_publishes_all(monkeypatch):
+    h, _ = _user()
+    slug = _org(h, plan="PRO")
+    c.post(f"/api/orgs/{slug}/integrations/github/connect", json={"token": FAKE_TOKEN}, headers=h)
+    _org_resource(h, slug, title="Skill A")
+    _org_resource(h, slug, title="Skill B")
+    created: dict = {}
+    _stub_writes(monkeypatch, created)
+    r = c.post(f"/api/orgs/{slug}/integrations/github/publish-scope", json={"scope_type": "ORG"}, headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["count"] >= 2
+
+
+def test_sync_all_pushes_links(monkeypatch):
+    h, _ = _user()
+    slug = _org(h, plan="PRO")
+    c.post(f"/api/orgs/{slug}/integrations/github/connect", json={"token": FAKE_TOKEN}, headers=h)
+    rid = _org_resource(h, slug)
+    created: dict = {}
+    _stub_writes(monkeypatch, created)
+    c.post(f"/api/orgs/{slug}/integrations/github/publish", json={"resource_id": rid}, headers=h)
+    r = c.post(f"/api/orgs/{slug}/integrations/github/sync-all", headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["pushed"] >= 1
+
+
+def test_oauth_start():
+    h, _ = _user()
+    slug = _org(h, plan="PRO")
+    r = c.post(f"/api/orgs/{slug}/integrations/github/oauth/start?method=oauth", headers=h)
+    # 422 when OAuth isn't configured (CI), 200 + authorize_url when it is (local .env).
+    assert r.status_code in (200, 422), r.text
+    if r.status_code == 200:
+        assert r.json()["authorize_url"].startswith("https://github.com/login/oauth")
+
+
+def test_webhook_and_cron_gated():
+    # webhook: 422 when no secret configured, 403 (bad signature) when it is.
+    assert c.post("/api/integrations/github/webhook", content=b"{}").status_code in (403, 422)
+    # cron: always 403 without a valid X-Cron-Secret header.
+    assert c.post("/api/cron/integrations/sync").status_code == 403
+
+
+def test_webhook_signature_verify():
+    import hashlib
+    import hmac
+    from app.github import verify_webhook_signature
+    secret, body = "s3cr3t", b'{"a":1}'
+    good = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    assert verify_webhook_signature(secret, body, good)
+    assert not verify_webhook_signature(secret, body, "sha256=deadbeef")
+    assert not verify_webhook_signature("", body, good)
 
 
 def test_repo_summary_includes_health_metadata():

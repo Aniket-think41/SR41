@@ -87,6 +87,12 @@ function ConnectFlow({ provider, slug, isAdmin }: { provider: IntegrationProvide
     onError: (e) => toast(errorMessage(e), "error"),
   });
 
+  const browserConnect = useMutation({
+    mutationFn: () => api.githubOAuthStart(slug, methodKey as "oauth" | "github_app"),
+    onSuccess: (r) => { window.location.href = r.authorize_url; },
+    onError: (e) => toast(errorMessage(e), "error"),
+  });
+
   if (!isAdmin) {
     return (
       <div className="card p-8 text-center">
@@ -159,35 +165,46 @@ function ConnectFlow({ provider, slug, isAdmin }: { provider: IntegrationProvide
           </div>
         )}
 
-        <div className="mt-6 space-y-4">
-          <label className="block">
-            <span className="text-xs font-semibold uppercase tracking-wide text-muted">Token</span>
-            <input
-              type="password"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="ghp_…"
-              autoComplete="off"
-              className="field mt-1.5 w-full font-mono"
-            />
-          </label>
-          <label className="block">
-            <span className="text-xs font-semibold uppercase tracking-wide text-muted">
-              GitHub org / user <span className="font-normal normal-case">(optional — scopes discovery)</span>
-            </span>
-            <input value={account} onChange={(e) => setAccount(e.target.value)} placeholder="acme" className="field mt-1.5 w-full" />
-          </label>
-        </div>
-
-        <button
-          onClick={() => connect.mutate()}
-          disabled={token.trim().length < 10 || connect.isPending}
-          className="btn btn-primary mt-6"
-        >
-          {connect.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-          Connect
-        </button>
-        <p className="mt-3 text-xs text-muted">The token is validated against GitHub, then encrypted at rest — it&apos;s never shown again.</p>
+        {methodKey === "classic_pat" ? (
+          <>
+            <div className="mt-6 space-y-4">
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-wide text-muted">Token</span>
+                <input
+                  type="password"
+                  value={token}
+                  onChange={(e) => setToken(e.target.value)}
+                  placeholder="ghp_…"
+                  autoComplete="off"
+                  className="field mt-1.5 w-full font-mono"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-wide text-muted">
+                  GitHub org / user <span className="font-normal normal-case">(optional — scopes discovery)</span>
+                </span>
+                <input value={account} onChange={(e) => setAccount(e.target.value)} placeholder="acme" className="field mt-1.5 w-full" />
+              </label>
+            </div>
+            <button
+              onClick={() => connect.mutate()}
+              disabled={token.trim().length < 10 || connect.isPending}
+              className="btn btn-primary mt-6"
+            >
+              {connect.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+              Connect
+            </button>
+            <p className="mt-3 text-xs text-muted">The token is validated against GitHub, then encrypted at rest — it&apos;s never shown again.</p>
+          </>
+        ) : (
+          <>
+            <button onClick={() => browserConnect.mutate()} disabled={browserConnect.isPending} className="btn btn-primary mt-6">
+              {browserConnect.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Github className="h-4 w-4" />}
+              Connect with GitHub
+            </button>
+            <p className="mt-3 text-xs text-muted">You&apos;ll authorize SkillShare on GitHub and be redirected back — no token to paste.</p>
+          </>
+        )}
       </div>
     </div>
   );
@@ -482,17 +499,46 @@ function PublishPanel({ slug, canWrite }: { slug: string; canWrite: boolean }) {
     onSuccess: () => { invalidate(); toast("Unlinked"); },
     onError: (e) => toast(errorMessage(e), "error"),
   });
+  const publishAll = useMutation({
+    mutationFn: () => api.githubPublishScope(slug, { scope_type: "ORG" }),
+    onSuccess: (r) => { invalidate(); toast(`Published ${r.count} resource${r.count === 1 ? "" : "s"}`); },
+    onError: (e) => toast(errorMessage(e), "error"),
+  });
+  const syncAll = useMutation({
+    mutationFn: () => api.githubSyncAll(slug),
+    onSuccess: (r) => { invalidate(); toast(`Pushed ${r.pushed} link${r.pushed === 1 ? "" : "s"}`); },
+    onError: (e) => toast(errorMessage(e), "error"),
+  });
 
   const linkedIds = new Set((links.data ?? []).map((l) => l.resource_id));
   const publishable = (resources.data ?? []).filter((r) => !linkedIds.has(r.id));
 
   return (
     <div className="card p-6">
-      <h3 className="font-display text-lg font-semibold text-ink">Publish resources to GitHub</h3>
-      <p className="mt-1 text-sm text-body">
-        Push a resource out to a repository. A <strong className="text-ink">public</strong> resource creates a
-        public repo; a <strong className="text-ink">private</strong> one creates a private repo.
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h3 className="font-display text-lg font-semibold text-ink">Publish resources to GitHub</h3>
+          <p className="mt-1 text-sm text-body">
+            Push a resource out to a repository. A <strong className="text-ink">public</strong> resource creates a
+            public repo; a <strong className="text-ink">private</strong> one creates a private repo.
+          </p>
+        </div>
+        {canWrite && (
+          <div className="flex gap-2">
+            <button
+              onClick={() => { if (confirm("Publish every resource in this org to GitHub?")) publishAll.mutate(); }}
+              disabled={publishAll.isPending}
+              className="btn btn-secondary btn-sm"
+              title="Publish every resource in the org"
+            >
+              {publishAll.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UploadCloud className="h-3.5 w-3.5" />} Publish all
+            </button>
+            <button onClick={() => syncAll.mutate()} disabled={syncAll.isPending} className="btn btn-secondary btn-sm" title="Re-push all linked resources">
+              {syncAll.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />} Sync all
+            </button>
+          </div>
+        )}
+      </div>
 
       {!canWrite ? (
         <p className="mt-4 rounded-lg bg-surface-2 px-3 py-2 text-xs text-muted">

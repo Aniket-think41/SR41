@@ -80,15 +80,50 @@ AUTH_METHODS: dict[str, list[dict]] = {
             ],
         },
         {
+            "key": "oauth",
+            "name": "Sign in with GitHub (OAuth)",
+            "hint": "Authorize SkillShare in your browser — no token to paste.",
+            "available": False,  # activated when GITHUB_OAUTH_CLIENT_ID/SECRET are set
+            "recommended": [
+                {"scope": "repo", "why": "Read private repos and push changes", "required": False},
+                {"scope": "read:org", "why": "Discover organization repositories", "required": False},
+            ],
+        },
+        {
             "key": "github_app",
             "name": "GitHub App",
             "hint": "Org-grade install with fine-grained per-repo access and webhooks.",
-            "available": False,
-            "status": "coming_soon",
+            "available": False,  # activated when GITHUB_APP_ID + private key are set
             "recommended": [],
         },
     ],
 }
+
+
+def auth_methods_for(provider_key: str) -> list[dict]:
+    """The connect methods for a provider with availability resolved from config.
+    OAuth/App become available only when their credentials are set (else they
+    render as 'coming soon')."""
+    from .config import get_settings
+
+    base = [dict(m) for m in AUTH_METHODS.get(provider_key, [])]
+    if provider_key != "github":
+        return base
+    s = get_settings()
+    oauth_on = bool(s.github_oauth_client_id and s.github_oauth_client_secret)
+    app_on = bool(s.github_app_id and s.github_app_private_key)
+    for m in base:
+        if m["key"] == "oauth":
+            m["available"] = oauth_on
+            if not oauth_on:
+                m["status"] = "coming_soon"
+        elif m["key"] == "github_app":
+            m["available"] = app_on
+            if not app_on:
+                m["status"] = "coming_soon"
+            elif s.github_app_slug:
+                m["install_url"] = f"https://github.com/apps/{s.github_app_slug}/installations/new"
+    return base
 
 # Capabilities a connection can unlock, and what grants them. `always` = any valid
 # token. `scopes` = classic-PAT scopes that grant it (any one suffices).
@@ -208,7 +243,7 @@ def provider_out(provider: IntegrationProvider, conn: OrgIntegration | None = No
         "docs_url": provider.docs_url,
         "auth_type": provider.auth_type,
         "status": provider.status,
-        "auth_methods": AUTH_METHODS.get(provider.key, []),
+        "auth_methods": auth_methods_for(provider.key),
         "connected": bool(conn and conn.status == "connected"),
         "connection": connection_out(conn) if conn else None,
     }

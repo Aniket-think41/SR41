@@ -1033,6 +1033,47 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     return { ok: true };
   }],
 
+  ["POST", "/api/orgs/:slug/integrations/github/publish-scope", (p, body, _q, db) => {
+    const { org } = requireIntegrations(db, p.slug, true);
+    const conn = orgConnection(db, org.id, "github");
+    if (!(conn?.capabilities ?? []).includes("write"))
+      throw new HttpError(403, "FORBIDDEN", "This connection can't write to GitHub — grant the 'repo' scope and Sync");
+    const account = conn?.account_label || "acme";
+    const scopeType = String(body.scope_type ?? "ORG");
+    const resources = db.resources.filter(
+      (r) => scopeOrgId(db, r) === org.id && (scopeType === "ORG" || r.scope_id === body.scope_id)
+    );
+    let count = 0;
+    for (const r of resources) {
+      const full = `${account}/${repoSlug(r.title)}`;
+      if (!db.resource_repo_links.find((l) => l.resource_id === r.id && l.repo_full_name === full)) {
+        db.resource_repo_links.push({
+          id: uid("rrl"), org_id: org.id, resource_id: r.id, provider_key: "github",
+          repo_full_name: full, repo_url: `https://github.com/${full}`, path: "",
+          visibility: r.is_public ? "public" : "private", managed: true, direction: "write",
+          last_pushed_at: now(), last_pulled_at: null, created_at: now(),
+        });
+      }
+      count++;
+    }
+    saveDb();
+    return { published: [], count };
+  }],
+
+  ["POST", "/api/orgs/:slug/integrations/github/sync-all", (p, _b, _q, db) => {
+    const { org } = requireIntegrations(db, p.slug, true);
+    const conn = orgConnection(db, org.id, "github");
+    if (!(conn?.capabilities ?? []).includes("write"))
+      throw new HttpError(403, "FORBIDDEN", "This connection can't write to GitHub — grant the 'repo' scope and Sync");
+    let pushed = 0;
+    for (const l of db.resource_repo_links.filter((l) => l.org_id === org.id)) {
+      l.last_pushed_at = now();
+      pushed++;
+    }
+    saveDb();
+    return { pushed };
+  }],
+
   ["GET", "/api/orgs/:slug/integrations", (p, _b, _q, db) => {
     const { org } = requireIntegrations(db, p.slug, false);
     return db.org_integrations.filter((c) => c.org_id === org.id).map((c) => connectionOut(c));
