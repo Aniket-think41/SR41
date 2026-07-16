@@ -118,7 +118,7 @@ class Settings(BaseSettings):
     # https://aistudio.google.com/apikey
     ai_provider: str = "auto"  # auto | gemini | anthropic
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-2.5-flash-lite"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-haiku-4-5-20251001"
 

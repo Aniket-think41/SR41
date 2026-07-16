@@ -69,15 +69,25 @@ def generate_metadata(title: str, kind: str, content: str) -> dict | None:
     s = get_settings()
     prompt = _prompt(title, kind, content)
     try:
+        import time
+
         import httpx
+
+        def _post(client: "httpx.Client", url: str, **kw):
+            # Retry transient 429/503 (free-tier overload) a couple of times.
+            for attempt in range(3):
+                r = client.post(url, **kw)
+                if r.status_code in (429, 503) and attempt < 2:
+                    time.sleep(1.5 * (attempt + 1))
+                    continue
+                return r
+            return r
 
         if provider == "gemini":
             with httpx.Client(timeout=30.0) as c:
-                r = c.post(
-                    f"{_GEMINI}/{s.gemini_model}:generateContent",
-                    params={"key": s.gemini_api_key},
-                    json={"contents": [{"parts": [{"text": prompt}]}]},
-                )
+                r = _post(c, f"{_GEMINI}/{s.gemini_model}:generateContent",
+                          params={"key": s.gemini_api_key},
+                          json={"contents": [{"parts": [{"text": prompt}]}]})
             if r.status_code >= 400:
                 log.warning("Gemini returned %s", r.status_code)
                 return None
@@ -86,16 +96,11 @@ def generate_metadata(title: str, kind: str, content: str) -> dict | None:
             text = "".join(p.get("text", "") for p in parts)
         else:  # anthropic
             with httpx.Client(timeout=30.0) as c:
-                r = c.post(
-                    _ANTHROPIC,
-                    headers={
-                        "x-api-key": s.anthropic_api_key,
-                        "anthropic-version": "2023-06-01",
-                        "content-type": "application/json",
-                    },
-                    json={"model": s.anthropic_model, "max_tokens": 400,
-                          "messages": [{"role": "user", "content": prompt}]},
-                )
+                r = _post(c, _ANTHROPIC,
+                          headers={"x-api-key": s.anthropic_api_key,
+                                   "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                          json={"model": s.anthropic_model, "max_tokens": 400,
+                                "messages": [{"role": "user", "content": prompt}]})
             if r.status_code >= 400:
                 log.warning("Anthropic returned %s", r.status_code)
                 return None
