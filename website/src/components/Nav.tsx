@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import { SITE } from "@/lib/site";
 import { getStarted, signIn } from "@/lib/redirects";
 import { Logo } from "./Logo";
+import { ThemeToggle } from "./ThemeToggle";
 
 export function Nav() {
   const [open, setOpen] = useState(false);
@@ -51,6 +52,7 @@ export function Nav() {
         </nav>
 
         <div className="hidden items-center gap-3 md:flex">
+          <ThemeToggle />
           <Link href={signIn()} className="text-[0.95rem] font-semibold text-ink hover:text-primary">
             Sign in
           </Link>
@@ -75,7 +77,7 @@ export function Nav() {
 
       {/* Mobile drawer */}
       {open && (
-        <div className="border-t border-line bg-white md:hidden">
+        <div className="border-t border-line bg-card md:hidden">
           <div className="shell flex flex-col gap-1 py-6">
             {SITE.nav.map((item) => (
               <Link
@@ -88,6 +90,10 @@ export function Nav() {
               </Link>
             ))}
             <div className="mt-4 flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-muted">Appearance</span>
+                <ThemeToggle />
+              </div>
               <Link href={signIn()} onClick={() => setOpen(false)} className="btn btn-secondary">
                 Sign in
               </Link>

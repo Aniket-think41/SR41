@@ -3,6 +3,7 @@ import { Schibsted_Grotesk, Manrope, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Nav } from "@/components/Nav";
 import { Footer } from "@/components/Footer";
+import { THEME_INIT_SCRIPT } from "@/components/ThemeToggle";
 import { SITE } from "@/lib/site";
 
 const schibsted = Schibsted_Grotesk({
@@ -56,6 +57,8 @@ export default function RootLayout({
       className={`${schibsted.variable} ${manrope.variable} ${jetbrains.variable} h-full`}
     >
       <body className="min-h-full flex flex-col">
+        {/* Set the theme class before paint to avoid a flash of the wrong theme. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <Nav />
         <main className="flex-1">{children}</main>
         <Footer />

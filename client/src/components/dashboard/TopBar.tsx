@@ -10,6 +10,7 @@ import { useUi } from "@/lib/store";
 import { Avatar } from "../Avatar";
 import { FeedbackButton } from "./FeedbackButton";
 import { NotificationBell } from "./NotificationBell";
+import { ThemeToggle } from "../ThemeToggle";
 
 /** Breadcrumb: Org › Project › Pod — clickable (frontend spec §3.2). In the
  *  publisher workspace there's no org hierarchy, so it just anchors "Publisher". */
@@ -86,7 +87,7 @@ export function TopBar() {
         {showPalette && (
           <button
             onClick={() => setPaletteOpen(true)}
-            className="flex items-center gap-2 rounded-full border border-line bg-white px-3.5 py-1.5 text-sm text-muted transition hover:border-primary hover:text-primary"
+            className="flex items-center gap-2 rounded-full border border-line bg-card px-3.5 py-1.5 text-sm text-muted transition hover:border-primary hover:text-primary"
             aria-label="Search (Cmd+K)"
           >
             <Search className="h-3.5 w-3.5" />
@@ -94,6 +95,8 @@ export function TopBar() {
             <span className="kbd hidden sm:inline">⌘K</span>
           </button>
         )}
+
+        <ThemeToggle />
 
         <FeedbackButton />
 

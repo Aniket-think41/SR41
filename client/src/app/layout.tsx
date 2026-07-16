@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Schibsted_Grotesk, Manrope, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/Providers";
+import { THEME_INIT_SCRIPT } from "@/components/ThemeToggle";
 
 const schibsted = Schibsted_Grotesk({
   variable: "--font-schibsted",
@@ -40,6 +41,8 @@ export default function RootLayout({
       className={`${schibsted.variable} ${manrope.variable} ${jetbrains.variable} h-full`}
     >
       <body className="min-h-full">
+        {/* Set the theme class before paint to avoid a flash of the wrong theme. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <Providers>{children}</Providers>
       </body>
     </html>

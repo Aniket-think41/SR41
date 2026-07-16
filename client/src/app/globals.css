@@ -10,6 +10,7 @@
 @theme {
   /* Color — identical to the website */
   --color-bg: #ffffff;
+  --color-card: #ffffff; /* solid card/input white — flips in dark mode */
   --color-surface: #f7f9fb;
   --color-surface-2: #f1f0fb;
   --color-ink: #141413;
@@ -58,6 +59,42 @@
   --sidebar-w: 240px;
   --sidebar-w-collapsed: 64px;
   --topbar-h: 64px;
+}
+
+/* ============================================================
+   Dark theme — override token *values* so every bg-surface / text-ink / .card
+   / .field flips without touching a single component. Activated by the
+   ThemeProvider adding `class="dark"` on <html>. Base palette kept IN SYNC with
+   the marketing site (website/src/app/globals.css); the extra dashboard tokens
+   (scope badges, danger, success) get dark tints here.
+   ============================================================ */
+.dark {
+  --color-bg: #0e0e14;
+  --color-card: #17171f;
+  --color-surface: #16161f;
+  --color-surface-2: #20202b;
+  --color-ink: #f3f3f6;
+  --color-body: #c3c3cc;
+  --color-muted: #9296a1;
+  --color-line: #2a2a37;
+  --color-primary: #8f78f2;
+  --color-primary-700: #7c66ec;
+  --color-primary-50: #221d3b;
+
+  /* Scope badges — dark tints with lightened foregrounds for contrast. */
+  --color-scope-org: #7fb0ff;
+  --color-scope-org-bg: #16233b;
+  --color-scope-project: #f0b356;
+  --color-scope-project-bg: #33260f;
+  --color-scope-pod: #6ede9b;
+  --color-scope-pod-bg: #123322;
+  --color-scope-public: #a996f6;
+  --color-scope-public-bg: #221d3b;
+
+  --color-danger: #f2837a;
+  --color-danger-bg: #3a1714;
+  --color-success: #6ede9b;
+  color-scheme: dark;
 }
 
 html {
@@ -135,7 +172,7 @@ h1, h2, h3, h4 {
   box-shadow: 0 14px 30px -10px rgba(115, 90, 229, 0.7);
 }
 .btn-secondary {
-  background-color: #fff;
+  background-color: var(--color-card);
   color: var(--color-ink);
   border: 1.5px solid var(--color-line);
 }
@@ -166,7 +203,7 @@ h1, h2, h3, h4 {
 
 /* --- Cards --- */
 .card {
-  background-color: #fff;
+  background-color: var(--color-card);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-card);
   box-shadow: 0 2px 4px rgba(20, 20, 19, 0.03);
@@ -204,7 +241,7 @@ h1, h2, h3, h4 {
   width: 100%;
   border: 1.5px solid var(--color-line);
   border-radius: 14px;
-  background-color: #fff;
+  background-color: var(--color-card);
   padding: 0.62rem 0.9rem;
   font-size: 0.9rem;
   color: var(--color-ink);
@@ -238,7 +275,7 @@ h1, h2, h3, h4 {
   padding: 0.42rem 1rem;
   font-size: 0.82rem;
   font-weight: 600;
-  background-color: #fff;
+  background-color: var(--color-card);
   color: var(--color-body);
   border: 1px solid var(--color-line);
   cursor: pointer;
@@ -487,7 +524,7 @@ h1, h2, h3, h4 {
   border-bottom-width: 2px;
   border-radius: 6px;
   padding: 0.1rem 0.38rem;
-  background-color: #fff;
+  background-color: var(--color-card);
 }
 
 /* soft gradient blobs (auth pages) */

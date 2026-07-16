@@ -11,6 +11,7 @@
 @theme {
   /* Color */
   --color-bg: #ffffff;
+  --color-card: #ffffff; /* solid card/surface white — flips in dark mode */
   --color-surface: #f7f9fb;
   --color-surface-2: #f1f0fb; /* faint violet-grey */
   --color-ink: #141413; /* headings */
@@ -42,6 +43,27 @@
 :root {
   --background: var(--color-bg);
   --foreground: var(--color-ink);
+}
+
+/* ============================================================
+   Dark theme — override the token *values* so every bg-surface / text-ink /
+   .card flips without touching a single component. Activated by the
+   ThemeProvider adding `class="dark"` on <html>. Kept in sync with the
+   dashboard (client/src/app/globals.css) so both surfaces look identical.
+   ============================================================ */
+.dark {
+  --color-bg: #0e0e14;
+  --color-surface: #16161f;
+  --color-surface-2: #20202b;
+  --color-card: #17171f;
+  --color-ink: #f3f3f6;
+  --color-body: #c3c3cc;
+  --color-muted: #9296a1;
+  --color-line: #2a2a37;
+  --color-primary: #8f78f2;
+  --color-primary-700: #7c66ec;
+  --color-primary-50: #221d3b;
+  color-scheme: dark;
 }
 
 html {
@@ -141,7 +163,7 @@ body {
   box-shadow: 0 14px 30px -10px rgba(115, 90, 229, 0.7);
 }
 .btn-secondary {
-  background-color: #fff;
+  background-color: var(--color-card);
   color: var(--color-ink);
   border: 1.5px solid var(--color-line);
 }
@@ -161,7 +183,7 @@ body {
 
 /* --- Cards --- */
 .card {
-  background-color: #fff;
+  background-color: var(--color-card);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-card);
   box-shadow: 0 2px 4px rgba(20, 20, 19, 0.03);
