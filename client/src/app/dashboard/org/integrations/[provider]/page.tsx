@@ -18,7 +18,7 @@ import {
   ArrowLeft, Github, Plug, Check, Loader2, Search, Star, Lock, ExternalLink,
   Trash2, KeyRound, PackagePlus, RefreshCw, ShieldCheck, CircleSlash,
   GitFork, CircleDot, Scale, ChevronDown, ChevronRight,
-  UploadCloud, DownloadCloud, Unlink, Globe,
+  UploadCloud, DownloadCloud, Unlink, Globe, Boxes,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/api/http";
@@ -27,6 +27,7 @@ import type { GithubRepo, IntegrationAuthMethod, IntegrationProvider } from "@/l
 import { useToast } from "@/components/Toast";
 import { FeatureGate } from "@/components/FeatureGate";
 import { ScopeRepoLinks } from "@/components/dashboard/ScopeRepoLinks";
+import { HiveConnect, HivePanel } from "@/components/dashboard/HivePanel";
 
 const SYNC_MODES = [
   { key: "manual", label: "Manual", hint: "Nothing syncs automatically — you trigger it.", needs: null as string | null },
@@ -36,7 +37,7 @@ const SYNC_MODES = [
 ] as const;
 
 function ProviderIcon({ icon, className = "" }: { icon: string; className?: string }) {
-  const Icon = icon === "github" ? Github : Plug;
+  const Icon = icon === "github" ? Github : icon === "hive" ? Boxes : Plug;
   return <Icon className={className || "h-6 w-6"} />;
 }
 
@@ -93,6 +94,10 @@ function ConnectFlow({ provider, slug, isAdmin }: { provider: IntegrationProvide
     onSuccess: (r) => { window.location.href = r.authorize_url; },
     onError: (e) => toast(errorMessage(e), "error"),
   });
+
+  // Hive uses a dedicated connect flow (OAuth popup / paste token). Rendered
+  // after all hooks so hook order stays stable (rules-of-hooks).
+  if (provider.key === "hive") return <HiveConnect slug={slug} isAdmin={isAdmin} />;
 
   if (!isAdmin) {
     return (
@@ -646,7 +651,7 @@ function ConnectedView({ provider, slug, orgId, isAdmin }: { provider: Integrati
               // eslint-disable-next-line @next/next/no-img-element
               <img src={conn.account_avatar} alt="" className="h-10 w-10 rounded-xl" />
             ) : (
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-surface-2"><Github className="h-5 w-5" /></span>
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-surface-2"><ProviderIcon icon={provider.icon} className="h-5 w-5" /></span>
             )}
             <div>
               <div className="flex items-center gap-2">
@@ -704,7 +709,10 @@ function ConnectedView({ provider, slug, orgId, isAdmin }: { provider: Integrati
 
       <Capabilities provider={provider} />
 
-      {/* sync mode — write modes gate on the `write` capability */}
+      {provider.key === "hive" && <HivePanel slug={slug} isAdmin={isAdmin} />}
+
+      {/* sync mode — write modes gate on the `write` capability (GitHub) */}
+      {provider.key === "github" && (
       <div className="card p-6">
         <h3 className="font-display text-lg font-semibold text-ink">Sync mode</h3>
         <p className="mt-1 text-sm text-body">Which direction changes flow between GitHub and SkillShare.</p>
@@ -732,6 +740,7 @@ function ConnectedView({ provider, slug, orgId, isAdmin }: { provider: Integrati
           })}
         </div>
       </div>
+      )}
 
       {provider.key === "github" && <RepoBrowser slug={slug} orgId={orgId} canPrivate={!!capOn.get("read_private")} />}
       {provider.key === "github" && isAdmin && <PublishPanel slug={slug} canWrite={!!capOn.get("write")} />}

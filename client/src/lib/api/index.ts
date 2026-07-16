@@ -15,6 +15,9 @@ import type {
   Feedback,
   FeedbackInput,
   GithubRepo,
+  HiveApplyResult,
+  HiveFetchSummary,
+  HiveStagedResponse,
   IntegrationProvider,
   ResourceRepoLink,
   ScopeRepoLink,
@@ -285,6 +288,22 @@ export const api = {
     request<{ ok: true }>("DELETE", `/api/orgs/${slug}/integrations/github/scope-links/${linkId}`),
   githubScopeSync: (slug: string, linkId: string) =>
     request<{ pushed: number; imported?: number }>("POST", `/api/orgs/${slug}/integrations/github/scope-links/${linkId}/sync`),
+
+  /* ---- hive (HR/directory) integration ---- */
+  /** Begin the Hive OAuth popup → returns the Hive authorize URL to open. */
+  hiveOAuthStart: (slug: string, tenant: string) =>
+    request<{ authorize_url: string }>("POST", `/api/orgs/${slug}/integrations/hive/oauth/start${qs({ tenant })}`),
+  /** Pull the Hive directory into staging for review (adds no members, no mail). */
+  hiveFetch: (slug: string) =>
+    request<HiveFetchSummary>("POST", `/api/orgs/${slug}/integrations/hive/fetch`, {}),
+  /** The staged Hive entities + their diff status, grouped for the review screen. */
+  hiveStaged: (slug: string, opts: { kind?: string; status?: string } = {}) =>
+    request<HiveStagedResponse>("GET", `/api/orgs/${slug}/integrations/hive/staged${qs(opts)}`),
+  /** Import staged entities into the org (all / members / projects / groups). */
+  hiveApply: (
+    slug: string,
+    body: { scope?: string; refs?: string[]; create_structure?: boolean; notify?: boolean; offboard?: boolean }
+  ) => request<HiveApplyResult>("POST", `/api/orgs/${slug}/integrations/hive/apply`, body),
 
   /* ---- projects ---- */
   projects: (slug: string) => request<Project[]>("GET", `/api/orgs/${slug}/projects`),

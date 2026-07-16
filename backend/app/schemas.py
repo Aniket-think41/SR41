@@ -246,7 +246,7 @@ class IntegrationConnectIn(BaseModel):
     pins the org/user login the connection is scoped to. The token is validated
     against the provider, then encrypted at rest — it is never returned."""
 
-    token: str = Field(min_length=10, max_length=500)
+    token: str = Field(min_length=10, max_length=4000)
     account: str | None = Field(default=None, max_length=120)
     auth_method: str = Field(default="classic_pat", max_length=40)
 
@@ -311,6 +311,38 @@ class GithubPublishScopeIn(BaseModel):
 
     scope_type: str = "ORG"  # ORG | PROJECT | POD
     scope_id: str | None = None
+
+
+# ---- Hive (HR/directory) integration ----
+
+
+class HiveConnectIn(BaseModel):
+    """Connect Hive by pasting a short-lived access token + the tenant code
+    (the ``service_token`` method — advanced/testing). The normal path is the
+    OAuth popup (``/hive/oauth/start``)."""
+
+    token: str = Field(min_length=10, max_length=4000)
+    tenant: str = Field(min_length=1, max_length=120)
+    auth_method: str = Field(default="service_token", max_length=40)
+
+
+class HiveApplyIn(BaseModel):
+    """Import staged Hive entities into the organization. Connecting/fetching
+    never adds members; this is the explicit, admin-driven apply step.
+
+    ``scope`` chooses what to import: everything, or only members / projects /
+    groups (team-wise or project-wise imports). ``refs`` optionally narrows to
+    specific staged external refs (empty → all pending of that scope).
+    ``create_structure`` creates SkillShare Projects/Pods for Hive
+    projects/groups. ``notify`` stays False so bulk imports send no mail — users
+    sign in via Google SSO with their Hive email. ``offboard`` also removes the
+    members that the sync created but that are gone/inactive in Hive now."""
+
+    scope: Literal["all", "members", "projects", "groups"] = "all"
+    refs: list[str] = Field(default_factory=list, max_length=5000)
+    create_structure: bool = True
+    notify: bool = False
+    offboard: bool = False
 
 
 # ---- Device-authorization login (CLI / MCP browser login) ----

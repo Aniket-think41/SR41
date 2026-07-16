@@ -454,6 +454,49 @@ export interface IntegrationProvider {
   connection: IntegrationConnection | null;
 }
 
+/** One entity pulled from Hive into staging, with its diff status. */
+export interface HiveStagedEntity {
+  id: string;
+  kind: "employee" | "project" | "group";
+  external_ref: string;
+  email: string | null;
+  display_name: string;
+  status: "pending" | "applied" | "removed" | "skipped";
+  payload: Record<string, unknown>;
+  fetched_at: string | null;
+  applied_at: string | null;
+}
+
+/** The staged Hive directory grouped for the review screen. */
+export interface HiveStagedResponse {
+  groups: {
+    employee: HiveStagedEntity[];
+    project: HiveStagedEntity[];
+    group: HiveStagedEntity[];
+  };
+  counts: { pending: number; applied: number; removed: number; skipped: number };
+}
+
+/** Summary returned by a Hive fetch. */
+export interface HiveFetchSummary {
+  members: number;
+  projects: number;
+  groups: number;
+  allocations: number;
+  pending_count: number;
+  applied_count: number;
+  removed_count: number;
+}
+
+/** What a Hive apply changed. */
+export interface HiveApplyResult {
+  members_added: number;
+  projects_created: number;
+  pods_created: number;
+  memberships_added: number;
+  offboarded: number;
+}
+
 /** A link between a SkillShare resource and a GitHub repo (publish/attach). */
 export interface ResourceRepoLink {
   id: string;

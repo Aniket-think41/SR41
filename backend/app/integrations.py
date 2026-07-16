@@ -54,6 +54,27 @@ PROVIDER_CATALOG: list[dict] = [
         "sort_order": 10,
         "enabled": True,
     },
+    {
+        "key": "hive",
+        "name": "Hive",
+        "tagline": "Mirror your company's people and teams from Hive into your organization.",
+        "description": (
+            "Connect Hive (your HR & delivery system) and SkillShare keeps your organization "
+            "in step with the real company: import employees as members, map delivery projects "
+            "to projects and teams to pods, and keep membership current as people join, move, "
+            "and leave. Connecting only fetches the directory for review — nothing is added until "
+            "you approve it, and imports never send bulk mail."
+        ),
+        "category": "HR & Directory",
+        "icon": "hive",
+        "docs_url": "https://hive.think41.com/",
+        "auth_type": "oauth",
+        "min_plan": "ENTERPRISE",
+        "feature_flag": None,
+        "status": "available",
+        "sort_order": 20,
+        "enabled": True,
+    },
 ]
 
 _CATALOG_KEYS = {p["key"] for p in PROVIDER_CATALOG}
@@ -94,6 +115,30 @@ AUTH_METHODS: dict[str, list[dict]] = {
             "name": "GitHub App",
             "hint": "Org-grade install with fine-grained per-repo access and webhooks.",
             "available": False,  # activated when GITHUB_APP_ID + private key are set
+            "recommended": [],
+        },
+    ],
+    "hive": [
+        {
+            "key": "oauth",
+            "name": "Sign in with Hive",
+            "hint": "Authorize SkillShare in your browser — no token to paste. Sign in with the "
+                    "Google account you use for Hive; use an HR / allocation-manager account so "
+                    "the sync can see everyone (including leavers) and all project allocations.",
+            "docs_url": "https://hive.think41.com/",
+            "available": True,
+            "recommended": [
+                {"scope": "employees:read", "why": "Import employees as organization members", "required": True},
+                {"scope": "delivery:read", "why": "Map delivery projects to projects", "required": False},
+                {"scope": "allocations:read", "why": "Place people on the right project/pod", "required": False},
+                {"scope": "groups:read", "why": "Map teams to pods with their members", "required": False},
+            ],
+        },
+        {
+            "key": "service_token",
+            "name": "Paste a Hive token",
+            "hint": "Advanced / testing: paste a short-lived Hive access token and the tenant code.",
+            "available": True,
             "recommended": [],
         },
     ],
@@ -147,6 +192,23 @@ CAPABILITY_CATALOG: dict[str, list[dict]] = {
         {"key": "webhooks", "name": "Receive repository events",
          "description": "Live sync on push/release via webhooks. GitHub App installs get this automatically; a classic PAT needs the admin:repo_hook scope.",
          "always": False, "scopes": ["admin:repo_hook"], "recommend": "admin:repo_hook"},
+    ],
+    # Hive access is governed by the connecting user's role in Hive (OPA), not by
+    # OAuth scopes we can introspect — so these show as available and the connect
+    # hint warns that an HR / allocation-manager account is needed for full reach.
+    "hive": [
+        {"key": "read_people", "name": "Read employees",
+         "description": "Import employees as organization members and detect leavers.",
+         "always": True, "scopes": []},
+        {"key": "read_projects", "name": "Read delivery projects",
+         "description": "Map Hive projects to SkillShare projects.",
+         "always": True, "scopes": []},
+        {"key": "read_allocations", "name": "Read allocations",
+         "description": "Place people on the projects/pods they're allocated to.",
+         "always": True, "scopes": []},
+        {"key": "read_groups", "name": "Read teams",
+         "description": "Map Hive groups/teams to pods with their members.",
+         "always": True, "scopes": []},
     ],
 }
 
@@ -226,6 +288,45 @@ def get_credentials(conn: OrgIntegration) -> dict:
         return json.loads(crypto.decrypt(conn.credentials_enc))
     except Exception:
         return {}
+
+
+# --------------------------------------------------------------------------- #
+# Hive credential helpers (OAuth access token with auto-refresh)
+# --------------------------------------------------------------------------- #
+
+def hive_tenant(conn: OrgIntegration) -> str:
+    """The Hive tenant code this connection is bound to."""
+    tenant = (conn.config or {}).get("tenant") or conn.account_label
+    if not tenant:
+        from .errors import validation
+
+        raise validation("This Hive connection has no tenant set — reconnect it")
+    return tenant
+
+
+def hive_access_token(db: Session, conn: OrgIntegration) -> str:
+    """Return a valid Hive access token, refreshing from the stored refresh token
+    if it has expired (the A+ flow) and persisting the rotated credential."""
+    from . import hive
+
+    creds = get_credentials(conn)
+    if not creds.get("access_token"):
+        from .errors import validation
+
+        raise validation("This Hive connection has no access token — reconnect it")
+    if hive.token_expired(creds) and creds.get("refresh_token"):
+        creds = hive.refresh_access_token(creds)
+        set_credentials(conn, creds)
+        db.commit()
+    return creds["access_token"]
+
+
+def hive_client(db: Session, conn: OrgIntegration):
+    """Build a live HiveClient for this connection (token refreshed as needed)."""
+    from . import hive
+
+    token = hive_access_token(db, conn)
+    return hive.build_client({"access_token": token}, hive_tenant(conn))
 
 
 # --------------------------------------------------------------------------- #

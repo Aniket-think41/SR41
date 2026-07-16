@@ -19,4 +19,5 @@ cryptography>=42.0 # at-rest encryption for integration credentials (app/crypto.
 # The app degrades gracefully if any are missing (imports are guarded).
 razorpay>=1.4       # payments (activates with RAZORPAY_KEY_ID/SECRET)
 redis>=5.0          # caching + distributed rate limiting (activates with REDIS_URL)
+celery[redis]>=5.3  # background sync worker + beat (activates with CELERY_BROKER_URL/REDIS_URL)
 sentry-sdk>=2.0     # error monitoring (activates with SENTRY_DSN)
