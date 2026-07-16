@@ -1074,6 +1074,64 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     return { pushed };
   }],
 
+  ["GET", "/api/orgs/:slug/integrations/github/scope-links", (p, _b, q, db) => {
+    const { org } = requireIntegrations(db, p.slug, false);
+    let rows = db.scope_repo_links.filter((l) => l.org_id === org.id);
+    const st = q.get("scope_type");
+    const sid = q.get("scope_id");
+    if (st) rows = rows.filter((l) => l.scope_type === st);
+    if (sid) rows = rows.filter((l) => l.scope_id === sid);
+    return rows;
+  }],
+
+  ["POST", "/api/orgs/:slug/integrations/github/scope-links", (p, body, _q, db) => {
+    const { org } = requireIntegrations(db, p.slug, true);
+    const conn = orgConnection(db, org.id, "github");
+    if (!(conn?.capabilities ?? []).includes("write"))
+      throw new HttpError(403, "FORBIDDEN", "This connection can't write to GitHub — grant the 'repo' scope and Sync");
+    const full = String(body.repo_full_name ?? "").trim();
+    if (full.length < 3) throw new HttpError(422, "VALIDATION_ERROR", "repo_full_name is required");
+    const st = String(body.scope_type ?? "ORG") as "ORG" | "PROJECT" | "POD";
+    const sid = String(body.scope_id ?? "");
+    let link = db.scope_repo_links.find((l) => l.org_id === org.id && l.scope_type === st && l.scope_id === sid && l.repo_full_name === full);
+    if (!link) {
+      link = {
+        id: uid("srl"), org_id: org.id, scope_type: st, scope_id: sid, provider_key: "github",
+        repo_full_name: full, repo_url: `https://github.com/${full}`, path_prefix: String(body.path_prefix ?? ""),
+        visibility: (String(body.visibility ?? "all") as "all" | "public" | "private"),
+        auto_sync: body.auto_sync !== false, last_synced_at: null, created_at: now(),
+      };
+      db.scope_repo_links.push(link);
+    } else {
+      link.visibility = (String(body.visibility ?? link.visibility) as "all" | "public" | "private");
+      link.auto_sync = body.auto_sync !== false;
+    }
+    saveDb();
+    return link;
+  }],
+
+  ["DELETE", "/api/orgs/:slug/integrations/github/scope-links/:id", (p, _b, _q, db) => {
+    const { org } = requireIntegrations(db, p.slug, true);
+    const idx = db.scope_repo_links.findIndex((l) => l.id === p.id && l.org_id === org.id);
+    if (idx >= 0) db.scope_repo_links.splice(idx, 1);
+    saveDb();
+    return { ok: true };
+  }],
+
+  ["POST", "/api/orgs/:slug/integrations/github/scope-links/:id/sync", (p, _b, _q, db) => {
+    const { org } = requireIntegrations(db, p.slug, true);
+    const link = db.scope_repo_links.find((l) => l.id === p.id && l.org_id === org.id);
+    if (!link) throw notFound("Scope link");
+    // Mock: count resources in the scope that match the visibility filter.
+    const inScope = db.resources.filter((r) => {
+      if (link.scope_type === "ORG") return scopeOrgId(db, r) === org.id;
+      return r.scope_type === link.scope_type && r.scope_id === link.scope_id;
+    }).filter((r) => link.visibility === "all" || (link.visibility === "public" ? r.is_public : !r.is_public));
+    link.last_synced_at = now();
+    saveDb();
+    return { pushed: inScope.length };
+  }],
+
   ["GET", "/api/orgs/:slug/integrations", (p, _b, _q, db) => {
     const { org } = requireIntegrations(db, p.slug, false);
     return db.org_integrations.filter((c) => c.org_id === org.id).map((c) => connectionOut(c));

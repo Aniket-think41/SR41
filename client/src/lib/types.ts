@@ -472,6 +472,22 @@ export interface ResourceRepoLink {
   created_at: string | null;
 }
 
+/** A repo attached to a scope (org/team/pod). Resources in the scope whose
+ *  visibility matches auto-sync to it. A scope can have many. */
+export interface ScopeRepoLink {
+  id: string;
+  scope_type: "ORG" | "PROJECT" | "POD";
+  scope_id: string;
+  provider_key: string;
+  repo_full_name: string;
+  repo_url: string | null;
+  path_prefix: string;
+  visibility: "all" | "public" | "private";
+  auto_sync: boolean;
+  last_synced_at: string | null;
+  created_at: string | null;
+}
+
 /** A repository summary returned by the GitHub integration search/list. */
 export interface GithubRepo {
   full_name: string;

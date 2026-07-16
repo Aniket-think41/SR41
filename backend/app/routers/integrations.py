@@ -30,17 +30,21 @@ from ..integrations import (
     available_providers,
     compute_capabilities,
     connection_out,
+    connection_token,
     get_credentials,
     has_capability,
     link_out,
     provider_available,
     provider_out,
+    push_resource_to,
     resource_repo_files,
+    scope_link_out,
     set_credentials,
+    visibility_matches,
 )
 from ..entitlements import _resolve_owning_org
 from ..features import feature_enabled
-from ..models import IntegrationProvider, OrgIntegration, Resource, ResourceRepoLink, User
+from ..models import IntegrationProvider, OrgIntegration, Resource, ResourceRepoLink, ScopeRepoLink, User
 from ..permissions import org_by_slug, require_org_admin, require_org_member
 from ..schemas import (
     GithubBulkImportIn,
@@ -50,6 +54,7 @@ from ..schemas import (
     GithubResourceRefIn,
     IntegrationConfigPatch,
     IntegrationConnectIn,
+    ScopeRepoLinkIn,
 )
 from ..security import get_current_user
 from ..serialize import log_activity, resource_out
@@ -724,6 +729,115 @@ def github_sync_all(slug: str, user: User = Depends(get_current_user), db: Sessi
             pushed += 1
         except Exception:
             continue
+    db.commit()
+    return {"pushed": pushed}
+
+
+# --------------------------------------------------------------------------- #
+# Scope↔repo links: attach a repo to an org / team / pod (many per scope),
+# auto-sync on resource add, org public/private pairing
+# --------------------------------------------------------------------------- #
+
+def _verify_scope(db: Session, org, scope_type: str, scope_id: str) -> None:
+    if scope_type not in ("ORG", "PROJECT", "POD"):
+        raise validation("scope_type must be ORG, PROJECT, or POD")
+    if scope_type == "ORG":
+        if scope_id != org.id:
+            raise forbidden("That scope doesn't belong to this organization")
+        return
+    owning = _resolve_owning_org(db, scope_type, scope_id)
+    if owning is None or owning.id != org.id:
+        raise forbidden("That scope doesn't belong to this organization")
+
+
+@router.get("/github/scope-links")
+def github_scope_links(
+    slug: str, scope_type: str = "", scope_id: str = "",
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
+):
+    """Repos attached to the org's scopes (org / team / pod). Filter by a scope."""
+    org = org_by_slug(db, slug)
+    _require_section(db, org, user)
+    q = db.query(ScopeRepoLink).filter(ScopeRepoLink.org_id == org.id)
+    if scope_type:
+        q = q.filter(ScopeRepoLink.scope_type == scope_type)
+    if scope_id:
+        q = q.filter(ScopeRepoLink.scope_id == scope_id)
+    return [scope_link_out(l) for l in q.order_by(ScopeRepoLink.created_at.desc()).all()]
+
+
+@router.post("/github/scope-links")
+def github_attach_scope(
+    slug: str, body: ScopeRepoLinkIn,
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
+):
+    """Attach a repo to a scope. Resources in the scope whose visibility matches
+    auto-sync to it. Attach a public repo (visibility=public) + a private repo
+    (visibility=private) at ORG scope for the public/private pairing."""
+    org = org_by_slug(db, slug)
+    _require_section(db, org, user, admin=True)
+    conn = _connection(db, org, "github")
+    if conn is None or conn.status != "connected":
+        raise validation("Connect GitHub first")
+    _require_write(db, org, conn)
+    _verify_scope(db, org, body.scope_type, body.scope_id)
+    token = _github_token(db, org, conn)
+    repo = github.get_repo(token, body.repo_full_name)
+    if not repo:
+        raise not_found(f'Repository "{body.repo_full_name}"')
+    existing = (
+        db.query(ScopeRepoLink)
+        .filter(ScopeRepoLink.org_id == org.id, ScopeRepoLink.scope_type == body.scope_type,
+                ScopeRepoLink.scope_id == body.scope_id, ScopeRepoLink.repo_full_name == body.repo_full_name)
+        .first()
+    )
+    link = existing or ScopeRepoLink(org_id=org.id, scope_type=body.scope_type, scope_id=body.scope_id,
+                                     created_by=user.id)
+    link.repo_full_name = repo["full_name"]
+    link.repo_url = repo.get("html_url")
+    link.visibility = body.visibility
+    link.auto_sync = body.auto_sync
+    link.path_prefix = body.path_prefix
+    if existing is None:
+        db.add(link)
+    _ensure_repo_webhook(conn, token, repo["full_name"])
+    db.commit()
+    return scope_link_out(link)
+
+
+@router.delete("/github/scope-links/{link_id}")
+def github_detach_scope(slug: str, link_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Detach a repo from a scope (does not delete the repo)."""
+    org = org_by_slug(db, slug)
+    _require_section(db, org, user, admin=True)
+    db.query(ScopeRepoLink).filter(ScopeRepoLink.id == link_id, ScopeRepoLink.org_id == org.id).delete()
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/github/scope-links/{link_id}/sync")
+def github_scope_sync(slug: str, link_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Push every matching resource currently in the scope to the attached repo."""
+    org = org_by_slug(db, slug)
+    _require_section(db, org, user, admin=True)
+    conn = _connection(db, org, "github")
+    if conn is None or conn.status != "connected":
+        raise validation("Connect GitHub first")
+    _require_write(db, org, conn)
+    link = db.query(ScopeRepoLink).filter(ScopeRepoLink.id == link_id, ScopeRepoLink.org_id == org.id).first()
+    if link is None:
+        raise not_found("Scope link")
+    token = _github_token(db, org, conn)
+    pushed = 0
+    for resource in _scope_resources(db, org, link.scope_type, link.scope_id):
+        if not visibility_matches(link.visibility, resource.is_public):
+            continue
+        try:
+            push_resource_to(token, link.repo_full_name, resource, link.path_prefix)
+            pushed += 1
+        except Exception:
+            continue
+    link.last_synced_at = datetime.now(timezone.utc)
     db.commit()
     return {"pushed": pushed}
 

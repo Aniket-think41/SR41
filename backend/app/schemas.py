@@ -282,6 +282,18 @@ class GithubResourceRefIn(BaseModel):
     resource_id: str = Field(min_length=1, max_length=64)
 
 
+class ScopeRepoLinkIn(BaseModel):
+    """Attach a GitHub repo to a scope (org/team/pod). Resources in the scope
+    whose visibility matches auto-sync to the repo. A scope may have many."""
+
+    scope_type: str  # ORG | PROJECT | POD
+    scope_id: str = Field(min_length=1, max_length=64)
+    repo_full_name: str = Field(min_length=3, max_length=200)
+    visibility: Literal["all", "public", "private"] = "all"
+    auto_sync: bool = True
+    path_prefix: str = Field(default="", max_length=200)
+
+
 class GithubBulkImportIn(BaseModel):
     """Import detected resources from several repos into a scope at once."""
 

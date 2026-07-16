@@ -17,6 +17,7 @@ import type {
   GithubRepo,
   IntegrationProvider,
   ResourceRepoLink,
+  ScopeRepoLink,
   Invitation,
   Notification,
   OrgEntitlements,
@@ -268,6 +269,17 @@ export const api = {
   /** Re-push every linked resource in the org to its repo. */
   githubSyncAll: (slug: string) =>
     request<{ pushed: number }>("POST", `/api/orgs/${slug}/integrations/github/sync-all`),
+  /* ---- scope↔repo links (attach a repo to org/team/pod; auto-sync) ---- */
+  githubScopeLinks: (slug: string, opts: { scope_type?: string; scope_id?: string } = {}) =>
+    request<ScopeRepoLink[]>("GET", `/api/orgs/${slug}/integrations/github/scope-links${qs(opts)}`),
+  githubAttachScope: (
+    slug: string,
+    body: { scope_type: string; scope_id: string; repo_full_name: string; visibility?: string; auto_sync?: boolean; path_prefix?: string }
+  ) => request<ScopeRepoLink>("POST", `/api/orgs/${slug}/integrations/github/scope-links`, body),
+  githubDetachScope: (slug: string, linkId: string) =>
+    request<{ ok: true }>("DELETE", `/api/orgs/${slug}/integrations/github/scope-links/${linkId}`),
+  githubScopeSync: (slug: string, linkId: string) =>
+    request<{ pushed: number }>("POST", `/api/orgs/${slug}/integrations/github/scope-links/${linkId}/sync`),
 
   /* ---- projects ---- */
   projects: (slug: string) => request<Project[]>("GET", `/api/orgs/${slug}/projects`),

@@ -26,6 +26,7 @@ import { qk, useCurrentOrg, useIntegration } from "@/lib/hooks";
 import type { GithubRepo, IntegrationAuthMethod, IntegrationProvider } from "@/lib/types";
 import { useToast } from "@/components/Toast";
 import { FeatureGate } from "@/components/FeatureGate";
+import { ScopeRepoLinks } from "@/components/dashboard/ScopeRepoLinks";
 
 const SYNC_MODES = [
   { key: "manual", label: "Manual", hint: "Nothing syncs automatically — you trigger it.", needs: null as string | null },
@@ -734,6 +735,10 @@ function ConnectedView({ provider, slug, orgId, isAdmin }: { provider: Integrati
 
       {provider.key === "github" && <RepoBrowser slug={slug} orgId={orgId} canPrivate={!!capOn.get("read_private")} />}
       {provider.key === "github" && isAdmin && <PublishPanel slug={slug} canWrite={!!capOn.get("write")} />}
+      {/* Org-wide repos — attach a public repo (public) + a private repo (private) for the pairing */}
+      {provider.key === "github" && orgId && (
+        <ScopeRepoLinks scopeType="ORG" scopeId={orgId} title="Organization repositories (public / private pairing)" />
+      )}
     </div>
   );
 }

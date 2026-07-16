@@ -311,6 +311,137 @@ def link_out(link, resource=None) -> dict:
     }
 
 
+def _resource_subpath(resource) -> str:
+    import re
+
+    slug = re.sub(r"^-+|-+$", "", re.sub(r"[^a-z0-9]+", "-", (resource.title or "resource").lower())) or "resource"
+    return f"{resource.type.lower()}/{slug}"
+
+
+def _scope_chain(db: Session, resource) -> set[tuple[str, str]]:
+    """The set of (scope_type, scope_id) that "cover" a resource: its own scope
+    plus every ancestor (pod → project → org). A scope-repo link on any of these
+    catches the resource."""
+    from .models import Pod, Project
+
+    st, sid = resource.scope_type, resource.scope_id
+    if st == "PUBLIC" or not sid:
+        return set()
+    out: set[tuple[str, str]] = {(st, sid)}
+    if st == "POD":
+        pod = db.get(Pod, sid)
+        if pod:
+            out.add(("PROJECT", pod.project_id))
+            proj = db.get(Project, pod.project_id)
+            if proj:
+                out.add(("ORG", proj.org_id))
+    elif st == "PROJECT":
+        proj = db.get(Project, sid)
+        if proj:
+            out.add(("ORG", proj.org_id))
+    return out
+
+
+def visibility_matches(link_visibility: str, is_public: bool) -> bool:
+    if link_visibility == "public":
+        return bool(is_public)
+    if link_visibility == "private":
+        return not is_public
+    return True  # "all"
+
+
+def connection_token(conn: OrgIntegration) -> str | None:
+    """Return a usable GitHub token for a connection — minting a fresh App
+    installation token when needed. None if unavailable."""
+    from . import github
+    from .config import get_settings
+
+    creds = get_credentials(conn)
+    if conn.auth_method == "github_app":
+        s = get_settings()
+        iid = creds.get("installation_id")
+        if not iid or not (s.github_app_id and s.github_app_private_key):
+            return None
+        try:
+            return github.installation_token(s.github_app_id, s.github_app_private_key_pem, iid)["token"]
+        except Exception:
+            return None
+    return creds.get("token")
+
+
+def scope_link_out(link) -> dict:
+    return {
+        "id": link.id,
+        "scope_type": link.scope_type,
+        "scope_id": link.scope_id,
+        "provider_key": link.provider_key,
+        "repo_full_name": link.repo_full_name,
+        "repo_url": link.repo_url,
+        "path_prefix": link.path_prefix,
+        "visibility": link.visibility,
+        "auto_sync": link.auto_sync,
+        "last_synced_at": link.last_synced_at.isoformat() if link.last_synced_at else None,
+        "created_at": link.created_at.isoformat() if link.created_at else None,
+    }
+
+
+def push_resource_to(token: str, full_name: str, resource, base_path: str) -> str | None:
+    """Push a resource's files into <base_path>/<type>/<slug>/ in a repo (so many
+    resources coexist in one mono-repo). Returns the last blob sha."""
+    from . import github
+
+    branch = (github.get_repo(token, full_name) or {}).get("default_branch") or "main"
+    prefix = f"{base_path.rstrip('/')}/" if base_path else ""
+    sub = _resource_subpath(resource)
+    last = None
+    for p, content in resource_repo_files(resource):
+        last = github.put_file(token, full_name, f"{prefix}{sub}/{p}", content,
+                               f"skillshare: sync {resource.title}", branch)
+    return last
+
+
+def autosync_resource(db: Session, resource) -> None:
+    """Best-effort: push a resource to every auto_sync scope-repo link that covers
+    its scope and matches its visibility. Never raises (guards resource writes)."""
+    try:
+        from .models import OrgIntegration, ScopeRepoLink
+
+        chain = _scope_chain(db, resource)
+        if not chain:
+            return
+        ids = [sid for (_st, sid) in chain]
+        links = [
+            l for l in db.query(ScopeRepoLink)
+            .filter(ScopeRepoLink.provider_key == "github", ScopeRepoLink.scope_id.in_(ids)).all()
+            if (l.scope_type, l.scope_id) in chain and l.auto_sync
+            and visibility_matches(l.visibility, resource.is_public)
+        ]
+        if not links:
+            return
+        conn = (
+            db.query(OrgIntegration)
+            .filter(OrgIntegration.org_id == links[0].org_id,
+                    OrgIntegration.provider_key == "github", OrgIntegration.status == "connected")
+            .first()
+        )
+        if not conn or "write" not in (conn.capabilities or []):
+            return
+        token = connection_token(conn)
+        if not token:
+            return
+        import datetime as _dt
+
+        for link in links:
+            try:
+                push_resource_to(token, link.repo_full_name, resource, link.path_prefix)
+                link.last_synced_at = _dt.datetime.now(_dt.timezone.utc)
+            except Exception:
+                continue
+        db.commit()
+    except Exception:
+        pass
+
+
 def connection_out(conn: OrgIntegration | None) -> dict | None:
     if conn is None:
         return None

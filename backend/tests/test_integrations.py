@@ -251,6 +251,7 @@ def _stub_writes(monkeypatch, created: dict):
     monkeypatch.setattr(github, "set_topics", lambda *a, **k: None)
     monkeypatch.setattr(github, "get_repo", lambda token, full: {
         "full_name": full, "html_url": f"https://github.com/{full}", "private": True, "default_branch": "main"})
+    monkeypatch.setattr(github, "register_webhook", lambda *a, **k: None)
 
 
 def test_publish_creates_managed_repo_mirroring_visibility(monkeypatch):
@@ -397,6 +398,40 @@ def test_webhook_signature_verify():
     assert verify_webhook_signature(secret, body, good)
     assert not verify_webhook_signature(secret, body, "sha256=deadbeef")
     assert not verify_webhook_signature("", body, good)
+
+
+def test_scope_link_attach_and_autosync(monkeypatch):
+    h, _ = _user()
+    slug = _org(h, plan="PRO")
+    c.post(f"/api/orgs/{slug}/integrations/github/connect", json={"token": FAKE_TOKEN}, headers=h)
+    org_id = c.get(f"/api/orgs/{slug}", headers=h).json()["id"]
+    created: dict = {}
+    _stub_writes(monkeypatch, created)
+    puts = {"n": 0}
+    monkeypatch.setattr(github, "put_file", lambda *a, **k: (puts.__setitem__("n", puts["n"] + 1), "sha")[1])
+
+    # attach a mono-repo to the whole org
+    r = c.post(f"/api/orgs/{slug}/integrations/github/scope-links",
+               json={"scope_type": "ORG", "scope_id": org_id, "repo_full_name": "acme/mono", "visibility": "all"},
+               headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["repo_full_name"] == "acme/mono" and r.json()["auto_sync"] is True
+
+    # creating a resource in the org auto-pushes it to the attached repo
+    before = puts["n"]
+    _org_resource(h, slug, title="Auto Skill")
+    assert puts["n"] > before, "autosync should have pushed the new resource"
+
+    # it shows up in the scope's links
+    links = c.get(f"/api/orgs/{slug}/integrations/github/scope-links?scope_type=ORG&scope_id={org_id}", headers=h).json()
+    assert any(l["repo_full_name"] == "acme/mono" for l in links)
+
+
+def test_scope_link_visibility_routing(monkeypatch):
+    from app.integrations import visibility_matches
+    assert visibility_matches("all", True) and visibility_matches("all", False)
+    assert visibility_matches("public", True) and not visibility_matches("public", False)
+    assert visibility_matches("private", False) and not visibility_matches("private", True)
 
 
 def test_repo_summary_includes_health_metadata():

@@ -479,6 +479,37 @@ class ResourceRepoLink(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
 
+class ScopeRepoLink(Base):
+    """Attaches a GitHub repo to a SCOPE (org / project(team) / pod) rather than a
+    single resource. A scope can have MANY repos. When ``auto_sync`` is on, any
+    resource created/updated in the scope (or a child scope) whose visibility
+    matches ``visibility`` is pushed to the repo automatically — so members never
+    paste a repo link per resource.
+
+    ``visibility`` routes by resource visibility: "public" repo receives only
+    published resources, "private" only private ones, "all" everything. This is
+    how the org public+private pairing works: attach a public repo (public) and a
+    private repo (private) at ORG scope. Each resource lands under
+    ``<path_prefix>/<type>/<slug>/``."""
+
+    __tablename__ = "scope_repo_links"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("srl"))
+    org_id: Mapped[str] = mapped_column(String, ForeignKey("organizations.id"), index=True)
+    scope_type: Mapped[str] = mapped_column(String, index=True)  # ORG | PROJECT | POD
+    scope_id: Mapped[str] = mapped_column(String, index=True)
+    provider_key: Mapped[str] = mapped_column(String, default="github")
+    repo_full_name: Mapped[str] = mapped_column(String, index=True)
+    repo_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    path_prefix: Mapped[str] = mapped_column(String, default="")
+    visibility: Mapped[str] = mapped_column(String, default="all")  # all | public | private
+    auto_sync: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
 class License(Base):
     __tablename__ = "licenses"
 

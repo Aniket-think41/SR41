@@ -130,6 +130,21 @@ export interface Db {
     created_at: string;
     updated_at: string;
   }[];
+  /** scope ⇄ GitHub repo links (attach a repo to org/team/pod; auto-sync). */
+  scope_repo_links: {
+    id: string;
+    org_id: string;
+    scope_type: "ORG" | "PROJECT" | "POD";
+    scope_id: string;
+    provider_key: string;
+    repo_full_name: string;
+    repo_url: string | null;
+    path_prefix: string;
+    visibility: "all" | "public" | "private";
+    auto_sync: boolean;
+    last_synced_at: string | null;
+    created_at: string;
+  }[];
   /** resource ⇄ GitHub repo links (publish/attach layer). */
   resource_repo_links: {
     id: string;
@@ -985,6 +1000,7 @@ export function seed(): Db {
     org_features: [],
     org_integrations: [],
     resource_repo_links: [],
+    scope_repo_links: [],
     device_auths: [],
     // Mock mode only: start signed in as the demo user so the dashboard shows
     // data without a login round-trip. (When NEXT_PUBLIC_API_URL points at a

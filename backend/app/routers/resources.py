@@ -10,6 +10,7 @@ from ..config import get_settings
 from ..database import get_db
 from ..errors import ApiError, forbidden, not_found, validation
 from ..features import feature_enabled
+from ..integrations import autosync_resource
 from ..models import (
     Follow,
     Notification,
@@ -147,6 +148,7 @@ def create_resource(
     db.flush()
     _log_resource(db, user, r, "created", source=source)
     db.commit()
+    autosync_resource(db, r)  # push to any auto-sync scope repos (best-effort)
     return resource_out(db, r, user)
 
 
@@ -279,6 +281,7 @@ def update_resource(
         submit_for_review(db, r, user)
     _log_resource(db, user, r, "updated", meta=f"v{r.version}")
     db.commit()
+    autosync_resource(db, r)  # push updated content to auto-sync scope repos
     return resource_out(db, r, user)
 
 
@@ -480,6 +483,7 @@ def publish(
     if is_publicly_visible(r) and not was_visible:
         _notify_followers(db, db.get(User, r.author_id) or user, r)
     db.commit()
+    autosync_resource(db, r)  # now public → routes to public scope repos too
     return resource_out(db, r, user)
 
 
