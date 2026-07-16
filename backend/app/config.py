@@ -112,8 +112,13 @@ class Settings(BaseSettings):
     # payloads. Empty → the webhook endpoint returns 503 (disabled).
     github_webhook_secret: str = ""
 
-    # --- AI metadata generation (Anthropic; app/ai.py) ---
-    # Empty → metadata generation is skipped (callers fall back to raw values).
+    # --- AI metadata generation (app/ai.py) — provider-agnostic, all optional ---
+    # Priority: gemini (free tier) → anthropic. Empty everywhere → generation is
+    # skipped and callers fall back to raw values. Get a free Gemini key at
+    # https://aistudio.google.com/apikey
+    ai_provider: str = "auto"  # auto | gemini | anthropic
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.0-flash"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-haiku-4-5-20251001"
 
