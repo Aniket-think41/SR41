@@ -966,6 +966,50 @@ def cmd_github_repos(args) -> None:
     _print_repos(request("GET", f"/api/orgs/{slug}/integrations/github/repos", params=params) or [])
 
 
+def _print_link(l: dict) -> None:
+    vis = l.get("visibility", "")
+    print(f"  {BOLD}{l.get('resource_title') or l.get('resource_id')}{RESET} "
+          f"{DIM}[{vis}]{RESET} → {l.get('repo_full_name')}")
+
+
+def cmd_github_publish(args) -> None:
+    """Publish a resource to GitHub (public resource → public repo, private → private)."""
+    slug = _org_for(args)
+    body = {"resource_id": args.resource_id}
+    if args.repo:
+        body["repo_full_name"] = args.repo
+    l = request("POST", f"/api/orgs/{slug}/integrations/github/publish", body=body)
+    print(f"{BOLD}✓ published{RESET} → {l.get('repo_url') or l.get('repo_full_name')}")
+
+
+def cmd_github_links(args) -> None:
+    """List resource⇄repo links for the org (or one repo's resources)."""
+    slug = _org_for(args)
+    params = {}
+    if args.repo:
+        params["repo"] = args.repo
+    rows = request("GET", f"/api/orgs/{slug}/integrations/github/links", params=params) or []
+    if not rows:
+        print(f"{DIM}no published resources{RESET}")
+        return
+    for l in rows:
+        _print_link(l)
+
+
+def cmd_github_push(args) -> None:
+    """Re-push a linked resource's content to its GitHub repo."""
+    slug = _org_for(args)
+    l = request("POST", f"/api/orgs/{slug}/integrations/github/push", body={"resource_id": args.resource_id})
+    print(f"{BOLD}✓ pushed{RESET} → {l.get('repo_full_name')}")
+
+
+def cmd_github_pull(args) -> None:
+    """Pull a linked repo's content back into the resource."""
+    slug = _org_for(args)
+    r = request("POST", f"/api/orgs/{slug}/integrations/github/pull", body={"resource_id": args.resource_id})
+    print(f"{BOLD}✓ pulled{RESET} {r.get('title')} [{r.get('id')}]")
+
+
 def cmd_watch(args) -> None:
     """Poll the inbox + local artifacts and pop a themed desktop card for each
     new item. Runs in the foreground; use --once for a cron/systemd timer."""
@@ -1454,6 +1498,27 @@ def main() -> None:
     sp.add_argument("--org", help="org slug (default: your primary org)")
     sp.add_argument("--account", help="GitHub org/user to scope to")
     sp.set_defaults(fn=cmd_github_repos)
+
+    sp = sub.add_parser("github-publish", help="publish a resource to GitHub (public→public repo, private→private)")
+    sp.add_argument("resource_id")
+    sp.add_argument("--org", help="org slug (default: your primary org)")
+    sp.add_argument("--repo", help="owner/repo of an existing repo (default: create a managed repo)")
+    sp.set_defaults(fn=cmd_github_publish)
+
+    sp = sub.add_parser("github-links", help="list resource⇄repo links (or one repo's resources with --repo)")
+    sp.add_argument("--org", help="org slug (default: your primary org)")
+    sp.add_argument("--repo", help="owner/repo to reverse-map to its resources")
+    sp.set_defaults(fn=cmd_github_links)
+
+    sp = sub.add_parser("github-push", help="re-push a linked resource to its GitHub repo")
+    sp.add_argument("resource_id")
+    sp.add_argument("--org", help="org slug (default: your primary org)")
+    sp.set_defaults(fn=cmd_github_push)
+
+    sp = sub.add_parser("github-pull", help="pull a linked repo's content back into the resource")
+    sp.add_argument("resource_id")
+    sp.add_argument("--org", help="org slug (default: your primary org)")
+    sp.set_defaults(fn=cmd_github_pull)
 
     sp = sub.add_parser("status", help="one-line status for an AI tool's status bar (install gap + local to-push)")
     _scan_flags(sp)

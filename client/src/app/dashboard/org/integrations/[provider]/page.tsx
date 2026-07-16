@@ -18,6 +18,7 @@ import {
   ArrowLeft, Github, Plug, Check, Loader2, Search, Star, Lock, ExternalLink,
   Trash2, KeyRound, PackagePlus, RefreshCw, ShieldCheck, CircleSlash,
   GitFork, CircleDot, Scale, ChevronDown, ChevronRight,
+  UploadCloud, DownloadCloud, Unlink, Globe,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/api/http";
@@ -446,6 +447,117 @@ function RepoBrowser({ slug, orgId, canPrivate }: { slug: string; orgId: string 
   );
 }
 
+/* ------------------------------ publish panel ------------------------------ */
+
+function PublishPanel({ slug, canWrite }: { slug: string; canWrite: boolean }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [sel, setSel] = useState("");
+
+  const links = useQuery({ queryKey: ["org", slug, "github-links"], queryFn: () => api.githubLinks(slug) });
+  const resources = useQuery({ queryKey: ["org", slug, "resources", {}], queryFn: () => api.orgResources(slug) });
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["org", slug, "github-links"] });
+    qc.invalidateQueries({ queryKey: ["org", slug, "resources"] });
+  };
+
+  const publish = useMutation({
+    mutationFn: () => api.githubPublish(slug, { resource_id: sel }),
+    onSuccess: (l) => { invalidate(); setSel(""); toast(`Published to ${l.repo_full_name}`); },
+    onError: (e) => toast(errorMessage(e), "error"),
+  });
+  const push = useMutation({
+    mutationFn: (id: string) => api.githubPush(slug, id),
+    onSuccess: () => { invalidate(); toast("Pushed to GitHub"); },
+    onError: (e) => toast(errorMessage(e), "error"),
+  });
+  const pull = useMutation({
+    mutationFn: (id: string) => api.githubPull(slug, id),
+    onSuccess: () => { invalidate(); toast("Pulled from GitHub"); },
+    onError: (e) => toast(errorMessage(e), "error"),
+  });
+  const unlink = useMutation({
+    mutationFn: (id: string) => api.githubUnlink(slug, id),
+    onSuccess: () => { invalidate(); toast("Unlinked"); },
+    onError: (e) => toast(errorMessage(e), "error"),
+  });
+
+  const linkedIds = new Set((links.data ?? []).map((l) => l.resource_id));
+  const publishable = (resources.data ?? []).filter((r) => !linkedIds.has(r.id));
+
+  return (
+    <div className="card p-6">
+      <h3 className="font-display text-lg font-semibold text-ink">Publish resources to GitHub</h3>
+      <p className="mt-1 text-sm text-body">
+        Push a resource out to a repository. A <strong className="text-ink">public</strong> resource creates a
+        public repo; a <strong className="text-ink">private</strong> one creates a private repo.
+      </p>
+
+      {!canWrite ? (
+        <p className="mt-4 rounded-lg bg-surface-2 px-3 py-2 text-xs text-muted">
+          Publishing needs the <code className="font-mono">write</code> capability — grant the{" "}
+          <code className="font-mono">repo</code> scope on your token and press Sync.
+        </p>
+      ) : (
+        <div className="mt-4 flex gap-2">
+          <select value={sel} onChange={(e) => setSel(e.target.value)} className="field flex-1">
+            <option value="">Select a resource to publish…</option>
+            {publishable.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.title} ({r.is_public ? "public" : "private"})
+              </option>
+            ))}
+          </select>
+          <button onClick={() => publish.mutate()} disabled={!sel || publish.isPending} className="btn btn-primary">
+            {publish.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+            Publish
+          </button>
+        </div>
+      )}
+
+      <div className="mt-5 space-y-2">
+        {links.isLoading ? (
+          <div className="flex items-center gap-2 py-4 text-sm text-muted"><Loader2 className="h-4 w-4 animate-spin" /> Loading links…</div>
+        ) : !links.data?.length ? (
+          <p className="py-4 text-sm text-muted">No resources published yet.</p>
+        ) : (
+          links.data.map((l) => (
+            <div key={l.id} className="flex items-center justify-between gap-3 rounded-xl border border-line p-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="truncate text-sm font-semibold text-ink">{l.resource_title ?? l.resource_id}</span>
+                  <span className={`tag inline-flex items-center gap-1 ${l.visibility === "public" ? "!bg-primary-50 !text-primary" : "!bg-surface-2 !text-muted"}`}>
+                    {l.visibility === "public" ? <Globe className="h-3 w-3" /> : <Lock className="h-3 w-3" />} {l.visibility}
+                  </span>
+                  {l.managed && <span className="tag !bg-surface-2 !text-muted">managed</span>}
+                </div>
+                <a href={l.repo_url ?? "#"} target="_blank" rel="noopener noreferrer" className="mt-0.5 flex items-center gap-1 truncate text-xs text-muted hover:text-primary">
+                  <Github className="h-3 w-3 shrink-0" /> {l.repo_full_name}
+                  {l.last_pushed_at && <span> · pushed {relTime(l.last_pushed_at)}</span>}
+                </a>
+              </div>
+              <div className="flex shrink-0 gap-1">
+                {canWrite && (
+                  <button onClick={() => push.mutate(l.resource_id)} disabled={push.isPending} className="btn btn-secondary btn-sm" title="Push current content to GitHub">
+                    <UploadCloud className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                <button onClick={() => pull.mutate(l.resource_id)} disabled={pull.isPending} className="btn btn-secondary btn-sm" title="Pull content from GitHub into the resource">
+                  <DownloadCloud className="h-3.5 w-3.5" />
+                </button>
+                <button onClick={() => { if (confirm("Unlink this repository?")) unlink.mutate(l.id); }} disabled={unlink.isPending} className="btn btn-secondary btn-sm !text-[var(--color-danger)]" title="Unlink">
+                  <Unlink className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------ connected view ------------------------------ */
 
 function ConnectedView({ provider, slug, orgId, isAdmin }: { provider: IntegrationProvider; slug: string; orgId: string | undefined; isAdmin: boolean }) {
@@ -575,6 +687,7 @@ function ConnectedView({ provider, slug, orgId, isAdmin }: { provider: Integrati
       </div>
 
       {provider.key === "github" && <RepoBrowser slug={slug} orgId={orgId} canPrivate={!!capOn.get("read_private")} />}
+      {provider.key === "github" && isAdmin && <PublishPanel slug={slug} canWrite={!!capOn.get("write")} />}
     </div>
   );
 }

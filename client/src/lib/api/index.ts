@@ -16,6 +16,7 @@ import type {
   FeedbackInput,
   GithubRepo,
   IntegrationProvider,
+  ResourceRepoLink,
   Invitation,
   Notification,
   OrgEntitlements,
@@ -239,6 +240,24 @@ export const api = {
       "GET",
       `/api/orgs/${slug}/integrations/github/search${qs({ q, account, page: String(page) })}`
     ),
+  /* ---- publish / attach / sync (SkillShare ⇄ GitHub) ---- */
+  githubLinks: (slug: string, opts: { resource_id?: string; repo?: string } = {}) =>
+    request<ResourceRepoLink[]>("GET", `/api/orgs/${slug}/integrations/github/links${qs(opts)}`),
+  /** Publish a resource to GitHub. Omit repo_full_name → managed repo mirroring
+   *  the resource's visibility (public → public repo, private → private). */
+  githubPublish: (slug: string, body: { resource_id: string; repo_full_name?: string; path?: string }) =>
+    request<ResourceRepoLink>("POST", `/api/orgs/${slug}/integrations/github/publish`, body),
+  /** Re-push a linked resource's content to its repo (write sync). */
+  githubPush: (slug: string, resourceId: string) =>
+    request<ResourceRepoLink>("POST", `/api/orgs/${slug}/integrations/github/push`, { resource_id: resourceId }),
+  /** Pull the linked repo's content back into the resource (read sync). */
+  githubPull: (slug: string, resourceId: string) =>
+    request<Resource>("POST", `/api/orgs/${slug}/integrations/github/pull`, { resource_id: resourceId }),
+  /** Attach an existing repo to a resource without pushing. */
+  githubLinkRepo: (slug: string, body: { resource_id: string; repo_full_name: string; path?: string }) =>
+    request<ResourceRepoLink>("POST", `/api/orgs/${slug}/integrations/github/link`, body),
+  githubUnlink: (slug: string, linkId: string) =>
+    request<{ ok: true }>("DELETE", `/api/orgs/${slug}/integrations/github/links/${linkId}`),
 
   /* ---- projects ---- */
   projects: (slug: string) => request<Project[]>("GET", `/api/orgs/${slug}/projects`),

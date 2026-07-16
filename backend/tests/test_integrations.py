@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from app import github  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
-from app.models import Organization, OrgIntegration, User  # noqa: E402
+from app.models import Organization, OrgIntegration, Resource, User  # noqa: E402
 from app.integrations import get_credentials  # noqa: E402
 from app.main import app  # noqa: E402
 
@@ -224,6 +224,96 @@ def test_config_patch_and_disconnect():
     assert d.status_code == 200, d.text
     after = c.get(f"/api/orgs/{slug}/integrations/github", headers=h).json()
     assert after["connected"] is False
+
+
+def _org_resource(h, slug, title="My Skill", public=False):
+    org_id = c.get(f"/api/orgs/{slug}", headers=h).json()["id"]
+    rid = c.post("/api/resources", json={
+        "type": "SKILL", "title": title, "content_md": "# hi", "scope_type": "ORG", "scope_id": org_id,
+    }, headers=h).json()["id"]
+    if public:  # flip visibility directly — we're testing the GitHub mirror, not the publish flow
+        db = SessionLocal()
+        r = db.get(Resource, rid)
+        r.is_public = True
+        db.commit()
+        db.close()
+    return rid
+
+
+def _stub_writes(monkeypatch, created: dict):
+    def fake_create_repo(token, name, *, private, description="", org=None):
+        created["private"] = private
+        created["org"] = org
+        return {"full_name": f"acme/{name}", "html_url": f"https://github.com/acme/{name}",
+                "private": private, "default_branch": "main"}
+    monkeypatch.setattr(github, "create_repo", fake_create_repo)
+    monkeypatch.setattr(github, "put_file", lambda *a, **k: "sha1")
+    monkeypatch.setattr(github, "set_topics", lambda *a, **k: None)
+    monkeypatch.setattr(github, "get_repo", lambda token, full: {
+        "full_name": full, "html_url": f"https://github.com/{full}", "private": True, "default_branch": "main"})
+
+
+def test_publish_creates_managed_repo_mirroring_visibility(monkeypatch):
+    h, _ = _user()
+    slug = _org(h, plan="PRO")
+    c.post(f"/api/orgs/{slug}/integrations/github/connect", json={"token": FAKE_TOKEN}, headers=h)
+    rid = _org_resource(h, slug)  # private (default)
+    created: dict = {}
+    _stub_writes(monkeypatch, created)
+
+    r = c.post(f"/api/orgs/{slug}/integrations/github/publish", json={"resource_id": rid}, headers=h)
+    assert r.status_code == 200, r.text
+    assert created["private"] is True  # private resource → private repo
+    link = r.json()
+    assert link["visibility"] == "private" and link["managed"] is True
+    assert link["repo_full_name"].startswith("acme/")
+
+    # reverse mapping: repo → resources
+    rev = c.get(f"/api/orgs/{slug}/integrations/github/links?repo={link['repo_full_name']}", headers=h).json()
+    assert any(x["resource_id"] == rid for x in rev)
+
+
+def test_publish_public_resource_makes_public_repo(monkeypatch):
+    h, _ = _user()
+    slug = _org(h, plan="PRO")
+    c.post(f"/api/orgs/{slug}/integrations/github/connect", json={"token": FAKE_TOKEN}, headers=h)
+    rid = _org_resource(h, slug, title="Public Skill", public=True)
+    created: dict = {}
+    _stub_writes(monkeypatch, created)
+    r = c.post(f"/api/orgs/{slug}/integrations/github/publish", json={"resource_id": rid}, headers=h)
+    assert r.status_code == 200, r.text
+    assert created["private"] is False  # public resource → public repo
+    assert r.json()["visibility"] == "public"
+
+
+def test_publish_requires_write_capability():
+    h, _ = _user()
+    slug = _org(h, plan="PRO")
+    c.post(f"/api/orgs/{slug}/integrations/github/connect", json={"token": "ghp_limited_0123456789"}, headers=h)
+    rid = _org_resource(h, slug)
+    r = c.post(f"/api/orgs/{slug}/integrations/github/publish", json={"resource_id": rid}, headers=h)
+    assert r.status_code == 403, r.text
+
+
+def test_pull_updates_resource(monkeypatch):
+    from app.github import DetectedResource
+
+    h, _ = _user()
+    slug = _org(h, plan="PRO")
+    c.post(f"/api/orgs/{slug}/integrations/github/connect", json={"token": FAKE_TOKEN}, headers=h)
+    rid = _org_resource(h, slug)
+    created: dict = {}
+    _stub_writes(monkeypatch, created)
+    c.post(f"/api/orgs/{slug}/integrations/github/publish", json={"resource_id": rid}, headers=h)
+
+    monkeypatch.setattr(github, "detect_from_url", lambda url, token=None: (
+        None,
+        [DetectedResource(kind="skill", title="My Skill", description="pulled desc", content_md="pulled body")],
+        {},
+    ))
+    r = c.post(f"/api/orgs/{slug}/integrations/github/pull", json={"resource_id": rid}, headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["description"] == "pulled desc"
 
 
 def test_repo_summary_includes_health_metadata():

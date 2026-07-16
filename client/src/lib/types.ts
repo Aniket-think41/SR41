@@ -454,6 +454,24 @@ export interface IntegrationProvider {
   connection: IntegrationConnection | null;
 }
 
+/** A link between a SkillShare resource and a GitHub repo (publish/attach). */
+export interface ResourceRepoLink {
+  id: string;
+  resource_id: string;
+  resource_title: string | null;
+  resource_type: string | null;
+  provider_key: string;
+  repo_full_name: string;
+  repo_url: string | null;
+  path: string;
+  visibility: "public" | "private";
+  managed: boolean;
+  direction: string;
+  last_pushed_at: string | null;
+  last_pulled_at: string | null;
+  created_at: string | null;
+}
+
 /** A repository summary returned by the GitHub integration search/list. */
 export interface GithubRepo {
   full_name: string;

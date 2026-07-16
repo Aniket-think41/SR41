@@ -230,6 +230,52 @@ def _capabilities_out(conn: OrgIntegration) -> list[dict]:
     ]
 
 
+def resource_repo_files(resource) -> list[tuple[str, str]]:
+    """Render a resource into the files that represent it in a GitHub repo
+    (the publish content mapping). Always writes a `skillshare.json` manifest."""
+    manifest = {
+        "skillshare_id": resource.id,
+        "type": resource.type,
+        "title": resource.title,
+        "version": resource.version,
+        "tags": resource.tags or [],
+        "visibility": "public" if resource.is_public else "private",
+    }
+    files: list[tuple[str, str]] = [("skillshare.json", json.dumps(manifest, indent=2) + "\n")]
+    if resource.type == "SKILL":
+        fm = f"---\nname: {resource.title}\ndescription: {resource.description or ''}\n---\n\n"
+        files.append(("SKILL.md", fm + (resource.content_md or "")))
+    elif resource.type == "MCP":
+        if resource.config_json:
+            files.append((".mcp.json", resource.config_json))
+        readme = f"# {resource.title}\n\n{resource.description or ''}\n"
+        if resource.server_url:
+            readme += f"\nServer: {resource.server_url}\n"
+        files.append(("README.md", readme))
+    else:  # NOTE
+        files.append(("README.md", f"# {resource.title}\n\n{resource.content_md or resource.description or ''}\n"))
+    return files
+
+
+def link_out(link, resource=None) -> dict:
+    return {
+        "id": link.id,
+        "resource_id": link.resource_id,
+        "resource_title": getattr(resource, "title", None),
+        "resource_type": getattr(resource, "type", None),
+        "provider_key": link.provider_key,
+        "repo_full_name": link.repo_full_name,
+        "repo_url": link.repo_url,
+        "path": link.path,
+        "visibility": link.visibility,
+        "managed": link.managed,
+        "direction": link.direction,
+        "last_pushed_at": link.last_pushed_at.isoformat() if link.last_pushed_at else None,
+        "last_pulled_at": link.last_pulled_at.isoformat() if link.last_pulled_at else None,
+        "created_at": link.created_at.isoformat() if link.created_at else None,
+    }
+
+
 def connection_out(conn: OrgIntegration | None) -> dict | None:
     if conn is None:
         return None

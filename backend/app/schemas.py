@@ -258,6 +258,30 @@ class IntegrationConfigPatch(BaseModel):
     config: dict
 
 
+class GithubPublishIn(BaseModel):
+    """Publish a resource to GitHub (SkillShare → GitHub). Omit ``repo_full_name``
+    to create a managed repo whose visibility mirrors the resource (public
+    resource → public repo); give it to publish into an existing repo."""
+
+    resource_id: str = Field(min_length=1, max_length=64)
+    repo_full_name: str | None = Field(default=None, max_length=200)  # owner/repo
+    path: str = Field(default="", max_length=200)
+
+
+class GithubLinkIn(BaseModel):
+    """Attach an existing repo to a resource without pushing (link only)."""
+
+    resource_id: str = Field(min_length=1, max_length=64)
+    repo_full_name: str = Field(min_length=3, max_length=200)
+    path: str = Field(default="", max_length=200)
+
+
+class GithubResourceRefIn(BaseModel):
+    """Reference a resource for a push/pull sync action."""
+
+    resource_id: str = Field(min_length=1, max_length=64)
+
+
 # ---- Device-authorization login (CLI / MCP browser login) ----
 
 

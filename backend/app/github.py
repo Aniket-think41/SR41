@@ -588,3 +588,87 @@ def search_repositories(query: str, token: str | None = None, account: str | Non
     data = _get("/search/repositories", token, {"q": q, "per_page": per_page, "page": page, "sort": "stars"})
     items = data.get("items", []) if isinstance(data, dict) else []
     return [_repo_summary(r) for r in items]
+
+
+# ----------------------------- authenticated write API -----------------------------
+# Publish (SkillShare → GitHub). All require the token's `repo` scope (the `write`
+# capability). Base64-encodes file content for the contents API.
+
+
+def _write(method: str, path: str, token: str, body: dict) -> dict:
+    import httpx
+
+    with httpx.Client(timeout=20.0, headers=_auth_headers(token), follow_redirects=True) as c:
+        r = c.request(method, f"{GITHUB_API}{path}", json=body)
+    if r.status_code == 401:
+        raise validation("GitHub rejected the token (401)")
+    if r.status_code == 403:
+        raise validation("GitHub denied the write — the token likely lacks the 'repo' scope (403)")
+    if r.status_code == 422:
+        # surface GitHub's message (e.g. name already exists)
+        try:
+            raise validation(f"GitHub: {r.json().get('message', 'unprocessable')}")
+        except ValueError:
+            raise validation("GitHub returned 422")
+    if r.status_code >= 400:
+        raise validation(f"GitHub returned {r.status_code} on write")
+    return r.json() if r.text else {}
+
+
+def get_repo(token: str, full_name: str) -> dict | None:
+    """Return a repo summary if it exists and the token can see it, else None."""
+    try:
+        return _repo_summary(_get(f"/repos/{full_name}", token))
+    except Exception:
+        return None
+
+
+def create_repo(token: str, name: str, *, private: bool, description: str = "", org: str | None = None) -> dict:
+    """Create a repository. When ``org`` is a GitHub org the token administers, it
+    lands there; otherwise under the authenticated user. `private` mirrors the
+    resource's visibility (public resource → public repo)."""
+    body = {"name": name, "private": private, "description": description[:350], "auto_init": True}
+    path = f"/orgs/{org}/repos" if org else "/user/repos"
+    try:
+        data = _write("POST", path, token, body)
+    except Exception:
+        if org:  # not an org / no admin → fall back to the user account
+            data = _write("POST", "/user/repos", token, body)
+        else:
+            raise
+    return _repo_summary(data)
+
+
+def _file_sha(token: str, full_name: str, path: str, ref: str | None = None) -> str | None:
+    try:
+        data = _get(f"/repos/{full_name}/contents/{path}", token, {"ref": ref} if ref else None)
+        return data.get("sha") if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def put_file(token: str, full_name: str, path: str, content: str, message: str, branch: str | None = None) -> str | None:
+    """Create or update a file via the contents API. Returns the new blob sha."""
+    import base64
+
+    body: dict = {
+        "message": message,
+        "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
+    }
+    if branch:
+        body["branch"] = branch
+    sha = _file_sha(token, full_name, path, branch)
+    if sha:
+        body["sha"] = sha
+    data = _write("PUT", f"/repos/{full_name}/contents/{path}", token, body)
+    return (data.get("content") or {}).get("sha") if isinstance(data, dict) else None
+
+
+def set_topics(token: str, full_name: str, topics: list[str]) -> None:
+    clean = [t.lower().replace(" ", "-")[:50] for t in (topics or []) if t][:20]
+    if not clean:
+        return
+    try:
+        _write("PUT", f"/repos/{full_name}/topics", token, {"names": clean})
+    except Exception:
+        pass  # topics are best-effort — never fail a publish over them

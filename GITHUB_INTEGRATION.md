@@ -106,6 +106,86 @@ Grouped by the three goals. Each is additive on the foundation above.
 
 ---
 
+## Requirement: Publish resources to GitHub (SkillShare → GitHub)  ⟵ SHIPPED (phase 3, 2026-07-16)
+
+Added + built 2026-07-16 per product request. The inverse of import: push
+SkillShare resources OUT to GitHub, with visibility mirrored.
+
+**Shipped:** `ResourceRepoLink` model; `github.py` write helpers (create repo
+public|private, put file, set topics); resource→files serializer; endpoints
+`github/publish` (managed repo mirroring visibility, or existing repo),
+`github/push`, `github/pull`, `github/link`, `github/links` (incl. reverse
+repo→resources), `github/links/{id}` DELETE — gated on the `write` capability;
+dashboard "Publish resources to GitHub" panel (publish + push/pull/unlink);
+CLI `github-publish/links/push/pull`; MCP `publish_to_github`,
+`list_github_links`, `push_to_github`, `pull_from_github`. Tests in
+`tests/test_integrations.py`.
+
+**Still deferred (build-list items 5b, 8):** automatic mode-driven sync worker
+(today push/pull are on-demand), scope-level bulk publish (publish a whole
+org/team/pod at once), live webhooks. Below is the original plan for reference.
+
+**Rules**
+- A resource, or a whole scope (org / team(project) / pod), can be published to a
+  GitHub repository.
+- **Visibility mirrors SkillShare → GitHub:** a *public* (published) resource →
+  a **public** repo; a *private* resource → a **private** repo. Repo visibility is
+  set from the resource/scope visibility, never wider.
+- **Public / private pairing:** an org can keep a **public repo** containing only
+  the shippable/published resources, and a **private repo** (org-members only)
+  containing everything — drafts, internal notes, private versions. The world sees
+  the public repo; org members see the merged (private) view.
+- **Two targets:** (a) *managed repo* — SkillShare creates + owns the layout
+  (README, manifest, `SKILL.md` / `.mcp.json` / `note.md`, `assets/`, `versions/`);
+  (b) *existing repo* — export into a chosen repo/subpath.
+- **Content mapping:** SKILL → `SKILL.md` (+ frontmatter); MCP → `.mcp.json` /
+  `server.json`; NOTE → `README.md` / `note.md`; description → README; version →
+  a GitHub release/tag; tags → repo topics; attachments → `assets/`.
+- **Gated on the `write` capability** (classic PAT `repo` scope). If missing, the
+  publish actions are disabled with a "grant `repo` and Sync" hint (capability
+  model already exists).
+- Direction honours the connection's stored **`sync_mode`** (write_only /
+  bidirectional). Bidirectional needs conflict handling + webhooks.
+
+## Build list — what to create for the above (High tier)
+
+1. **DB**
+   - `resource_repo_links` (resource_id, provider_key, repo_full_name, path,
+     direction, visibility, last_pushed_sha, last_pushed_at) → also gives the
+     reverse "repo → resources" mapping.
+   - per-scope publish target: repo + public/private role (extend `OrgIntegration.config`
+     or a new `github_publish_targets` table for org/team/pod → repo pairing).
+2. **Backend — `github.py` write helpers** (all need `write` capability):
+   create repo (public|private), create/update file (contents API PUT with sha),
+   create release/tag, set topics, upload asset blobs.
+3. **Backend — serializer**: resource → repo file layout (the content mapping above).
+4. **Backend — endpoints**:
+   - `POST /api/orgs/{slug}/integrations/github/publish` — export a resource or a
+     scope; create managed repo (visibility from resource) or push to existing.
+   - `POST /api/resources/{id}/github/link` / `DELETE` / `GET /api/resources/{id}/repos`.
+   - `GET /api/orgs/{slug}/integrations/github/repos/{owner}/{repo}/resources` (reverse).
+   - `POST /api/orgs/{slug}/integrations/github/publish-sync` — run a push for all
+     linked resources (the Sync-driven / webhook-driven path).
+5. **Backend — sync engine/worker**: on resource create/update (and on Sync click /
+   webhook), push to linked repos per `sync_mode`; record `last_pushed_sha`.
+   Bidirectional adds GitHub→SkillShare apply + conflict resolution.
+6. **Dashboard**:
+   - Resource: "Publish to GitHub" / "Link repository" (managed vs existing;
+     visibility auto from the resource), show linked repo + last-synced.
+   - Integration page: manage the public↔private repo pair + per-scope publish
+     targets + a "Publish now" action; surface which repos are managed.
+   - Reverse: repo browser marks linked repos; resource shows its repo(s).
+7. **CLI / MCP**: `github publish <resource>`, `github link <resource> <repo>`,
+   `github repo-resources <repo>`; MCP `publish_to_github`, `link_repo`,
+   `repo_resources`.
+8. **Webhooks** (for live bidirectional): a receiver endpoint + registration
+   (needs `admin:repo_hook` / a GitHub App) so repo edits flow back in.
+
+Dependencies: #1–#4 unlock one-way *publish* (public→public / private→private) —
+the smallest shippable slice. #5 makes it stay in sync; #8 makes it live/bidirectional.
+
+---
+
 ## Notes for the next builder
 - No Alembic: new tables auto-create via `create_all`; if you add a **column** to an
   existing table, register it in `main.py::_ensure_additive_columns`.

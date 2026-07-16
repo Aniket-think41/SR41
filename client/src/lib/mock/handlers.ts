@@ -420,6 +420,16 @@ function providerOut(provider: MockProvider, conn: MockConn | undefined) {
   };
 }
 
+type MockLink = Db["resource_repo_links"][number];
+
+function linkOut(db: Db, link: MockLink) {
+  const r = db.resources.find((x) => x.id === link.resource_id);
+  return { ...link, resource_title: r?.title ?? null, resource_type: r?.type ?? null };
+}
+
+const repoSlug = (title: string) =>
+  (title || "resource").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "resource";
+
 /** Guard: org member (or admin) + the integrations feature must be on. */
 function requireIntegrations(db: Db, slug: string, admin: boolean) {
   const org = orgBySlug(db, slug);
@@ -927,6 +937,100 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     const conn = orgConnection(db, org.id, "github");
     if (!conn || conn.status !== "connected") throw new HttpError(422, "VALIDATION_ERROR", "Connect GitHub first");
     return mockRepos(q.get("account") || conn.account_label || "", q.get("q") || "", Number(q.get("page") || "1"));
+  }],
+
+  ["GET", "/api/orgs/:slug/integrations/github/links", (p, _b, q, db) => {
+    const { org } = requireIntegrations(db, p.slug, false);
+    let rows = db.resource_repo_links.filter((l) => l.org_id === org.id);
+    const rid = q.get("resource_id");
+    const repo = q.get("repo");
+    if (rid) rows = rows.filter((l) => l.resource_id === rid);
+    if (repo) rows = rows.filter((l) => l.repo_full_name === repo);
+    return rows.map((l) => linkOut(db, l));
+  }],
+
+  ["POST", "/api/orgs/:slug/integrations/github/publish", (p, body, _q, db) => {
+    const { org, me } = requireIntegrations(db, p.slug, true);
+    const conn = orgConnection(db, org.id, "github");
+    if (!conn || conn.status !== "connected") throw new HttpError(422, "VALIDATION_ERROR", "Connect GitHub first");
+    if (!(conn.capabilities ?? []).includes("write"))
+      throw new HttpError(403, "FORBIDDEN", "This connection can't write to GitHub — grant the 'repo' scope and Sync");
+    const resource = db.resources.find((r) => r.id === body.resource_id);
+    if (!resource) throw notFound("Resource");
+    const account = conn.account_label || "acme";
+    const explicit = String(body.repo_full_name ?? "").trim();
+    const full = explicit || `${account}/${repoSlug(resource.title)}`;
+    const managed = !explicit;
+    const visibility: "public" | "private" = resource.is_public ? "public" : "private";
+    let link = db.resource_repo_links.find((l) => l.resource_id === resource.id && l.repo_full_name === full);
+    if (!link) {
+      link = {
+        id: uid("rrl"), org_id: org.id, resource_id: resource.id, provider_key: "github",
+        repo_full_name: full, repo_url: `https://github.com/${full}`, path: String(body.path ?? ""),
+        visibility, managed, direction: "write", last_pushed_at: now(), last_pulled_at: null, created_at: now(),
+      };
+      db.resource_repo_links.push(link);
+    } else {
+      link.visibility = visibility;
+      link.last_pushed_at = now();
+    }
+    void me;
+    saveDb();
+    return linkOut(db, link);
+  }],
+
+  ["POST", "/api/orgs/:slug/integrations/github/push", (p, body, _q, db) => {
+    const { org } = requireIntegrations(db, p.slug, true);
+    const conn = orgConnection(db, org.id, "github");
+    if (!(conn?.capabilities ?? []).includes("write"))
+      throw new HttpError(403, "FORBIDDEN", "This connection can't write to GitHub — grant the 'repo' scope and Sync");
+    const link = db.resource_repo_links.find((l) => l.org_id === org.id && l.resource_id === body.resource_id);
+    if (!link) throw notFound("Repository link");
+    link.last_pushed_at = now();
+    saveDb();
+    return linkOut(db, link);
+  }],
+
+  ["POST", "/api/orgs/:slug/integrations/github/pull", (p, body, _q, db) => {
+    const { org } = requireIntegrations(db, p.slug, true);
+    const link = db.resource_repo_links.find((l) => l.org_id === org.id && l.resource_id === body.resource_id);
+    if (!link) throw notFound("Repository link");
+    const resource = db.resources.find((r) => r.id === body.resource_id);
+    if (!resource) throw notFound("Resource");
+    resource.description = `Synced from ${link.repo_full_name}`;
+    resource.updated_at = now();
+    link.last_pulled_at = now();
+    saveDb();
+    return enrich(resource, db);
+  }],
+
+  ["POST", "/api/orgs/:slug/integrations/github/link", (p, body, _q, db) => {
+    const { org } = requireIntegrations(db, p.slug, true);
+    const conn = orgConnection(db, org.id, "github");
+    if (!conn || conn.status !== "connected") throw new HttpError(422, "VALIDATION_ERROR", "Connect GitHub first");
+    const resource = db.resources.find((r) => r.id === body.resource_id);
+    if (!resource) throw notFound("Resource");
+    const full = String(body.repo_full_name ?? "").trim();
+    let link = db.resource_repo_links.find((l) => l.resource_id === resource.id && l.repo_full_name === full);
+    if (!link) {
+      link = {
+        id: uid("rrl"), org_id: org.id, resource_id: resource.id, provider_key: "github",
+        repo_full_name: full, repo_url: `https://github.com/${full}`, path: String(body.path ?? ""),
+        visibility: resource.is_public ? "public" : "private", managed: false, direction: "both",
+        last_pushed_at: null, last_pulled_at: null, created_at: now(),
+      };
+      db.resource_repo_links.push(link);
+    }
+    saveDb();
+    return linkOut(db, link);
+  }],
+
+  ["DELETE", "/api/orgs/:slug/integrations/github/links/:id", (p, _b, _q, db) => {
+    const { org } = requireIntegrations(db, p.slug, true);
+    const idx = db.resource_repo_links.findIndex((l) => l.id === p.id && l.org_id === org.id);
+    if (idx >= 0) db.resource_repo_links.splice(idx, 1);
+    saveDb();
+    return { ok: true };
   }],
 
   ["GET", "/api/orgs/:slug/integrations", (p, _b, _q, db) => {

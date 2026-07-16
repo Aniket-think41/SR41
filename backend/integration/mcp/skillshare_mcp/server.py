@@ -97,7 +97,14 @@ mcp = FastMCP(
         "list_org_integrations() to see what's connected. When the user wants "
         "resources from a repo you found this way, pass its html_url to "
         "import_from_github. If a call says GitHub isn't connected, point them to "
-        "the dashboard Integrations page to connect it first."
+        "the dashboard Integrations page to connect it first.\n\n"
+        "PUBLISH TO GITHUB — to push a SkillShare resource OUT to GitHub use "
+        "publish_to_github(resource_id) — visibility mirrors (public resource → "
+        "public repo, private → private); pass repo='owner/repo' to target an "
+        "existing repo. push_to_github / pull_from_github keep a linked resource "
+        "in sync; list_github_links shows what's linked (and reverse-maps a repo "
+        "to its resources). Publishing needs the connection's write capability "
+        "(a repo-scoped token)."
     ),
 )
 
@@ -1280,6 +1287,43 @@ def list_github_repos(org_slug: str = "", account: str = "") -> list[dict]:
     if account:
         params["account"] = account
     return _request("GET", f"/api/orgs/{_org_slug(org_slug)}/integrations/github/repos", params=params)
+
+
+@mcp.tool()
+def publish_to_github(resource_id: str, org_slug: str = "", repo: str = "") -> dict:
+    """Publish a SkillShare resource OUT to GitHub (SkillShare → GitHub).
+
+    Visibility mirrors: a public resource creates a public repo, a private one a
+    private repo. Omit `repo` to create a managed repo named from the resource;
+    pass `owner/repo` to publish into an existing repository. Needs the org's
+    GitHub connection to have the `write` capability (a `repo`-scoped token).
+    Returns the resource⇄repo link."""
+    body = {"resource_id": resource_id}
+    if repo:
+        body["repo_full_name"] = repo
+    return _request("POST", f"/api/orgs/{_org_slug(org_slug)}/integrations/github/publish", json=body)
+
+
+@mcp.tool()
+def list_github_links(org_slug: str = "", repo: str = "") -> list[dict]:
+    """List resource⇄GitHub-repo links for the org. Pass `repo` (owner/repo) to
+    reverse-map a repository to the SkillShare resources published from it."""
+    params = {}
+    if repo:
+        params["repo"] = repo
+    return _request("GET", f"/api/orgs/{_org_slug(org_slug)}/integrations/github/links", params=params)
+
+
+@mcp.tool()
+def push_to_github(resource_id: str, org_slug: str = "") -> dict:
+    """Re-push a linked resource's current content to its GitHub repo (write sync)."""
+    return _request("POST", f"/api/orgs/{_org_slug(org_slug)}/integrations/github/push", json={"resource_id": resource_id})
+
+
+@mcp.tool()
+def pull_from_github(resource_id: str, org_slug: str = "") -> dict:
+    """Pull a linked repo's content back into the resource (read sync, GitHub → SkillShare)."""
+    return _request("POST", f"/api/orgs/{_org_slug(org_slug)}/integrations/github/pull", json={"resource_id": resource_id})
 
 
 @mcp.tool()

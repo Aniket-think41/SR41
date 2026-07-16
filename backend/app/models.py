@@ -450,6 +450,35 @@ class OrgIntegration(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
 
+class ResourceRepoLink(Base):
+    """Links a SkillShare resource to a GitHub repository (the publish/attach
+    layer). Powers both directions: publish (SkillShare→GitHub) records where a
+    resource lives, and the reverse "which resources belong to this repo" query.
+
+    `visibility` mirrors the resource at publish time (public resource → public
+    repo, private → private). `managed` = SkillShare created the repo. `direction`
+    records the intended sync flow. `last_pushed_sha`/timestamps track sync state."""
+
+    __tablename__ = "resource_repo_links"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("rrl"))
+    org_id: Mapped[str] = mapped_column(String, ForeignKey("organizations.id"), index=True)
+    resource_id: Mapped[str] = mapped_column(String, ForeignKey("resources.id"), index=True)
+    provider_key: Mapped[str] = mapped_column(String, default="github", index=True)
+    repo_full_name: Mapped[str] = mapped_column(String, index=True)  # owner/repo
+    repo_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    path: Mapped[str] = mapped_column(String, default="")            # subpath within the repo
+    visibility: Mapped[str] = mapped_column(String, default="private")  # public | private
+    managed: Mapped[bool] = mapped_column(Boolean, default=False)    # SkillShare created the repo
+    direction: Mapped[str] = mapped_column(String, default="write")  # write | read | both
+    last_pushed_sha: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_pushed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_pulled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
 class License(Base):
     __tablename__ = "licenses"
 
