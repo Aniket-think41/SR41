@@ -427,6 +427,43 @@ def test_scope_link_attach_and_autosync(monkeypatch):
     assert any(l["repo_full_name"] == "acme/mono" for l in links)
 
 
+def test_public_repo_rejects_private_route(monkeypatch):
+    h, _ = _user()
+    slug = _org(h, plan="PRO")
+    c.post(f"/api/orgs/{slug}/integrations/github/connect", json={"token": FAKE_TOKEN}, headers=h)
+    org_id = c.get(f"/api/orgs/{slug}", headers=h).json()["id"]
+    created: dict = {}
+    _stub_writes(monkeypatch, created)
+    # public repo
+    monkeypatch.setattr(github, "get_repo", lambda token, full: {
+        "full_name": full, "html_url": f"https://github.com/{full}", "private": False, "default_branch": "main"})
+    # "all" route into a public repo → rejected (would leak private resources)
+    bad = c.post(f"/api/orgs/{slug}/integrations/github/scope-links",
+                 json={"scope_type": "ORG", "scope_id": org_id, "repo_full_name": "acme/pub", "visibility": "all"}, headers=h)
+    assert bad.status_code == 422, bad.text
+    # "public" route into a public repo → allowed
+    ok = c.post(f"/api/orgs/{slug}/integrations/github/scope-links",
+                json={"scope_type": "ORG", "scope_id": org_id, "repo_full_name": "acme/pub", "visibility": "public"}, headers=h)
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["repo_private"] is False and ok.json()["visibility"] == "public"
+
+
+def test_create_repo_for_private_route_is_private(monkeypatch):
+    h, _ = _user()
+    slug = _org(h, plan="PRO")
+    c.post(f"/api/orgs/{slug}/integrations/github/connect", json={"token": FAKE_TOKEN}, headers=h)
+    org_id = c.get(f"/api/orgs/{slug}", headers=h).json()["id"]
+    created: dict = {}
+    _stub_writes(monkeypatch, created)
+    # create a repo for an "all" route but ask for public → forced private
+    r = c.post(f"/api/orgs/{slug}/integrations/github/scope-links",
+               json={"scope_type": "ORG", "scope_id": org_id, "create_repo_name": "team-skills",
+                     "create_private": False, "visibility": "all"}, headers=h)
+    assert r.status_code == 200, r.text
+    assert created["private"] is True  # holding private content → must be private
+    assert r.json()["repo_private"] is True
+
+
 def test_scope_link_visibility_routing(monkeypatch):
     from app.integrations import visibility_matches
     assert visibility_matches("all", True) and visibility_matches("all", False)

@@ -501,9 +501,12 @@ class ScopeRepoLink(Base):
     provider_key: Mapped[str] = mapped_column(String, default="github")
     repo_full_name: Mapped[str] = mapped_column(String, index=True)
     repo_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    repo_private: Mapped[bool] = mapped_column(Boolean, default=False)  # cached repo visibility (safety guard)
     path_prefix: Mapped[str] = mapped_column(String, default="")
-    visibility: Mapped[str] = mapped_column(String, default="all")  # all | public | private
-    auto_sync: Mapped[bool] = mapped_column(Boolean, default=True)
+    visibility: Mapped[str] = mapped_column(String, default="all")  # all | public | private (which resources route here)
+    # Sync flow: off | pull (GitHub→SkillShare) | push (SkillShare→GitHub) | both.
+    sync_direction: Mapped[str] = mapped_column(String, default="push")
+    auto_sync: Mapped[bool] = mapped_column(Boolean, default=True)  # legacy mirror of (sync_direction in push/both)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)

@@ -377,12 +377,22 @@ def scope_link_out(link) -> dict:
         "provider_key": link.provider_key,
         "repo_full_name": link.repo_full_name,
         "repo_url": link.repo_url,
+        "repo_private": bool(getattr(link, "repo_private", False)),
         "path_prefix": link.path_prefix,
         "visibility": link.visibility,
+        "sync_direction": getattr(link, "sync_direction", "push"),
         "auto_sync": link.auto_sync,
         "last_synced_at": link.last_synced_at.isoformat() if link.last_synced_at else None,
         "created_at": link.created_at.isoformat() if link.created_at else None,
     }
+
+
+def push_allowed(link, resource) -> bool:
+    """Safety: never push a PRIVATE resource to a PUBLIC repo, regardless of route
+    (defence-in-depth on top of visibility routing)."""
+    if not resource.is_public and not getattr(link, "repo_private", False):
+        return False
+    return visibility_matches(link.visibility, resource.is_public)
 
 
 def push_resource_to(token: str, full_name: str, resource, base_path: str) -> str | None:
@@ -413,8 +423,9 @@ def autosync_resource(db: Session, resource) -> None:
         links = [
             l for l in db.query(ScopeRepoLink)
             .filter(ScopeRepoLink.provider_key == "github", ScopeRepoLink.scope_id.in_(ids)).all()
-            if (l.scope_type, l.scope_id) in chain and l.auto_sync
-            and visibility_matches(l.visibility, resource.is_public)
+            if (l.scope_type, l.scope_id) in chain
+            and getattr(l, "sync_direction", "push") in ("push", "both")
+            and push_allowed(l, resource)
         ]
         if not links:
             return

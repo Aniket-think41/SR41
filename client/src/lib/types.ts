@@ -481,8 +481,10 @@ export interface ScopeRepoLink {
   provider_key: string;
   repo_full_name: string;
   repo_url: string | null;
+  repo_private: boolean;
   path_prefix: string;
   visibility: "all" | "public" | "private";
+  sync_direction: "off" | "pull" | "push" | "both";
   auto_sync: boolean;
   last_synced_at: string | null;
   created_at: string | null;

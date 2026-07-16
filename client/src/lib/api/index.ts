@@ -274,12 +274,17 @@ export const api = {
     request<ScopeRepoLink[]>("GET", `/api/orgs/${slug}/integrations/github/scope-links${qs(opts)}`),
   githubAttachScope: (
     slug: string,
-    body: { scope_type: string; scope_id: string; repo_full_name: string; visibility?: string; auto_sync?: boolean; path_prefix?: string }
+    body: {
+      scope_type: string; scope_id: string;
+      repo_full_name?: string;                        // attach an existing repo
+      create_repo_name?: string; create_private?: boolean;  // …or create a new one
+      visibility?: string; sync_direction?: string; path_prefix?: string;
+    }
   ) => request<ScopeRepoLink>("POST", `/api/orgs/${slug}/integrations/github/scope-links`, body),
   githubDetachScope: (slug: string, linkId: string) =>
     request<{ ok: true }>("DELETE", `/api/orgs/${slug}/integrations/github/scope-links/${linkId}`),
   githubScopeSync: (slug: string, linkId: string) =>
-    request<{ pushed: number }>("POST", `/api/orgs/${slug}/integrations/github/scope-links/${linkId}/sync`),
+    request<{ pushed: number; imported?: number }>("POST", `/api/orgs/${slug}/integrations/github/scope-links/${linkId}/sync`),
 
   /* ---- projects ---- */
   projects: (slug: string) => request<Project[]>("GET", `/api/orgs/${slug}/projects`),

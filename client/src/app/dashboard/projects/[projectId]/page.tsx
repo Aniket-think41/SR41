@@ -12,7 +12,6 @@ import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/api/http";
 import { qk, useCurrentOrg, useTerms } from "@/lib/hooks";
 import { ResourceBrowser } from "@/components/ResourceBrowser";
-import { ScopeRepoLinks } from "@/components/dashboard/ScopeRepoLinks";
 import { useToast } from "@/components/Toast";
 
 export default function ProjectDetail({ params }: { params: Promise<{ projectId: string }> }) {
@@ -140,9 +139,6 @@ export default function ProjectDetail({ params }: { params: Promise<{ projectId:
           emptyHint={`Resources added here are inherited by every ${terms.pod.toLowerCase()} in this ${terms.project.toLowerCase()}.`}
         />
       </section>
-
-      {/* GitHub repos attached to this team (only shown when GitHub is connected) */}
-      <ScopeRepoLinks scopeType="PROJECT" scopeId={projectId} title={`${terms.project} repositories`} />
     </div>
   );
 }

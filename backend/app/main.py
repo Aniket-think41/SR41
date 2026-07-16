@@ -114,6 +114,10 @@ def _ensure_additive_columns() -> None:
         ("org_integrations", "scopes", "JSON"),
         ("org_integrations", "capabilities", "JSON"),
         ("org_integrations", "last_synced_at", "TIMESTAMP"),
+        # Scope→repo link: sync direction + cached repo visibility (added after
+        # scope_repo_links shipped).
+        ("scope_repo_links", "sync_direction", "VARCHAR NOT NULL DEFAULT 'push'"),
+        ("scope_repo_links", "repo_private", "BOOLEAN NOT NULL DEFAULT FALSE"),
     ]
     # One-off NOT NULL relaxations (Postgres only — SQLite dev DBs are rebuilt by
     # create_all). feedback.user_id must allow NULL for anonymous website feedback.

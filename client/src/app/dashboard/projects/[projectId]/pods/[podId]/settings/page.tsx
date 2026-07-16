@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/api/http";
 import { qk, useCurrentOrg, useSession } from "@/lib/hooks";
 import { MembersCard } from "@/components/dashboard/MembersCard";
+import { ScopeRepoLinks } from "@/components/dashboard/ScopeRepoLinks";
 import { useToast } from "@/components/Toast";
 import { useConfirm } from "@/components/ConfirmDelete";
 
@@ -142,6 +143,9 @@ export default function PodSettings({
         canManage={canManage}
         selfUserId={me?.id}
       />
+
+      {/* GitHub repos attached to this pod (only when GitHub is connected) */}
+      <ScopeRepoLinks scopeType="POD" scopeId={podId} title="Pod repositories" />
 
       <div className="card border-[var(--color-danger)]/30 p-6">
         <h2 className="font-display text-lg font-semibold text-[var(--color-danger)]">Danger zone</h2>

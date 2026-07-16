@@ -13,7 +13,6 @@ import { Settings, Users } from "lucide-react";
 import { api } from "@/lib/api";
 import { qk, useTerms } from "@/lib/hooks";
 import { ResourceBrowser } from "@/components/ResourceBrowser";
-import { ScopeRepoLinks } from "@/components/dashboard/ScopeRepoLinks";
 import { Avatar } from "@/components/Avatar";
 
 export default function PodDetail({
@@ -85,9 +84,6 @@ export default function PodDetail({
         addScope={{ scope_type: "POD", scope_id: podId }}
         emptyHint={`Add the ${terms.pod.toLowerCase()}'s first skill, MCP server, or note — or check the ${terms.project} / Org tabs for inherited ones.`}
       />
-
-      {/* GitHub repos attached to this pod (only shown when GitHub is connected) */}
-      <ScopeRepoLinks scopeType="POD" scopeId={podId} title={`${terms.pod} repositories`} />
     </div>
   );
 }

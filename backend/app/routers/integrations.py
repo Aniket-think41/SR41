@@ -36,6 +36,7 @@ from ..integrations import (
     link_out,
     provider_available,
     provider_out,
+    push_allowed,
     push_resource_to,
     resource_repo_files,
     scope_link_out,
@@ -750,12 +751,37 @@ def _verify_scope(db: Session, org, scope_type: str, scope_id: str) -> None:
         raise forbidden("That scope doesn't belong to this organization")
 
 
+def _require_scope_admin(db: Session, org, scope_type: str, scope_id: str, user: User) -> None:
+    """Manage rights for a scope's repos: org admin for ORG; project admin (or
+    org admin) for PROJECT; pod admin (or project/org admin) for POD. Honors the
+    org⊃project⊃pod cascade."""
+    from ..models import Pod, Project
+    from ..permissions import require_org_admin as _roa, require_pod_admin as _rpa, require_project_admin as _rpra
+
+    if scope_type == "ORG":
+        _roa(db, org, user)
+    elif scope_type == "PROJECT":
+        proj = db.get(Project, scope_id)
+        if proj is None or proj.org_id != org.id:
+            raise forbidden("That team doesn't belong to this organization")
+        _rpra(db, proj, user)
+    elif scope_type == "POD":
+        pod = db.get(Pod, scope_id)
+        proj = db.get(Project, pod.project_id) if pod else None
+        if pod is None or proj is None or proj.org_id != org.id:
+            raise forbidden("That pod doesn't belong to this organization")
+        _rpa(db, pod, user)
+    else:
+        raise validation("scope_type must be ORG, PROJECT, or POD")
+
+
 @router.get("/github/scope-links")
 def github_scope_links(
     slug: str, scope_type: str = "", scope_id: str = "",
     user: User = Depends(get_current_user), db: Session = Depends(get_db),
 ):
-    """Repos attached to the org's scopes (org / team / pod). Filter by a scope."""
+    """Repos attached to the org's scopes (org / team / pod). Filter by a scope.
+    Any org member may view."""
     org = org_by_slug(db, slug)
     _require_section(db, org, user)
     q = db.query(ScopeRepoLink).filter(ScopeRepoLink.org_id == org.id)
@@ -771,32 +797,56 @@ def github_attach_scope(
     slug: str, body: ScopeRepoLinkIn,
     user: User = Depends(get_current_user), db: Session = Depends(get_db),
 ):
-    """Attach a repo to a scope. Resources in the scope whose visibility matches
-    auto-sync to it. Attach a public repo (visibility=public) + a private repo
-    (visibility=private) at ORG scope for the public/private pairing."""
+    """Attach a repo to a scope — an EXISTING repo (repo_full_name, from the
+    dropdown) or a NEW one (create_repo_name + create_private). Enforces the
+    safety rule: a public repo can only route public resources. Managed by the
+    scope's admin (org/project/pod)."""
     org = org_by_slug(db, slug)
-    _require_section(db, org, user, admin=True)
+    _require_section(db, org, user)  # feature + membership
+    _verify_scope(db, org, body.scope_type, body.scope_id)
+    _require_scope_admin(db, org, body.scope_type, body.scope_id, user)
     conn = _connection(db, org, "github")
     if conn is None or conn.status != "connected":
         raise validation("Connect GitHub first")
     _require_write(db, org, conn)
-    _verify_scope(db, org, body.scope_type, body.scope_id)
     token = _github_token(db, org, conn)
-    repo = github.get_repo(token, body.repo_full_name)
-    if not repo:
-        raise not_found(f'Repository "{body.repo_full_name}"')
+
+    wants_private_content = body.visibility in ("all", "private")
+
+    if body.create_repo_name:
+        # Creating a repo to hold private content → it MUST be private.
+        private = body.create_private or wants_private_content
+        target_org = conn.account_label if (conn.account_type == "Organization") else None
+        repo = github.create_repo(token, body.create_repo_name, private=private,
+                                  description=f"SkillShare {body.scope_type.lower()} resources", org=target_org)
+    else:
+        if not body.repo_full_name:
+            raise validation("Pick an existing repository or provide a name to create one")
+        repo = github.get_repo(token, body.repo_full_name)
+        if not repo:
+            raise not_found(f'Repository "{body.repo_full_name}"')
+
+    # Safety: a PUBLIC repo may only ever receive PUBLIC resources.
+    if not repo.get("private") and wants_private_content:
+        raise validation(
+            "A public repository can only hold public resources. Attach a private repo, "
+            "or set the route to \"Public only\"."
+        )
+
     existing = (
         db.query(ScopeRepoLink)
         .filter(ScopeRepoLink.org_id == org.id, ScopeRepoLink.scope_type == body.scope_type,
-                ScopeRepoLink.scope_id == body.scope_id, ScopeRepoLink.repo_full_name == body.repo_full_name)
+                ScopeRepoLink.scope_id == body.scope_id, ScopeRepoLink.repo_full_name == repo["full_name"])
         .first()
     )
     link = existing or ScopeRepoLink(org_id=org.id, scope_type=body.scope_type, scope_id=body.scope_id,
                                      created_by=user.id)
     link.repo_full_name = repo["full_name"]
     link.repo_url = repo.get("html_url")
+    link.repo_private = bool(repo.get("private"))
     link.visibility = body.visibility
-    link.auto_sync = body.auto_sync
+    link.sync_direction = body.sync_direction
+    link.auto_sync = body.sync_direction in ("push", "both")
     link.path_prefix = body.path_prefix
     if existing is None:
         db.add(link)
@@ -807,39 +857,53 @@ def github_attach_scope(
 
 @router.delete("/github/scope-links/{link_id}")
 def github_detach_scope(slug: str, link_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Detach a repo from a scope (does not delete the repo)."""
+    """Detach a repo from a scope (does not delete the repo). Scope admin only."""
     org = org_by_slug(db, slug)
-    _require_section(db, org, user, admin=True)
-    db.query(ScopeRepoLink).filter(ScopeRepoLink.id == link_id, ScopeRepoLink.org_id == org.id).delete()
-    db.commit()
+    _require_section(db, org, user)
+    link = db.query(ScopeRepoLink).filter(ScopeRepoLink.id == link_id, ScopeRepoLink.org_id == org.id).first()
+    if link is not None:
+        _require_scope_admin(db, org, link.scope_type, link.scope_id, user)
+        db.delete(link)
+        db.commit()
     return {"ok": True}
 
 
 @router.post("/github/scope-links/{link_id}/sync")
 def github_scope_sync(slug: str, link_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Push every matching resource currently in the scope to the attached repo."""
+    """Run the link's sync now. push/both → push matching resources to the repo;
+    pull/both → import the repo's resources into the scope. Scope admin only."""
     org = org_by_slug(db, slug)
-    _require_section(db, org, user, admin=True)
-    conn = _connection(db, org, "github")
-    if conn is None or conn.status != "connected":
-        raise validation("Connect GitHub first")
-    _require_write(db, org, conn)
+    _require_section(db, org, user)
     link = db.query(ScopeRepoLink).filter(ScopeRepoLink.id == link_id, ScopeRepoLink.org_id == org.id).first()
     if link is None:
         raise not_found("Scope link")
+    _require_scope_admin(db, org, link.scope_type, link.scope_id, user)
+    conn = _connection(db, org, "github")
+    if conn is None or conn.status != "connected":
+        raise validation("Connect GitHub first")
     token = _github_token(db, org, conn)
-    pushed = 0
-    for resource in _scope_resources(db, org, link.scope_type, link.scope_id):
-        if not visibility_matches(link.visibility, resource.is_public):
-            continue
+
+    pushed = imported = 0
+    if link.sync_direction in ("push", "both"):
+        _require_write(db, org, conn)
+        for resource in _scope_resources(db, org, link.scope_type, link.scope_id):
+            if not push_allowed(link, resource):
+                continue
+            try:
+                push_resource_to(token, link.repo_full_name, resource, link.path_prefix)
+                pushed += 1
+            except Exception:
+                continue
+    if link.sync_direction in ("pull", "both"):
+        scope_id = org.id if link.scope_type == "ORG" else link.scope_id
         try:
-            push_resource_to(token, link.repo_full_name, resource, link.path_prefix)
-            pushed += 1
+            _ref, found, _meta = github.detect_from_url(f"github.com/{link.repo_full_name}", token=token)
+            imported = len(_import_detected(db, org, user, link.scope_type, scope_id, found))
         except Exception:
-            continue
+            imported = 0
     link.last_synced_at = datetime.now(timezone.utc)
     db.commit()
-    return {"pushed": pushed}
+    return {"pushed": pushed, "imported": imported}
 
 
 # --------------------------------------------------------------------------- #
@@ -992,8 +1056,31 @@ async def github_webhook(request: Request, db: Session = Depends(get_db)):
                 updated += 1
         except Exception:
             continue
+
+    # Scope links on this repo with a pull direction → import the repo's
+    # resources into the scope (GitHub → SkillShare).
+    imported = 0
+    for slink in db.query(ScopeRepoLink).filter(
+        ScopeRepoLink.repo_full_name == full, ScopeRepoLink.provider_key == "github"
+    ).all():
+        if slink.sync_direction not in ("pull", "both"):
+            continue
+        org = db.get(__import__("app.models", fromlist=["Organization"]).Organization, slink.org_id)
+        conn = _connection(db, org, "github") if org else None
+        actor = db.get(User, slink.created_by)
+        if not (org and conn and actor):
+            continue
+        try:
+            token = connection_token(conn)
+            _ref, found, _meta = github.detect_from_url(f"github.com/{full}", token=token)
+            scope_id = org.id if slink.scope_type == "ORG" else slink.scope_id
+            imported += len(_import_detected(db, org, actor, slink.scope_type, scope_id, found))
+            slink.last_synced_at = datetime.now(timezone.utc)
+        except Exception:
+            continue
+
     db.commit()
-    return {"ok": True, "updated": updated}
+    return {"ok": True, "updated": updated, "imported": imported}
 
 
 @cron_router.post("/integrations/sync")

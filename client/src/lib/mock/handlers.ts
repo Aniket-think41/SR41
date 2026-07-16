@@ -1089,22 +1089,41 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     const conn = orgConnection(db, org.id, "github");
     if (!(conn?.capabilities ?? []).includes("write"))
       throw new HttpError(403, "FORBIDDEN", "This connection can't write to GitHub — grant the 'repo' scope and Sync");
-    const full = String(body.repo_full_name ?? "").trim();
-    if (full.length < 3) throw new HttpError(422, "VALIDATION_ERROR", "repo_full_name is required");
     const st = String(body.scope_type ?? "ORG") as "ORG" | "PROJECT" | "POD";
     const sid = String(body.scope_id ?? "");
+    const account = conn?.account_label || "acme";
+    const route = String(body.visibility ?? "all") as "all" | "public" | "private";
+    const wantsPrivate = route === "all" || route === "private";
+
+    let full: string;
+    let repoPrivate: boolean;
+    const createName = String(body.create_repo_name ?? "").trim();
+    if (createName) {
+      full = `${account}/${createName}`;
+      repoPrivate = body.create_private !== false || wantsPrivate; // forced private if holding private content
+    } else {
+      full = String(body.repo_full_name ?? "").trim();
+      if (full.length < 3) throw new HttpError(422, "VALIDATION_ERROR", "Pick a repository or provide a name to create");
+      const known = mockRepos(account, "").find((r) => (r as { full_name: string }).full_name === full) as { private?: boolean } | undefined;
+      repoPrivate = known?.private ?? true; // unknown repos assumed private in mock
+    }
+    // Safety: a public repo can only route public resources.
+    if (!repoPrivate && wantsPrivate)
+      throw new HttpError(422, "VALIDATION_ERROR", "A public repository can only hold public resources. Attach a private repo or set the route to Public only.");
+
+    const dir = String(body.sync_direction ?? "push") as "off" | "pull" | "push" | "both";
     let link = db.scope_repo_links.find((l) => l.org_id === org.id && l.scope_type === st && l.scope_id === sid && l.repo_full_name === full);
     if (!link) {
       link = {
         id: uid("srl"), org_id: org.id, scope_type: st, scope_id: sid, provider_key: "github",
-        repo_full_name: full, repo_url: `https://github.com/${full}`, path_prefix: String(body.path_prefix ?? ""),
-        visibility: (String(body.visibility ?? "all") as "all" | "public" | "private"),
-        auto_sync: body.auto_sync !== false, last_synced_at: null, created_at: now(),
+        repo_full_name: full, repo_url: `https://github.com/${full}`, repo_private: repoPrivate,
+        path_prefix: String(body.path_prefix ?? ""), visibility: route, sync_direction: dir,
+        auto_sync: dir === "push" || dir === "both", last_synced_at: null, created_at: now(),
       };
       db.scope_repo_links.push(link);
     } else {
-      link.visibility = (String(body.visibility ?? link.visibility) as "all" | "public" | "private");
-      link.auto_sync = body.auto_sync !== false;
+      link.visibility = route; link.sync_direction = dir; link.repo_private = repoPrivate;
+      link.auto_sync = dir === "push" || dir === "both";
     }
     saveDb();
     return link;
@@ -1129,7 +1148,8 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     }).filter((r) => link.visibility === "all" || (link.visibility === "public" ? r.is_public : !r.is_public));
     link.last_synced_at = now();
     saveDb();
-    return { pushed: inScope.length };
+    const pushed = link.sync_direction === "push" || link.sync_direction === "both" ? inScope.length : 0;
+    return { pushed, imported: 0 };
   }],
 
   ["GET", "/api/orgs/:slug/integrations", (p, _b, _q, db) => {

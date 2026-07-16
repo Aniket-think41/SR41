@@ -283,14 +283,17 @@ class GithubResourceRefIn(BaseModel):
 
 
 class ScopeRepoLinkIn(BaseModel):
-    """Attach a GitHub repo to a scope (org/team/pod). Resources in the scope
-    whose visibility matches auto-sync to the repo. A scope may have many."""
+    """Attach a GitHub repo to a scope (org/team/pod). Provide an EXISTING repo
+    via ``repo_full_name`` (chosen from the dropdown), OR create a new one via
+    ``create_repo_name`` (+ ``create_private``). A scope may have many repos."""
 
     scope_type: str  # ORG | PROJECT | POD
     scope_id: str = Field(min_length=1, max_length=64)
-    repo_full_name: str = Field(min_length=3, max_length=200)
-    visibility: Literal["all", "public", "private"] = "all"
-    auto_sync: bool = True
+    repo_full_name: str | None = Field(default=None, max_length=200)   # existing repo
+    create_repo_name: str | None = Field(default=None, max_length=100)  # create a new repo instead
+    create_private: bool = True                                        # visibility of the created repo
+    visibility: Literal["all", "public", "private"] = "all"            # which resources route here
+    sync_direction: Literal["off", "pull", "push", "both"] = "push"
     path_prefix: str = Field(default="", max_length=200)
 
 
