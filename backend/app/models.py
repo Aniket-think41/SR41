@@ -697,3 +697,60 @@ class ContentPage(Base):
     status: Mapped[str] = mapped_column(String, default="published", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class HiveStagedEntity(Base):
+    """A single entity pulled from Hive (crispr) into a staging area during a
+    *fetch*, before an admin approves importing it. Connecting Hive never adds
+    members or fires mail; a fetch snapshots the directory here, the admin
+    reviews the diff, then applies (all / by project / by team) — see
+    HIVE_INTEGRATION.md §3a.
+
+    ``kind`` = employee | project | group. ``external_ref`` is Hive's stable key
+    for the entity (employee: member_id; project/group: id) — the dedup key
+    across fetches and the join key to HiveLink. ``status`` is the diff verdict:
+      pending  — present in Hive, not yet applied (a new import candidate)
+      applied  — imported into SkillShare (an OrgMember/Project/Pod exists)
+      removed  — was applied before but is gone/inactive in Hive now (offboard
+                 candidate: leaver, ended allocation, or removed group member)
+      skipped  — admin chose not to import it
+    ``payload`` holds the normalized Hive record (email, display_name, dates,
+    status, allocation links, group members) so apply needs no re-fetch."""
+
+    __tablename__ = "hive_staged_entities"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("hst"))
+    org_id: Mapped[str] = mapped_column(String, ForeignKey("organizations.id"), index=True)
+    provider_key: Mapped[str] = mapped_column(String, default="hive", index=True)
+    kind: Mapped[str] = mapped_column(String, index=True)          # employee | project | group
+    external_ref: Mapped[str] = mapped_column(String, index=True)  # Hive stable key
+    email: Mapped[str | None] = mapped_column(String, nullable=True)   # employees (dedup)
+    display_name: Mapped[str] = mapped_column(String, default="")
+    # Normalized Hive record + relationships (allocations, group members, PM,
+    # is_active/status, dates) — enough to apply without re-calling Hive.
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String, default="pending", index=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class HiveLink(Base):
+    """Provenance: a SkillShare row the Hive sync created/owns. Every import
+    records one, so subsequent syncs can (a) dedup — never double-create — and
+    (b) offboard safely — only remove rows the sync itself created, never a
+    member an admin added by hand (the don't-clobber rule, §Tier 3).
+
+    ``kind`` = user | org_member | project | pod | project_member | pod_member.
+    ``external_ref`` is Hive's key (member_id / project id / group id, or a
+    composite like "<project_ref>:<member_id>" for a membership). ``local_id``
+    is the SkillShare row id (user id / project id / pod id / membership id)."""
+
+    __tablename__ = "hive_links"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("hln"))
+    org_id: Mapped[str] = mapped_column(String, ForeignKey("organizations.id"), index=True)
+    provider_key: Mapped[str] = mapped_column(String, default="hive", index=True)
+    kind: Mapped[str] = mapped_column(String, index=True)
+    external_ref: Mapped[str] = mapped_column(String, index=True)
+    local_id: Mapped[str] = mapped_column(String, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)

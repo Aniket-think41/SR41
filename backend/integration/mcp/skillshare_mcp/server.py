@@ -104,7 +104,17 @@ mcp = FastMCP(
         "existing repo. push_to_github / pull_from_github keep a linked resource "
         "in sync; list_github_links shows what's linked (and reverse-maps a repo "
         "to its resources). Publishing needs the connection's write capability "
-        "(a repo-scoped token)."
+        "(a repo-scoped token).\n\n"
+        "HIVE INTEGRATION (Enterprise) — an org can connect Hive (its HR/ERP "
+        "directory) in the dashboard Integrations section to mirror its people "
+        "and teams. The flow is deliberately two-step and never sends bulk mail: "
+        "call fetch_hive() to snapshot the directory into staging (adds nobody), "
+        "list_hive_staged() to review the diff (pending/applied/removed), then "
+        "apply_hive(scope=...) to import — scope is all|members|projects|groups, "
+        "create_structure makes Projects (from Hive projects) and Pods (from Hive "
+        "teams), and offboard=True removes sync-created members for people who "
+        "left. If a call says Hive isn't connected, point them to the dashboard "
+        "Integrations page."
     ),
 )
 
@@ -1362,6 +1372,50 @@ def publish_scope_to_github(org_slug: str = "", scope_type: str = "ORG", scope_i
 def sync_all_github(org_slug: str = "") -> dict:
     """Re-push every linked resource in the org to its GitHub repo (bulk write sync)."""
     return _request("POST", f"/api/orgs/{_org_slug(org_slug)}/integrations/github/sync-all", json={})
+
+
+# ---- Hive (HR/directory) integration ----
+
+
+@mcp.tool()
+def fetch_hive(org_slug: str = "") -> dict:
+    """Pull the organization's Hive (HR/ERP) directory into staging for review.
+
+    Adds NO members and sends NO mail — it snapshots employees, projects, teams,
+    and allocations so you can review the diff and then apply. Hive must be
+    connected first in the dashboard Integrations section (Enterprise plan).
+    Returns counts. Follow with list_hive_staged, then apply_hive."""
+    return _request("POST", f"/api/orgs/{_org_slug(org_slug)}/integrations/hive/fetch", json={})
+
+
+@mcp.tool()
+def list_hive_staged(org_slug: str = "", status: str = "") -> dict:
+    """List the staged Hive entities and their diff status (pending / applied /
+    removed / skipped), grouped into people, projects, and teams. Optionally
+    filter by `status`. Omit org_slug to use your primary org."""
+    params = {"status": status} if status else None
+    return _request("GET", f"/api/orgs/{_org_slug(org_slug)}/integrations/hive/staged", params=params)
+
+
+@mcp.tool()
+def apply_hive(
+    org_slug: str = "", scope: str = "all", refs: list[str] | None = None,
+    create_structure: bool = True, offboard: bool = False,
+) -> dict:
+    """Import staged Hive entities into the organization (the explicit approval
+    step after fetch_hive).
+
+    `scope` selects what to import: all | members | projects | groups. `refs`
+    optionally narrows to specific staged external refs (default: all pending).
+    `create_structure` creates SkillShare Projects (from Hive projects) and Pods
+    (from Hive teams); set False to only add people. `offboard` removes the
+    members the sync created for people who have left / teams removed in Hive
+    (never touches members added by hand). No mail is sent — imported users sign
+    in with their Hive Google email via SSO. Returns counts of what changed."""
+    body = {"scope": scope, "create_structure": create_structure, "notify": False, "offboard": offboard}
+    if refs:
+        body["refs"] = refs
+    return _request("POST", f"/api/orgs/{_org_slug(org_slug)}/integrations/hive/apply", json=body)
 
 
 @mcp.tool()

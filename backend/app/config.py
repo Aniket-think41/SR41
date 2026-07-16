@@ -112,6 +112,18 @@ class Settings(BaseSettings):
     # payloads. Empty → the webhook endpoint returns 503 (disabled).
     github_webhook_secret: str = ""
 
+    # --- Hive (crispr HR/ERP directory) integration ---
+    # Origin of the Hive deployment SkillShare connects to. Its MCP OAuth flow
+    # and tools live under {hive_base_url}/mcp/. Users authorize in a popup
+    # (authorization-code + dynamic client registration); SkillShare stores the
+    # returned access/refresh token (Fernet) and reads employees/projects/
+    # allocations/groups through the MCP tools.
+    hive_base_url: str = "https://hive.think41.com"
+    # Optional: pin a pre-registered OAuth client (else Dynamic Client
+    # Registration mints one on first connect and caches it on the provider row).
+    hive_oauth_client_id: str = ""
+    hive_oauth_client_secret: str = ""
+
     # --- AI metadata generation (app/ai.py) — provider-agnostic, all optional ---
     # Priority: gemini (free tier) → anthropic. Empty everywhere → generation is
     # skipped and callers fall back to raw values. Get a free Gemini key at
@@ -126,6 +138,27 @@ class Settings(BaseSettings):
     # Shared secret an external scheduler (Cloud Scheduler) sends as
     # X-Cron-Secret to POST /api/cron/integrations/sync. Empty → endpoint 403s.
     cron_secret: str = ""
+
+    # --- Celery background worker (integration sync) ---
+    # Broker/result backend for the background sync worker. Defaults to redis_url
+    # (already used for cache/rate-limiting) so setting REDIS_URL is enough. When
+    # no broker is configured the cron endpoints run the sync INLINE instead of
+    # enqueuing — so the feature degrades gracefully with zero infra.
+    celery_broker_url: str = ""     # empty → falls back to redis_url
+    celery_result_backend: str = ""  # empty → falls back to broker
+    # Beat cadence (seconds). Defaults: people/offboarding daily, structure weekly.
+    hive_sync_people_seconds: int = 86_400      # 24h
+    hive_sync_structure_seconds: int = 604_800  # 7d
+    # GitHub push-sync cadence (resources → linked repos for write-mode conns).
+    github_sync_seconds: int = 21_600           # 6h
+
+    @property
+    def effective_celery_broker(self) -> str:
+        return self.celery_broker_url or self.redis_url
+
+    @property
+    def celery_enabled(self) -> bool:
+        return bool(self.effective_celery_broker)
 
     # --- payments: Razorpay (spec §5) ---
     # Scaffolded now, activates when credentials are present. Empty → payments are

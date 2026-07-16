@@ -1,0 +1,47 @@
+# Cloud Build → Cloud Run pipeline for the SkillShare Celery WORKER.
+# Reuses the backend image (same Dockerfile) but overrides the entrypoint to run
+# the Celery worker + embedded beat scheduler alongside a tiny health server
+# (Cloud Run requires the container to answer HTTP on $PORT).
+#
+# Deploy manually:
+#   gcloud builds submit --config backend/cloudbuild.worker.yaml .
+#
+# The worker needs the SAME env/secrets as the API (DATABASE_URL, REDIS_URL,
+# INTEGRATION_SECRET_KEY, HIVE_BASE_URL, …) — set once on the service and carried
+# forward. Requires REDIS_URL (or CELERY_BROKER_URL) to be set, and a min of 1
+# always-on instance so beat keeps ticking.
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args: [build, -t, "${_IMAGE}:$SHORT_SHA", -t, "${_IMAGE}:latest", -f, backend/Dockerfile, backend]
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args: [push, --all-tags, "${_IMAGE}"]
+
+  - id: deploy-worker
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - "$_WORKER_SERVICE"
+      - "--image=$_IMAGE:$SHORT_SHA"
+      - "--region=$_REGION"
+      - --platform=managed
+      - --no-cpu-throttling      # keep the worker alive between requests
+      - --min-instances=1        # beat must always be running
+      - --max-instances=1        # single beat scheduler (avoid duplicate schedules)
+      - "--command=sh"
+      - "--args=-c,celery -A app.celery_app worker --beat --loglevel=info --concurrency=2 & exec uvicorn app.worker_health:app --host 0.0.0.0 --port $${PORT:-8080}"
+
+images:
+  - ${_IMAGE}
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+substitutions:
+  _REGION: us-central1
+  _WORKER_SERVICE: skillshare-worker
+  _IMAGE: us-central1-docker.pkg.dev/think41-web/skillshare/backend

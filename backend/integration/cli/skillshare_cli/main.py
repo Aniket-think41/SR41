@@ -1043,6 +1043,61 @@ def cmd_github_sync_all(args) -> None:
     print(f"{BOLD}✓ pushed {res.get('pushed', 0)} link(s){RESET}")
 
 
+# ---- hive (HR/directory) integration ----
+
+def cmd_hive_fetch(args) -> None:
+    """Pull the Hive directory into staging for review (adds no members)."""
+    slug = _org_for(args)
+    r = request("POST", f"/api/orgs/{slug}/integrations/hive/fetch", body={}) or {}
+    print(f"{BOLD}✓ fetched from Hive{RESET}  "
+          f"{DIM}{r.get('members', 0)} people · {r.get('projects', 0)} projects · "
+          f"{r.get('groups', 0)} teams · {r.get('allocations', 0)} allocations{RESET}")
+    print(f"    {DIM}pending {r.get('pending_count', 0)} · applied {r.get('applied_count', 0)} · "
+          f"removed {r.get('removed_count', 0)}{RESET}")
+    print(f"    {DIM}review with `skillshare hive-staged`, then `skillshare hive-apply`{RESET}")
+
+
+def cmd_hive_staged(args) -> None:
+    """Show the staged Hive entities and their diff status."""
+    slug = _org_for(args)
+    data = request("GET", f"/api/orgs/{slug}/integrations/hive/staged",
+                   params={"status": args.status} if args.status else None) or {}
+    counts = data.get("counts", {})
+    print(f"{BOLD}Hive staging{RESET}  {DIM}pending {counts.get('pending', 0)} · "
+          f"applied {counts.get('applied', 0)} · removed {counts.get('removed', 0)} · "
+          f"skipped {counts.get('skipped', 0)}{RESET}")
+    labels = {"employee": "People", "project": "Projects", "group": "Teams"}
+    for kind, rows in (data.get("groups") or {}).items():
+        if not rows:
+            continue
+        print(f"  {BOLD}{labels.get(kind, kind)}{RESET} ({len(rows)})")
+        for e in rows[: args.max]:
+            mark = {"pending": "＋", "applied": "✓", "removed": "－", "skipped": "·"}.get(e["status"], " ")
+            extra = f" {DIM}{e['email']}{RESET}" if e.get("email") else ""
+            print(f"    {mark} {e['display_name']}{extra}  {DIM}{e['status']}{RESET}")
+
+
+def cmd_hive_apply(args) -> None:
+    """Import staged Hive entities into the org (members/projects/teams)."""
+    slug = _org_for(args)
+    body = {"scope": args.scope, "create_structure": not args.members_only,
+            "notify": False, "offboard": args.offboard}
+    if args.refs:
+        body["refs"] = [x for x in args.refs.split(",") if x]
+    r = request("POST", f"/api/orgs/{slug}/integrations/hive/apply", body=body) or {}
+    print(f"{BOLD}✓ imported from Hive{RESET}  "
+          f"{DIM}+{r.get('members_added', 0)} members · {r.get('projects_created', 0)} projects · "
+          f"{r.get('pods_created', 0)} pods · {r.get('memberships_added', 0)} memberships"
+          + (f" · offboarded {r.get('offboarded', 0)}" if args.offboard else "") + f"{RESET}")
+
+
+def cmd_hive_sync(args) -> None:
+    """Fetch + apply in one step (equivalent to the dashboard 'Sync now')."""
+    slug = _org_for(args)
+    request("POST", f"/api/orgs/{slug}/integrations/hive/fetch", body={})
+    cmd_hive_apply(args)
+
+
 def cmd_watch(args) -> None:
     """Poll the inbox + local artifacts and pop a themed desktop card for each
     new item. Runs in the foreground; use --once for a cron/systemd timer."""
@@ -1568,6 +1623,34 @@ def main() -> None:
     sp = sub.add_parser("github-sync-all", help="re-push every linked resource in the org to GitHub")
     sp.add_argument("--org", help="org slug (default: your primary org)")
     sp.set_defaults(fn=cmd_github_sync_all)
+
+    sp = sub.add_parser("hive-fetch", help="pull your Hive directory into staging for review (adds no members)")
+    sp.add_argument("--org", help="org slug (default: your primary org)")
+    sp.set_defaults(fn=cmd_hive_fetch)
+
+    sp = sub.add_parser("hive-staged", help="show staged Hive entities and their diff status")
+    sp.add_argument("--org", help="org slug (default: your primary org)")
+    sp.add_argument("--status", choices=["pending", "applied", "removed", "skipped"], help="filter by status")
+    sp.add_argument("--max", type=int, default=50, help="max rows per kind (default 50)")
+    sp.set_defaults(fn=cmd_hive_staged)
+
+    sp = sub.add_parser("hive-apply", help="import staged Hive entities into the org")
+    sp.add_argument("--org", help="org slug (default: your primary org)")
+    sp.add_argument("--scope", default="all", choices=["all", "members", "projects", "groups"],
+                    help="what to import (default all)")
+    sp.add_argument("--refs", help="comma-separated staged external refs to import (default: all pending)")
+    sp.add_argument("--members-only", dest="members_only", action="store_true",
+                    help="don't create projects/pods, only add people")
+    sp.add_argument("--offboard", action="store_true", help="also remove sync-created rows for leavers")
+    sp.set_defaults(fn=cmd_hive_apply)
+
+    sp = sub.add_parser("hive-sync", help="fetch + apply Hive in one step (Sync now)")
+    sp.add_argument("--org", help="org slug (default: your primary org)")
+    sp.add_argument("--scope", default="all", choices=["all", "members", "projects", "groups"])
+    sp.add_argument("--refs", help="comma-separated staged external refs (default: all pending)")
+    sp.add_argument("--members-only", dest="members_only", action="store_true")
+    sp.add_argument("--offboard", action="store_true")
+    sp.set_defaults(fn=cmd_hive_sync)
 
     sp = sub.add_parser("status", help="one-line status for an AI tool's status bar (install gap + local to-push)")
     _scan_flags(sp)

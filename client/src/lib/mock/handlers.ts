@@ -300,6 +300,25 @@ const INTEGRATION_PROVIDERS = [
     sort_order: 10,
     enabled: true,
   },
+  {
+    key: "hive",
+    name: "Hive",
+    tagline: "Mirror your company's people and teams from Hive into your organization.",
+    description:
+      "Connect Hive (your HR & delivery system) and SkillShare keeps your organization in step with the " +
+      "real company: import employees as members, map delivery projects to projects and teams to pods, and " +
+      "keep membership current as people join, move, and leave. Connecting only fetches the directory for " +
+      "review — nothing is added until you approve it, and imports never send bulk mail.",
+    category: "HR & Directory",
+    icon: "hive",
+    docs_url: "https://hive.think41.com/",
+    auth_type: "oauth" as const,
+    min_plan: "ENTERPRISE",
+    feature_flag: null as string | null,
+    status: "available" as const,
+    sort_order: 20,
+    enabled: true,
+  },
 ];
 
 const AUTH_METHODS: Record<string, unknown[]> = {
@@ -326,6 +345,28 @@ const AUTH_METHODS: Record<string, unknown[]> = {
       recommended: [],
     },
   ],
+  hive: [
+    {
+      key: "oauth",
+      name: "Sign in with Hive",
+      hint: "Authorize SkillShare in your browser — sign in with an HR / allocation-manager account.",
+      docs_url: "https://hive.think41.com/",
+      available: true,
+      recommended: [
+        { scope: "employees:read", why: "Import employees as organization members", required: true },
+        { scope: "delivery:read", why: "Map delivery projects to projects", required: false },
+        { scope: "allocations:read", why: "Place people on the right project/pod", required: false },
+        { scope: "groups:read", why: "Map teams to pods with their members", required: false },
+      ],
+    },
+    {
+      key: "service_token",
+      name: "Paste a Hive token",
+      hint: "Advanced / testing: paste a short-lived Hive access token and the tenant code.",
+      available: true,
+      recommended: [],
+    },
+  ],
 };
 
 const CAPABILITY_CATALOG: Record<string, { key: string; name: string; description: string; always?: boolean; scopes: string[]; recommend?: string }[]> = {
@@ -337,7 +378,35 @@ const CAPABILITY_CATALOG: Record<string, { key: string; name: string; descriptio
     { key: "write", name: "Push changes to GitHub", description: "Two-way / write-only sync back to repositories.", scopes: ["repo"], recommend: "repo" },
     { key: "webhooks", name: "Receive repository events", description: "Live sync on push/release via webhooks (coming soon).", scopes: ["admin:repo_hook"], recommend: "admin:repo_hook" },
   ],
+  hive: [
+    { key: "read_people", name: "Read employees", description: "Import employees as organization members and detect leavers.", always: true, scopes: [] },
+    { key: "read_projects", name: "Read delivery projects", description: "Map Hive projects to SkillShare projects.", always: true, scopes: [] },
+    { key: "read_allocations", name: "Read allocations", description: "Place people on the projects/pods they're allocated to.", always: true, scopes: [] },
+    { key: "read_groups", name: "Read teams", description: "Map Hive groups/teams to pods with their members.", always: true, scopes: [] },
+  ],
 };
+
+/* ---- hive staging (offline demo directory) ---- */
+type HiveStaged = {
+  id: string;
+  kind: "employee" | "project" | "group";
+  external_ref: string;
+  email: string | null;
+  display_name: string;
+  status: "pending" | "applied" | "removed" | "skipped";
+  payload: Record<string, unknown>;
+  fetched_at: string | null;
+  applied_at: string | null;
+  member_refs?: string[];
+};
+
+const MOCK_HIVE_DIR: HiveStaged[] = [
+  { id: "hst-m1", kind: "employee", external_ref: "m1", email: "alice@think41.com", display_name: "Alice Rao", status: "pending", payload: {}, fetched_at: null, applied_at: null },
+  { id: "hst-m2", kind: "employee", external_ref: "m2", email: "bob@think41.com", display_name: "Bob Singh", status: "pending", payload: {}, fetched_at: null, applied_at: null },
+  { id: "hst-m3", kind: "employee", external_ref: "m3", email: "carol@think41.com", display_name: "Carol Meyer", status: "pending", payload: {}, fetched_at: null, applied_at: null },
+  { id: "hst-p1", kind: "project", external_ref: "p1", email: null, display_name: "Apollo", status: "pending", payload: {}, fetched_at: null, applied_at: null, member_refs: ["m1", "m2"] },
+  { id: "hst-g1", kind: "group", external_ref: "g1", email: null, display_name: "Platform", status: "pending", payload: {}, fetched_at: null, applied_at: null, member_refs: ["m2", "m3"] },
+];
 
 function computeCaps(providerKey: string, scopes: string[]): string[] {
   const granted = new Set(scopes);
@@ -1150,6 +1219,114 @@ const routes: [method: string, pattern: string, fn: Handler][] = [
     saveDb();
     const pushed = link.sync_direction === "push" || link.sync_direction === "both" ? inScope.length : 0;
     return { pushed, imported: 0 };
+  }],
+
+  /* ---- hive (HR/directory) — offline demo of fetch → review → apply ---- */
+  ["POST", "/api/orgs/:slug/integrations/hive/oauth/start", (p, _b, q, db) => {
+    const { org, me } = requireIntegrations(db, p.slug, true);
+    const tenant = (q.get("tenant") ?? "").trim() || "think41";
+    // Mock shortcut: "connect" immediately so the demo works without a real
+    // Hive tab (the popup opens a harmless '#'), and stamp the tenant.
+    let conn = orgConnection(db, org.id, "hive");
+    if (!conn) {
+      conn = {
+        id: uid("oint"), org_id: org.id, provider_key: "hive", status: "connected",
+        auth_method: "oauth", account_label: tenant, account_type: "Tenant",
+        account_url: "https://hive.think41.com/", account_avatar: null,
+        token_hint: "demo", scopes: [], capabilities: computeCaps("hive", []),
+        config: { tenant }, last_error: null, last_synced_at: null, connected_by: me.id,
+        created_at: now(), updated_at: now(),
+      };
+      db.org_integrations.push(conn);
+    } else {
+      conn.status = "connected"; conn.config = { ...(conn.config ?? {}), tenant }; conn.updated_at = now();
+    }
+    saveDb();
+    return { authorize_url: "#hive-mock-connected" };
+  }],
+
+  ["POST", "/api/orgs/:slug/integrations/hive/fetch", (p, _b, _q, db) => {
+    const { org } = requireIntegrations(db, p.slug, true);
+    const conn = orgConnection(db, org.id, "hive");
+    if (!conn) throw new HttpError(422, "VALIDATION_ERROR", "Connect Hive first");
+    const staged = MOCK_HIVE_DIR.map((e) => {
+      const prev = (conn.config?.hive_staged as HiveStaged[] | undefined)?.find((s) => s.external_ref === e.external_ref && s.kind === e.kind);
+      return { ...e, status: prev?.status === "applied" ? "applied" : "pending" } as HiveStaged;
+    });
+    conn.config = { ...(conn.config ?? {}), hive_staged: staged };
+    conn.last_synced_at = now();
+    conn.updated_at = now();
+    saveDb();
+    const c = (s: string) => staged.filter((x) => x.status === s).length;
+    return {
+      members: staged.filter((s) => s.kind === "employee").length,
+      projects: staged.filter((s) => s.kind === "project").length,
+      groups: staged.filter((s) => s.kind === "group").length,
+      allocations: 2, pending_count: c("pending"), applied_count: c("applied"), removed_count: c("removed"),
+    };
+  }],
+
+  ["GET", "/api/orgs/:slug/integrations/hive/staged", (p, _b, q, db) => {
+    const { org } = requireIntegrations(db, p.slug, false);
+    const conn = orgConnection(db, org.id, "hive");
+    const statusFilter = q.get("status");
+    const staged = ((conn?.config?.hive_staged as HiveStaged[]) ?? []).filter(
+      (s) => !statusFilter || s.status === statusFilter
+    );
+    const groups = { employee: [] as HiveStaged[], project: [] as HiveStaged[], group: [] as HiveStaged[] };
+    for (const s of staged) groups[s.kind].push(s);
+    const cnt = (st: string) => ((conn?.config?.hive_staged as HiveStaged[]) ?? []).filter((s) => s.status === st).length;
+    return { groups, counts: { pending: cnt("pending"), applied: cnt("applied"), removed: cnt("removed"), skipped: cnt("skipped") } };
+  }],
+
+  ["POST", "/api/orgs/:slug/integrations/hive/apply", (p, body, _q, db) => {
+    const { org } = requireIntegrations(db, p.slug, true);
+    const conn = orgConnection(db, org.id, "hive");
+    if (!conn) throw new HttpError(422, "VALIDATION_ERROR", "Connect Hive first");
+    const scope = String(body.scope ?? "all");
+    const refs = new Set((body.refs as string[] | undefined) ?? []);
+    const createStructure = body.create_structure !== false;
+    const staged = (conn.config?.hive_staged as HiveStaged[]) ?? [];
+    const res = { members_added: 0, projects_created: 0, pods_created: 0, memberships_added: 0, offboarded: 0 };
+    const want = (k: HiveStaged["kind"]) =>
+      (scope === "all" || (scope === "members" && k === "employee") || (scope === "projects" && k === "project") || (scope === "groups" && k === "group"));
+    const userFor = (ref: string): User | undefined => {
+      const emp = staged.find((s) => s.kind === "employee" && s.external_ref === ref);
+      if (!emp?.email) return undefined;
+      const u = resolveOrProvision(db, { email: emp.email });
+      ensureOrgMember(db, org.id, u.id);
+      if (emp.status === "pending") { emp.status = "applied"; res.members_added += 1; }
+      return u;
+    };
+    for (const s of staged) {
+      if (s.status !== "pending" || !want(s.kind)) continue;
+      if (refs.size && !refs.has(s.external_ref)) continue;
+      if (s.kind === "employee") { userFor(s.external_ref); }
+    }
+    if (createStructure && (scope === "all" || scope === "projects")) {
+      for (const s of staged.filter((x) => x.kind === "project" && x.status === "pending" && (!refs.size || refs.has(x.external_ref)))) {
+        const proj = { id: uid("proj"), org_id: org.id, name: s.display_name, description: "", tags: [], visibility: "ORG" as const, created_by: org.owner_id, created_at: now() };
+        db.projects.push(proj); res.projects_created += 1;
+        for (const mref of (s.member_refs ?? [])) { const u = userFor(mref); if (u) { ensureProjectMember(db, proj.id, u.id); res.memberships_added += 1; } }
+        s.status = "applied";
+      }
+    }
+    if (createStructure && (scope === "all" || scope === "groups")) {
+      const teamRows = staged.filter((x) => x.kind === "group" && x.status === "pending" && (!refs.size || refs.has(x.external_ref)));
+      if (teamRows.length) {
+        let teams = db.projects.find((x) => x.org_id === org.id && x.name === "Teams (from Hive)");
+        if (!teams) { teams = { id: uid("proj"), org_id: org.id, name: "Teams (from Hive)", description: "Teams synced from Hive.", tags: [], visibility: "ORG" as const, created_by: org.owner_id, created_at: now() }; db.projects.push(teams); }
+        for (const s of teamRows) {
+          const pod = { id: uid("pod"), project_id: teams.id, name: s.display_name, description: "", purpose_tag: "", created_by: org.owner_id, created_at: now() };
+          db.pods.push(pod); res.pods_created += 1;
+          for (const mref of (s.member_refs ?? [])) { const u = userFor(mref); if (u) { ensureProjectMember(db, teams.id, u.id); ensurePodMember(db, pod.id, u.id); res.memberships_added += 1; } }
+          s.status = "applied";
+        }
+      }
+    }
+    conn.updated_at = now();
+    saveDb();
+    return res;
   }],
 
   ["GET", "/api/orgs/:slug/integrations", (p, _b, _q, db) => {
