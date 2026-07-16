@@ -38,18 +38,30 @@ from .errors import validation
 _TIMEOUT = 20.0
 _UA = "skillshare-registry"
 
-# FastMCP's OAuth routes are mounted at the server root. We still prefer the
-# discovery document when it's reachable; these are the fallbacks.
-_DEFAULT_AUTHZ_METADATA = "/.well-known/oauth-authorization-server"
-_DEFAULT_REGISTER = "/register"
-_DEFAULT_AUTHORIZE = "/authorize"
-_DEFAULT_TOKEN = "/token"
+# Hive mounts its MCP server (and OAuth routes) under /mcp. RFC 8414 discovery is
+# served per-resource at /.well-known/oauth-authorization-server/mcp (JSON); the
+# endpoints themselves live under /mcp/*. We prefer the discovery document and
+# fall back to these known paths. (Hitting /register at the host root returns the
+# SPA's 405 — the earlier bug.)
+_DEFAULT_AUTHZ_METADATA = "/.well-known/oauth-authorization-server/mcp"
+_DEFAULT_REGISTER = "/mcp/register"
+_DEFAULT_AUTHORIZE = "/mcp/authorize"
+_DEFAULT_TOKEN = "/mcp/token"
+# OAuth scopes to request (identity only — enough to resolve the Hive user; the
+# MCP tools are authorized by that user's role, not by these scopes).
+_SCOPES = "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
 
 
 def _base_url() -> str:
     from .config import get_settings
 
     return (get_settings().hive_base_url or "https://hive.think41.com").rstrip("/")
+
+
+def _resource() -> str:
+    """The protected-resource audience Hive expects on authorize/token (RFC 8707);
+    Hive rejects a mismatch with invalid_target."""
+    return _base_url() + "/mcp/"
 
 
 def _headers(token: str | None = None) -> dict:
@@ -90,8 +102,10 @@ def discover_endpoints() -> dict:
     httpx = _httpx()
     try:
         with httpx.Client(timeout=_TIMEOUT, headers=_headers(), follow_redirects=True) as c:
-            r = c.get(base + _DEFAULT_AUTHZ_METADATA)
-            if r.status_code < 400:
+            r = c.get(base + _DEFAULT_AUTHZ_METADATA, headers={"Accept": "application/json"})
+            # The host's SPA answers unknown paths with 200 text/html — only
+            # trust a real JSON metadata document.
+            if r.status_code < 400 and "application/json" in r.headers.get("content-type", ""):
                 doc = r.json()
                 for k in list(endpoints):
                     if doc.get(k):
@@ -143,6 +157,8 @@ def authorize_url(client_id: str, redirect_uri: str, state: str, code_challenge:
         "state": state,
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
+        "scope": _SCOPES,
+        "resource": _resource(),
     }
     return discover_endpoints()["authorization_endpoint"] + "?" + urlencode(params)
 
@@ -171,6 +187,7 @@ def exchange_code(
         "redirect_uri": redirect_uri,
         "code_verifier": code_verifier,
         "client_id": client_id,
+        "resource": _resource(),
     }
     if client_secret:
         form["client_secret"] = client_secret
@@ -188,6 +205,7 @@ def refresh_access_token(creds: dict) -> dict:
         "grant_type": "refresh_token",
         "refresh_token": rt,
         "client_id": creds.get("client_id", ""),
+        "resource": _resource(),
     }
     if creds.get("client_secret"):
         form["client_secret"] = creds["client_secret"]

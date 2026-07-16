@@ -18,30 +18,34 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Loader2, RefreshCw, Users, FolderKanban, Boxes, UserPlus, UserMinus,
-  Check, DownloadCloud, CircleDot,
+  Check, DownloadCloud, CircleDot, KeyRound, ShieldCheck, Building2, Info,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/api/http";
 import { qk } from "@/lib/hooks";
-import type { HiveStagedEntity } from "@/lib/types";
+import type { HiveStagedEntity, IntegrationAuthMethod, IntegrationProvider } from "@/lib/types";
 import { useToast } from "@/components/Toast";
 
 /* ------------------------------ connect ------------------------------ */
 
-export function HiveConnect({ slug, isAdmin }: { slug: string; isAdmin: boolean }) {
+export function HiveConnect({
+  provider, slug, isAdmin,
+}: { provider: IntegrationProvider; slug: string; isAdmin: boolean }) {
   const { toast } = useToast();
-  const [tenant, setTenant] = useState("");
-  const [mode, setMode] = useState<"oauth" | "service_token">("oauth");
-  const [token, setToken] = useState("");
   const qc = useQueryClient();
+  const methods = (provider.auth_methods ?? []).filter((m) => m.available);
+  const [methodKey, setMethodKey] = useState(methods[0]?.key ?? "oauth");
+  const method: IntegrationAuthMethod | undefined = methods.find((m) => m.key === methodKey) ?? methods[0];
+  const [tenant, setTenant] = useState("");
+  const [token, setToken] = useState("");
 
   const start = useMutation({
     mutationFn: () => api.hiveOAuthStart(slug, tenant.trim()),
     onSuccess: (r) => {
-      // Open Hive's authorize page in a new tab; on success it redirects back
+      // Open Hive's authorize page in a new tab; on success Hive redirects back
       // to this page (the backend stores the token) — the user returns here.
-      window.open(r.authorize_url, "_blank", "noopener");
-      toast("Continue in the Hive tab, then return here");
+      window.open(r.authorize_url, "_blank", "noopener,noreferrer");
+      toast("Continue in the Hive tab, then return here and refresh");
     },
     onError: (e) => toast(errorMessage(e), "error"),
   });
@@ -51,70 +55,138 @@ export function HiveConnect({ slug, isAdmin }: { slug: string; isAdmin: boolean 
       api.connectIntegration(slug, "hive", { token: token.trim(), account: tenant.trim(), auth_method: "service_token" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.integration(slug, "hive") });
+      qc.invalidateQueries({ queryKey: qk.integrationProviders(slug) });
       toast("Hive connected");
     },
     onError: (e) => toast(errorMessage(e), "error"),
   });
 
   if (!isAdmin) {
-    return <div className="card p-8 text-center text-sm text-body">Only an organization admin can connect Hive.</div>;
+    return (
+      <div className="card p-8 text-center">
+        <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-2 text-muted">
+          <ShieldCheck className="h-5 w-5" />
+        </span>
+        <p className="mt-4 text-sm text-body">Only an organization admin can connect Hive.</p>
+      </div>
+    );
   }
 
+  const tenantValid = tenant.trim().length > 0;
+
   return (
-    <div className="card space-y-5 p-6">
-      <div>
-        <label className="text-[0.65rem] font-semibold uppercase tracking-wide text-muted">Hive tenant</label>
-        <input
-          value={tenant}
-          onChange={(e) => setTenant(e.target.value)}
-          placeholder="e.g. think41"
-          className="mt-1 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink"
-        />
-        <p className="mt-1 text-xs text-muted">
-          The tenant code of your Hive workspace. Connect with an HR / allocation-manager account so the
-          sync can see everyone (including leavers) and all project allocations.
-        </p>
-      </div>
+    <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
+      {/* method chooser */}
+      <div className="space-y-3">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Choose how to connect</h2>
+        {methods.map((m) => {
+          const selected = m.key === methodKey;
+          return (
+            <button
+              key={m.key}
+              onClick={() => setMethodKey(m.key)}
+              className={`w-full rounded-2xl border p-4 text-left transition ${
+                selected ? "border-primary bg-primary-50" : "border-line hover:border-primary/40"
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-2 text-sm font-semibold text-ink">
+                  {m.key === "oauth" ? <DownloadCloud className="h-4 w-4 text-primary" /> : <KeyRound className="h-4 w-4 text-muted" />}
+                  {m.name}
+                </span>
+                {selected ? <Check className="h-4 w-4 text-primary" /> : null}
+              </div>
+              <p className="mt-1 text-xs text-muted">{m.hint}</p>
+            </button>
+          );
+        })}
 
-      <div className="flex gap-2">
-        <button
-          onClick={() => setMode("oauth")}
-          className={`btn btn-sm ${mode === "oauth" ? "btn-primary" : "btn-secondary"}`}
-        >Sign in with Hive</button>
-        <button
-          onClick={() => setMode("service_token")}
-          className={`btn btn-sm ${mode === "service_token" ? "btn-primary" : "btn-secondary"}`}
-        >Paste a token</button>
-      </div>
-
-      {mode === "oauth" ? (
-        <button
-          onClick={() => start.mutate()}
-          disabled={!tenant.trim() || start.isPending}
-          className="btn btn-primary"
-        >
-          {start.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <DownloadCloud className="h-4 w-4" />}
-          Authorize in browser
-        </button>
-      ) : (
-        <div className="space-y-2">
-          <textarea
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder="Paste a short-lived Hive access token"
-            rows={3}
-            className="w-full rounded-lg border border-line bg-surface px-3 py-2 font-mono text-xs text-ink"
-          />
-          <button
-            onClick={() => connectToken.mutate()}
-            disabled={!tenant.trim() || token.trim().length < 10 || connectToken.isPending}
-            className="btn btn-primary"
-          >
-            {connectToken.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-            Connect
-          </button>
+        <div className="rounded-2xl border border-line bg-surface-2/40 p-4">
+          <p className="flex items-center gap-1.5 text-xs font-semibold text-ink">
+            <Info className="h-3.5 w-3.5 text-primary" /> Before you start
+          </p>
+          <ul className="mt-2 space-y-1.5 text-xs text-body">
+            <li>• Connecting only fetches your directory for review — <b>no one is added and no email is sent</b> until you approve.</li>
+            <li>• Sign in with an <b>HR / allocation-manager</b> Hive account so the sync can see everyone (including leavers) and all project allocations.</li>
+          </ul>
         </div>
-      )}
+      </div>
+
+      {/* selected method form */}
+      <div className="card p-8">
+        <div className="flex items-center gap-2 text-ink">
+          <KeyRound className="h-5 w-5 text-primary" />
+          <h2 className="font-display text-lg font-semibold">Connect with {method?.name}</h2>
+        </div>
+
+        {!!method?.recommended?.length && (
+          <div className="mt-5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted">What SkillShare will read</p>
+            <ul className="mt-3 space-y-2">
+              {method.recommended.map((r) => (
+                <li key={r.scope} className="flex items-start gap-2 text-sm">
+                  <code className="mt-0.5 rounded bg-surface-2 px-1.5 py-0.5 font-mono text-xs text-ink">{r.scope}</code>
+                  <span className="text-body">
+                    {r.why}
+                    {r.required && <span className="ml-1 text-[var(--color-danger)]">· required</span>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* tenant is needed for both methods */}
+        <label className="mt-6 block">
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted">Hive tenant</span>
+          <div className="relative mt-1.5">
+            <Building2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+            <input
+              value={tenant}
+              onChange={(e) => setTenant(e.target.value)}
+              placeholder="e.g. think41"
+              className="field w-full pl-9"
+            />
+          </div>
+          <span className="mt-1 block text-xs text-muted">The tenant code of your Hive workspace (from your Hive URL).</span>
+        </label>
+
+        {methodKey === "service_token" ? (
+          <>
+            <label className="mt-4 block">
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted">Access token</span>
+              <textarea
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="Paste a short-lived Hive access token"
+                rows={3}
+                className="field mt-1.5 w-full font-mono text-xs"
+              />
+            </label>
+            <button
+              onClick={() => connectToken.mutate()}
+              disabled={!tenantValid || token.trim().length < 10 || connectToken.isPending}
+              className="btn btn-primary mt-6"
+            >
+              {connectToken.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+              Connect
+            </button>
+            <p className="mt-3 text-xs text-muted">The token is validated against Hive, then encrypted at rest — it&apos;s never shown again.</p>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={() => start.mutate()}
+              disabled={!tenantValid || start.isPending}
+              className="btn btn-primary mt-6"
+            >
+              {start.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <DownloadCloud className="h-4 w-4" />}
+              Authorize with Hive
+            </button>
+            <p className="mt-3 text-xs text-muted">A Hive tab opens for you to sign in and approve. You&apos;ll be redirected back — no token to paste.</p>
+          </>
+        )}
+      </div>
     </div>
   );
 }

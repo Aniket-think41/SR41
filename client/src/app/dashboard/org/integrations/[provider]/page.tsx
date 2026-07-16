@@ -18,7 +18,7 @@ import {
   ArrowLeft, Github, Plug, Check, Loader2, Search, Star, Lock, ExternalLink,
   Trash2, KeyRound, PackagePlus, RefreshCw, ShieldCheck, CircleSlash,
   GitFork, CircleDot, Scale, ChevronDown, ChevronRight,
-  UploadCloud, DownloadCloud, Unlink, Globe, Boxes,
+  UploadCloud, DownloadCloud, Unlink, Globe,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/api/http";
@@ -28,6 +28,7 @@ import { useToast } from "@/components/Toast";
 import { FeatureGate } from "@/components/FeatureGate";
 import { ScopeRepoLinks } from "@/components/dashboard/ScopeRepoLinks";
 import { HiveConnect, HivePanel } from "@/components/dashboard/HivePanel";
+import { HiveLogo } from "@/components/HiveLogo";
 
 const SYNC_MODES = [
   { key: "manual", label: "Manual", hint: "Nothing syncs automatically — you trigger it.", needs: null as string | null },
@@ -37,7 +38,8 @@ const SYNC_MODES = [
 ] as const;
 
 function ProviderIcon({ icon, className = "" }: { icon: string; className?: string }) {
-  const Icon = icon === "github" ? Github : icon === "hive" ? Boxes : Plug;
+  if (icon === "hive") return <HiveLogo className={className || "h-6 w-6"} />;
+  const Icon = icon === "github" ? Github : Plug;
   return <Icon className={className || "h-6 w-6"} />;
 }
 
@@ -97,7 +99,7 @@ function ConnectFlow({ provider, slug, isAdmin }: { provider: IntegrationProvide
 
   // Hive uses a dedicated connect flow (OAuth popup / paste token). Rendered
   // after all hooks so hook order stays stable (rules-of-hooks).
-  if (provider.key === "hive") return <HiveConnect slug={slug} isAdmin={isAdmin} />;
+  if (provider.key === "hive") return <HiveConnect provider={provider} slug={slug} isAdmin={isAdmin} />;
 
   if (!isAdmin) {
     return (
