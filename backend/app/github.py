@@ -736,6 +736,20 @@ def installation_token(app_id: str, private_key_pem: str, installation_id: str) 
     return {"token": data["token"], "expires_at": data.get("expires_at")}
 
 
+def get_installation_account(app_id: str, private_key_pem: str, installation_id: str) -> dict:
+    """Read the account (org/user) a GitHub App is installed on. Uses the App JWT
+    — installation TOKENS can't call /user, so this is how we get the account."""
+    jwt_tok = app_jwt(app_id, private_key_pem)
+    data = _get(f"/app/installations/{installation_id}", jwt_tok)
+    acct = (data.get("account") or {}) if isinstance(data, dict) else {}
+    return {
+        "login": acct.get("login"),
+        "type": acct.get("type"),
+        "html_url": acct.get("html_url"),
+        "avatar_url": acct.get("avatar_url"),
+    }
+
+
 def verify_webhook_signature(secret: str, body: bytes, signature_header: str | None) -> bool:
     """Verify GitHub's X-Hub-Signature-256 HMAC over the raw body."""
     import hmac

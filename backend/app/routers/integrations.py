@@ -85,7 +85,18 @@ def _connection(db: Session, org, key: str) -> OrgIntegration | None:
 
 
 def _github_token(db: Session, org, conn: OrgIntegration) -> str:
-    token = get_credentials(conn).get("token")
+    creds = get_credentials(conn)
+    # GitHub App installation tokens expire hourly — mint a fresh one each call
+    # from the stored installation_id (the stored token is only a bootstrap).
+    if conn.auth_method == "github_app":
+        from ..config import get_settings as _gs
+
+        s = _gs()
+        iid = creds.get("installation_id")
+        if not iid or not (s.github_app_id and s.github_app_private_key):
+            raise validation("This GitHub App connection is missing its installation — reconnect it")
+        return github.installation_token(s.github_app_id, s.github_app_private_key_pem, iid)["token"]
+    token = creds.get("token")
     if not token:
         raise validation("This GitHub connection has no stored token — reconnect the integration")
     return token
@@ -201,9 +212,26 @@ def sync(slug: str, provider_key: str, user: User = Depends(get_current_user), d
     conn = _connection(db, org, provider_key)
     if conn is None:
         raise not_found(f'{provider.name} connection')
-    token = _github_token(db, org, conn)
     try:
-        _apply_github_account(conn, token, conn.account_label)
+        if conn.auth_method == "github_app":
+            # App connection: re-read the installation account (no /user for App
+            # tokens); permissions are fixed at install → keep the capability set.
+            from ..config import get_settings as _gs
+            from ..integrations import compute_capabilities as _cc2
+
+            s = _gs()
+            iid = get_credentials(conn).get("installation_id")
+            acct = github.get_installation_account(s.github_app_id, s.github_app_private_key_pem, iid)
+            conn.account_label = acct.get("login") or conn.account_label
+            conn.account_type = acct.get("type")
+            conn.account_url = acct.get("html_url")
+            conn.account_avatar = acct.get("avatar_url")
+            conn.capabilities = _cc2("github", ["repo", "read:org"])
+            conn.status = "connected"
+            conn.last_error = None
+            conn.last_synced_at = datetime.now(timezone.utc)
+        else:
+            _apply_github_account(conn, _github_token(db, org, conn), conn.account_label)
     except Exception as e:  # surface the failure on the connection instead of 500-ing
         conn.status = "error"
         conn.last_error = str(getattr(e, "detail", None) or e)
@@ -721,11 +749,23 @@ def _store_flow_connection(db: Session, org, user: User, token: str, method: str
     if installation_id:
         creds["installation_id"] = installation_id
     set_credentials(conn, creds)
-    _apply_github_account(conn, token, None)  # detect account + scopes/caps
     if method == "github_app":
-        # App tokens carry permissions (not X-OAuth scopes) chosen at install —
-        # trust the configured read/write set so features unlock.
+        # Installation tokens can't call /user — read the account from the
+        # installation, and trust the App's configured read/write permissions
+        # (they aren't reported as X-OAuth scopes).
+        s = get_settings()
+        acct = github.get_installation_account(s.github_app_id, s.github_app_private_key_pem, installation_id)
+        conn.account_label = acct.get("login")
+        conn.account_type = acct.get("type")
+        conn.account_url = acct.get("html_url")
+        conn.account_avatar = acct.get("avatar_url")
+        conn.scopes = []
         conn.capabilities = _cc("github", ["repo", "read:org"])
+        conn.status = "connected"
+        conn.last_error = None
+        conn.last_synced_at = datetime.now(timezone.utc)
+    else:  # oauth — a real user token, /user works
+        _apply_github_account(conn, token, None)
     db.flush()
     db.commit()
     return conn
