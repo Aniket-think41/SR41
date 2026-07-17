@@ -1,0 +1,16 @@
+{
+  "nav": {
+    "Marketplace": "मार्केटप्लेस",
+    "Organizations": "संगठन",
+    "How it works": "यह कैसे काम करता है",
+    "GitHub": "GitHub",
+    "Pricing": "मूल्य निर्धारण",
+    "Blog": "ब्लॉग"
+  },
+  "cta": {
+    "signIn": "साइन इन करें",
+    "getStarted": "शुरू करें",
+    "getStartedFree": "मुफ़्त में शुरू करें",
+    "appearance": "दिखावट"
+  }
+}

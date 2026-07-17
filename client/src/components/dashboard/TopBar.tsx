@@ -75,6 +75,7 @@ export function TopBar() {
   const { data: user } = useSession();
   const t = useTranslations("topbar");
   const palette = useFeature("command-palette");
+  const i18n = useFeature("i18n");
   // ⌘K searches the current org — only meaningful in the org workspace.
   const showPalette = palette.enabled && workspace === "org";
 
@@ -99,7 +100,7 @@ export function TopBar() {
           </button>
         )}
 
-        <LanguageSwitcher />
+        {i18n.enabled && <LanguageSwitcher />}
 
         <ThemeToggle />
 

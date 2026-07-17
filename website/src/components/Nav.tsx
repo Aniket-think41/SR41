@@ -2,14 +2,18 @@
 
 import Link from "next/link";
 import { useState, useEffect } from "react";
+import { useTranslations } from "next-intl";
 import { SITE } from "@/lib/site";
 import { getStarted, signIn } from "@/lib/redirects";
 import { Logo } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
+import { LanguageSwitcher } from "./LanguageSwitcher";
 
 export function Nav() {
   const [open, setOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const tNav = useTranslations("nav");
+  const tCta = useTranslations("cta");
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -46,18 +50,19 @@ export function Nav() {
               href={item.href}
               className="link-underline text-[0.95rem] font-medium text-body hover:text-ink"
             >
-              {item.label}
+              {tNav(item.label)}
             </Link>
           ))}
         </nav>
 
         <div className="hidden items-center gap-3 md:flex">
+          <LanguageSwitcher />
           <ThemeToggle />
           <Link href={signIn()} className="text-[0.95rem] font-semibold text-ink hover:text-primary">
-            Sign in
+            {tCta("signIn")}
           </Link>
           <Link href={getStarted()} className="btn btn-primary">
-            Get started <span aria-hidden>→</span>
+            {tCta("getStarted")} <span aria-hidden>→</span>
           </Link>
         </div>
 
@@ -86,19 +91,22 @@ export function Nav() {
                 onClick={() => setOpen(false)}
                 className="font-display py-3 text-3xl"
               >
-                {item.label}
+                {tNav(item.label)}
               </Link>
             ))}
             <div className="mt-4 flex flex-col gap-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold text-muted">Appearance</span>
-                <ThemeToggle />
+                <span className="text-sm font-semibold text-muted">{tCta("appearance")}</span>
+                <div className="flex items-center gap-2">
+                  <LanguageSwitcher />
+                  <ThemeToggle />
+                </div>
               </div>
               <Link href={signIn()} onClick={() => setOpen(false)} className="btn btn-secondary">
-                Sign in
+                {tCta("signIn")}
               </Link>
               <Link href={getStarted()} onClick={() => setOpen(false)} className="btn btn-primary">
-                Get started free →
+                {tCta("getStartedFree")} →
               </Link>
             </div>
           </div>

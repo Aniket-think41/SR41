@@ -64,6 +64,13 @@ CATALOG: list[dict] = [
         "min_plan": PRO,
         "default_enabled": True,
     },
+    {
+        "key": "i18n",
+        "name": "Languages (internationalization)",
+        "description": "Let members switch the dashboard language (English, हिन्दी, …). Off hides the language switcher.",
+        "min_plan": FREE,
+        "default_enabled": True,
+    },
 ]
 
 

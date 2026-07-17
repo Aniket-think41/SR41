@@ -1,0 +1,16 @@
+{
+  "nav": {
+    "Marketplace": "Marketplace",
+    "Organizations": "Organizations",
+    "How it works": "How it works",
+    "GitHub": "GitHub",
+    "Pricing": "Pricing",
+    "Blog": "Blog"
+  },
+  "cta": {
+    "signIn": "Sign in",
+    "getStarted": "Get started",
+    "getStartedFree": "Get started free",
+    "appearance": "Appearance"
+  }
+}

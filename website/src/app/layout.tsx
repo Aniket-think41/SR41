@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Schibsted_Grotesk, Manrope, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import { NextIntlClientProvider } from "next-intl";
+import { getLocale } from "next-intl/server";
 import { Nav } from "@/components/Nav";
 import { Footer } from "@/components/Footer";
 import { THEME_INIT_SCRIPT } from "@/components/ThemeToggle";
@@ -48,20 +50,23 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const locale = await getLocale();
   return (
     <html
-      lang="en"
+      lang={locale}
       className={`${schibsted.variable} ${manrope.variable} ${jetbrains.variable} h-full`}
     >
       <body className="min-h-full flex flex-col">
         {/* Set the theme class before paint to avoid a flash of the wrong theme. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
-        <Nav />
-        <main className="flex-1">{children}</main>
-        <Footer />
+        <NextIntlClientProvider>
+          <Nav />
+          <main className="flex-1">{children}</main>
+          <Footer />
+        </NextIntlClientProvider>
       </body>
     </html>
   );

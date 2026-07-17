@@ -81,6 +81,14 @@ export const FEATURES: FeatureFlag[] = [
     premium: true,
     default_enabled: true,
   },
+  {
+    key: "i18n",
+    name: "Languages (internationalization)",
+    description: "Let members switch the dashboard language (English, हिन्दी, …). Off hides the language switcher.",
+    min_plan: "FREE",
+    premium: false,
+    default_enabled: true,
+  },
 ];
 
 export interface Db {
