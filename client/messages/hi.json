@@ -1,0 +1,54 @@
+{
+  "nav": {
+    "dashboard": "डैशबोर्ड",
+    "projects": "प्रोजेक्ट्स",
+    "orgResources": "संगठन संसाधन",
+    "marketplace": "मार्केटप्लेस",
+    "integrations": "इंटीग्रेशन",
+    "members": "सदस्य",
+    "settings": "सेटिंग्स",
+    "myResources": "मेरे संसाधन",
+    "billing": "बिलिंग",
+    "reviewQueue": "समीक्षा कतार",
+    "feedback": "प्रतिक्रिया",
+    "logOut": "लॉग आउट"
+  },
+  "topbar": {
+    "search": "खोजें…",
+    "myProfile": "मेरी प्रोफ़ाइल"
+  },
+  "common": {
+    "appearance": "दिखावट",
+    "lightMode": "लाइट मोड",
+    "darkMode": "डार्क मोड",
+    "language": "भाषा",
+    "connect": "कनेक्ट करें",
+    "disconnect": "डिस्कनेक्ट करें",
+    "sync": "सिंक करें",
+    "save": "सहेजें",
+    "cancel": "रद्द करें",
+    "loading": "लोड हो रहा है…"
+  },
+  "hive": {
+    "chooseHowToConnect": "कनेक्ट करने का तरीका चुनें",
+    "beforeYouStart": "शुरू करने से पहले",
+    "noAutoAdd": "कनेक्ट करने पर केवल आपकी डायरेक्टरी समीक्षा के लिए लाई जाती है — जब तक आप स्वीकृति नहीं देते, न कोई जोड़ा जाता है और न ही कोई ईमेल भेजा जाता है।",
+    "useHrAccount": "किसी HR / एलोकेशन-मैनेजर Hive खाते से साइन इन करें ताकि सिंक सभी को (छोड़ चुके कर्मचारियों सहित) और सभी प्रोजेक्ट एलोकेशन देख सके।",
+    "willRead": "SkillShare क्या पढ़ेगा",
+    "tenant": "Hive टेनेंट",
+    "tenantHint": "आपके Hive वर्कस्पेस का टेनेंट कोड (आपके Hive URL से)।",
+    "accessToken": "एक्सेस टोकन",
+    "authorizeWithHive": "Hive से अधिकृत करें",
+    "authorizeHint": "साइन इन और स्वीकृति के लिए एक Hive टैब खुलेगा। आपको वापस भेज दिया जाएगा — कोई टोकन पेस्ट करने की ज़रूरत नहीं।",
+    "directorySync": "डायरेक्टरी सिंक",
+    "fetchFromHive": "Hive से लाएँ",
+    "importEverything": "सब कुछ इम्पोर्ट करें",
+    "offboard": "{count} को हटाएँ",
+    "pending": "लंबित",
+    "applied": "लागू",
+    "toOffboard": "हटाने के लिए",
+    "people": "लोग",
+    "projects": "प्रोजेक्ट्स",
+    "teams": "टीमें"
+  }
+}

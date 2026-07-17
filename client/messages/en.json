@@ -1,0 +1,54 @@
+{
+  "nav": {
+    "dashboard": "Dashboard",
+    "projects": "Projects",
+    "orgResources": "Org Resources",
+    "marketplace": "Marketplace",
+    "integrations": "Integrations",
+    "members": "Members",
+    "settings": "Settings",
+    "myResources": "My Resources",
+    "billing": "Billing",
+    "reviewQueue": "Review Queue",
+    "feedback": "Feedback",
+    "logOut": "Log out"
+  },
+  "topbar": {
+    "search": "Search…",
+    "myProfile": "My profile"
+  },
+  "common": {
+    "appearance": "Appearance",
+    "lightMode": "Light mode",
+    "darkMode": "Dark mode",
+    "language": "Language",
+    "connect": "Connect",
+    "disconnect": "Disconnect",
+    "sync": "Sync",
+    "save": "Save",
+    "cancel": "Cancel",
+    "loading": "Loading…"
+  },
+  "hive": {
+    "chooseHowToConnect": "Choose how to connect",
+    "beforeYouStart": "Before you start",
+    "noAutoAdd": "Connecting only fetches your directory for review — no one is added and no email is sent until you approve.",
+    "useHrAccount": "Sign in with an HR / allocation-manager Hive account so the sync can see everyone (including leavers) and all project allocations.",
+    "willRead": "What SkillShare will read",
+    "tenant": "Hive tenant",
+    "tenantHint": "The tenant code of your Hive workspace (from your Hive URL).",
+    "accessToken": "Access token",
+    "authorizeWithHive": "Authorize with Hive",
+    "authorizeHint": "A Hive tab opens for you to sign in and approve. You'll be redirected back — no token to paste.",
+    "directorySync": "Directory sync",
+    "fetchFromHive": "Fetch from Hive",
+    "importEverything": "Import everything",
+    "offboard": "Offboard {count}",
+    "pending": "pending",
+    "applied": "applied",
+    "toOffboard": "to offboard",
+    "people": "People",
+    "projects": "Projects",
+    "teams": "Teams"
+  }
+}

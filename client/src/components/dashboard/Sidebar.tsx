@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
+import { useTranslations } from "next-intl";
 import {
   LayoutDashboard, FolderKanban, Library, Users, Settings,
   Store, LogOut, PanelLeftClose, PanelLeftOpen, UserCircle,
@@ -23,6 +24,7 @@ import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 type NavItem = { label: string; href: string; icon: typeof LayoutDashboard; exact?: boolean };
 
 function useNav(): NavItem[] {
+  const t = useTranslations("nav");
   const terms = useTerms();
   const marketplace = useFeature("marketplace");
   const { workspace } = useUi();
@@ -40,32 +42,32 @@ function useNav(): NavItem[] {
   // either workspace when the signed-in user is a platform admin (spec §3/§4).
   const adminItems = user?.is_admin
     ? [
-        { label: "Review Queue", href: "/dashboard/admin/review", icon: ShieldCheck },
-        { label: "Feedback", href: "/dashboard/admin/feedback", icon: MessagesSquare },
+        { label: t("reviewQueue"), href: "/dashboard/admin/review", icon: ShieldCheck },
+        { label: t("feedback"), href: "/dashboard/admin/feedback", icon: MessagesSquare },
       ]
     : [];
 
   if (workspace === "publisher") {
     return [
-      { label: "My Resources", href: "/dashboard/publisher", icon: Library, exact: true },
-      { label: "Marketplace", href: "/dashboard/marketplace", icon: Store },
-      { label: "Billing", href: "/dashboard/billing", icon: CreditCard },
+      { label: t("myResources"), href: "/dashboard/publisher", icon: Library, exact: true },
+      { label: t("marketplace"), href: "/dashboard/marketplace", icon: Store },
+      { label: t("billing"), href: "/dashboard/billing", icon: CreditCard },
       ...adminItems,
     ];
   }
 
   return [
-    { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, exact: true },
+    { label: t("dashboard"), href: "/dashboard", icon: LayoutDashboard, exact: true },
     { label: terms.projects, href: "/dashboard/projects", icon: FolderKanban },
-    { label: "Org Resources", href: "/dashboard/org/resources", icon: Library },
+    { label: t("orgResources"), href: "/dashboard/org/resources", icon: Library },
     ...(marketplace.enabled
-      ? [{ label: "Marketplace", href: "/dashboard/marketplace", icon: Store }]
+      ? [{ label: t("marketplace"), href: "/dashboard/marketplace", icon: Store }]
       : []),
     ...(showIntegrations
-      ? [{ label: "Integrations", href: "/dashboard/org/integrations", icon: Plug }]
+      ? [{ label: t("integrations"), href: "/dashboard/org/integrations", icon: Plug }]
       : []),
-    { label: "Members", href: "/dashboard/members", icon: Users },
-    { label: "Settings", href: "/dashboard/org/settings", icon: Settings },
+    { label: t("members"), href: "/dashboard/members", icon: Users },
+    { label: t("settings"), href: "/dashboard/org/settings", icon: Settings },
     ...adminItems,
   ];
 }

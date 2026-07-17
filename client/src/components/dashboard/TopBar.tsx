@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslations } from "next-intl";
 import { Search, ChevronRight } from "lucide-react";
 import { api } from "@/lib/api";
 import { qk, useCurrentOrg, useFeature, useSession } from "@/lib/hooks";
@@ -11,6 +12,7 @@ import { Avatar } from "../Avatar";
 import { FeedbackButton } from "./FeedbackButton";
 import { NotificationBell } from "./NotificationBell";
 import { ThemeToggle } from "../ThemeToggle";
+import { LanguageSwitcher } from "../LanguageSwitcher";
 
 /** Breadcrumb: Org › Project › Pod — clickable (frontend spec §3.2). In the
  *  publisher workspace there's no org hierarchy, so it just anchors "Publisher". */
@@ -71,6 +73,7 @@ function Breadcrumb() {
 export function TopBar() {
   const { setPaletteOpen, sidebarCollapsed, workspace } = useUi();
   const { data: user } = useSession();
+  const t = useTranslations("topbar");
   const palette = useFeature("command-palette");
   // ⌘K searches the current org — only meaningful in the org workspace.
   const showPalette = palette.enabled && workspace === "org";
@@ -91,10 +94,12 @@ export function TopBar() {
             aria-label="Search (Cmd+K)"
           >
             <Search className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Search…</span>
+            <span className="hidden sm:inline">{t("search")}</span>
             <span className="kbd hidden sm:inline">⌘K</span>
           </button>
         )}
+
+        <LanguageSwitcher />
 
         <ThemeToggle />
 
@@ -102,7 +107,7 @@ export function TopBar() {
 
         <NotificationBell />
 
-        <Link href="/dashboard/profile" aria-label="My profile">
+        <Link href="/dashboard/profile" aria-label={t("myProfile")}>
           <Avatar name={user?.display_name ?? "?"} src={user?.avatar_url} size="sm" />
         </Link>
       </div>

@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Schibsted_Grotesk, Manrope, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import { NextIntlClientProvider } from "next-intl";
+import { getLocale } from "next-intl/server";
 import { Providers } from "@/components/Providers";
 import { THEME_INIT_SCRIPT } from "@/components/ThemeToggle";
 
@@ -32,18 +34,21 @@ export const metadata: Metadata = {
   robots: { index: false }, // the dashboard is private; the website handles SEO
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const locale = await getLocale();
   return (
     <html
-      lang="en"
+      lang={locale}
       className={`${schibsted.variable} ${manrope.variable} ${jetbrains.variable} h-full`}
     >
       <body className="min-h-full">
         {/* Set the theme class before paint to avoid a flash of the wrong theme. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
-        <Providers>{children}</Providers>
+        <NextIntlClientProvider>
+          <Providers>{children}</Providers>
+        </NextIntlClientProvider>
       </body>
     </html>
   );
